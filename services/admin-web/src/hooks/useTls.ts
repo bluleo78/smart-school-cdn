@@ -8,8 +8,5 @@ export function useCertificates() {
     queryKey: ['tls', 'certificates'],
     queryFn: fetchCertificates,
     refetchInterval: 30_000,
-    initialData: [],
-    // initialDataUpdatedAt: 0 — initialData를 항상 오래된 것으로 간주하여 마운트 시 즉시 fetch
-    initialDataUpdatedAt: 0,
   });
 }

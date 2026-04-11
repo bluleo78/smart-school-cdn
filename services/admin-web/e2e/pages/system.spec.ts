@@ -34,14 +34,6 @@ test.describe('CA 인증서 섹션', () => {
     await expect(page.getByTestId('mobileconfig-download-btn')).toBeVisible();
   });
 
-  test('.crt 다운로드 버튼이 있다', async ({ page }) => {
-    await expect(page.getByTestId('ca-download-btn')).toBeVisible();
-  });
-
-  test('iOS 프로파일 다운로드 버튼이 있다', async ({ page }) => {
-    await expect(page.getByTestId('mobileconfig-download-btn')).toBeVisible();
-  });
-
   test('iPad 설치 방법 안내가 표시된다', async ({ page }) => {
     await expect(page.getByText('iPad 설치 방법')).toBeVisible();
   });
@@ -53,7 +45,7 @@ test.describe('발급된 인증서 목록', () => {
     await mockApi(page, 'GET', '/tls/certificates', createCertList());
     await page.goto('/system');
 
-    // initialData: [] 때문에 빈 상태로 먼저 렌더링되고, fetch 후 테이블로 전환
+    // fetch 완료 전 로딩 상태 → fetch 후 테이블로 전환
     await expect(page.getByTestId('certificates-table')).toBeVisible({ timeout: 10000 });
   });
 

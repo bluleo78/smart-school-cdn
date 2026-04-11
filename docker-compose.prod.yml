@@ -6,6 +6,8 @@ services:
       context: services/proxy
       dockerfile: Dockerfile
     restart: always
+    # 포트 8081 (관리 API)은 내부 네트워크 전용 — admin-server에서만 접근
+    # 외부 노출 불필요
     ports:
       - "8080:8080"   # HTTP 프록시 + CA 다운로드
       - "443:443"     # HTTPS 프록시
@@ -18,7 +20,7 @@ services:
       - CERTS_DIR=/app/certs
       - RUST_LOG=info
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/ca.crt"]
+      test: ["CMD", "curl", "-f", "http://localhost:8081/status"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -38,6 +40,7 @@ services:
       - PORT=3000
       - DB_PATH=/app/data/admin.db
       - PROXY_ADMIN_URL=http://proxy:8081
+      - PROXY_HTTP_URL=http://proxy:8080
     depends_on:
       proxy:
         condition: service_healthy

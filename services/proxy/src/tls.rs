@@ -7,16 +7,20 @@ use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
 use rcgen::{BasicConstraints, CertificateParams, DnType, IsCa, KeyPair};
+use rustls::sign::CertifiedKey;
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use time::{Duration, OffsetDateTime};
 
 /// CA 서명으로 발급된 도메인 인증서 캐시 항목
-#[derive(serde::Serialize)]
+/// CertifiedKey가 Serialize 미지원이므로 derive 생략 — API 응답은 CertInfo DTO 사용
 pub struct CachedCert {
     pub domain: String,
     pub cert_pem: String,
     pub key_pem: String,
     pub issued_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
+    /// 파싱 캐시 — 매 핸드셰이크마다 PEM 재파싱 방지
+    pub certified_key: Arc<CertifiedKey>,
 }
 
 /// 관리 API 응답용 인증서 정보
@@ -88,16 +92,14 @@ impl TlsManager {
     ///
     /// TOCTOU 방지: 캐시 확인은 락 보유 중에, 발급은 락 밖에서 수행하고
     /// 저장 전 double-check으로 다른 스레드의 중복 발급을 방지한다.
-    ///
-    /// TODO(Task 5): SNI resolver 구현 시 반환 타입을 Result<Arc<CachedCert>, _>로
-    /// 변경하여 panic 대신 에러 전파로 개선 예정.
-    pub fn get_or_issue(&self, domain: &str) -> Arc<CachedCert> {
+    /// 발급 실패 시 None을 반환하여 해당 핸드셰이크만 거부한다.
+    pub fn get_or_issue(&self, domain: &str) -> Option<Arc<CachedCert>> {
         // 캐시 HIT 확인 (락 보유 중)
         {
             let cache = self.cert_cache.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(cached) = cache.get(domain) {
                 if cached.expires_at > Utc::now() {
-                    return Arc::clone(cached);
+                    return Some(Arc::clone(cached));
                 }
             }
         }
@@ -106,9 +108,8 @@ impl TlsManager {
         let cert = match self.issue_domain_cert(domain) {
             Ok(c) => Arc::new(c),
             Err(e) => {
-                tracing::error!(domain = %domain, error = %e, "도메인 인증서 발급 실패");
-                // 발급 실패는 복구 불가 — 추후 Task 5에서 Result 전파로 개선 예정
-                panic!("도메인 인증서 발급 실패: {}", e);
+                eprintln!("[TLS] 인증서 발급 실패 ({domain}): {e}");
+                return None;
             }
         };
         {
@@ -116,17 +117,17 @@ impl TlsManager {
             // double-check: 다른 스레드가 먼저 발급했을 수 있음
             if let Some(existing) = cache.get(domain) {
                 if existing.expires_at > Utc::now() {
-                    return Arc::clone(existing);
+                    return Some(Arc::clone(existing));
                 }
             }
             cache.insert(domain.to_string(), Arc::clone(&cert));
         }
         tracing::info!(domain = %domain, "도메인 인증서 발급 완료");
-        cert
+        Some(cert)
     }
 
     /// CA 서명으로 도메인 인증서 발급 (유효기간 30일)
-    fn issue_domain_cert(&self, domain: &str) -> Result<CachedCert, rcgen::Error> {
+    fn issue_domain_cert(&self, domain: &str) -> Result<CachedCert, Box<dyn std::error::Error>> {
         let domain_key = KeyPair::generate()?;
         let expires_offset = OffsetDateTime::now_utc()
             .checked_add(Duration::days(30))
@@ -141,12 +142,25 @@ impl TlsManager {
         let issued_at = Utc::now();
         let expires_at = issued_at + chrono::Duration::days(30);
 
+        let cert_pem = domain_cert.pem();
+        let key_pem = domain_key.serialize_pem();
+
+        // PEM → CertifiedKey 변환하여 캐시 — 매 핸드셰이크마다 재파싱 방지
+        let cert_der: Vec<CertificateDer<'static>> = rustls_pemfile::certs(
+            &mut cert_pem.as_bytes()
+        ).filter_map(|r| r.ok()).collect();
+        let key_der: PrivateKeyDer<'static> = rustls_pemfile::private_key(&mut key_pem.as_bytes())
+            .ok().flatten().expect("key parse");
+        let signing_key = rustls::crypto::ring::sign::any_supported_type(&key_der)?;
+        let certified_key = Arc::new(CertifiedKey::new(cert_der, signing_key));
+
         Ok(CachedCert {
             domain: domain.to_string(),
-            cert_pem: domain_cert.pem(),
-            key_pem: domain_key.serialize_pem(),
+            cert_pem,
+            key_pem,
             issued_at,
             expires_at,
+            certified_key,
         })
     }
 
@@ -202,7 +216,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let manager = TlsManager::load_or_create(dir.path()).unwrap();
 
-        let cert = manager.get_or_issue("textbook.co.kr");
+        let cert = manager.get_or_issue("textbook.co.kr").expect("발급 성공");
 
         assert_eq!(cert.domain, "textbook.co.kr");
         assert!(cert.cert_pem.contains("BEGIN CERTIFICATE"));
@@ -216,8 +230,8 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let manager = TlsManager::load_or_create(dir.path()).unwrap();
 
-        let cert1 = manager.get_or_issue("test.example.com");
-        let cert2 = manager.get_or_issue("test.example.com");
+        let cert1 = manager.get_or_issue("test.example.com").expect("발급 성공");
+        let cert2 = manager.get_or_issue("test.example.com").expect("캐시 HIT");
 
         assert!(Arc::ptr_eq(&cert1, &cert2));
     }
@@ -230,8 +244,8 @@ mod tests {
 
         assert!(manager.list_certificates().is_empty());
 
-        manager.get_or_issue("a.example.com");
-        manager.get_or_issue("b.example.com");
+        manager.get_or_issue("a.example.com").expect("발급 성공");
+        manager.get_or_issue("b.example.com").expect("발급 성공");
 
         let list = manager.list_certificates();
         assert_eq!(list.len(), 2);

@@ -60,10 +60,10 @@ describe('TLS 라우트', () => {
   // ─── GET /api/tls/ca/mobileconfig ────────────────
 
   describe('GET /api/tls/ca/mobileconfig', () => {
-    it('프록시가 PEM을 반환할 때 200과 mobileconfig를 응답한다', async () => {
-      // Proxy가 PEM 문자열을 정상 반환 → Apple 구성 프로파일로 변환
-      const pem = '-----BEGIN CERTIFICATE-----\nABCDEF==\n-----END CERTIFICATE-----\n';
-      mockAxiosGet.mockResolvedValueOnce({ data: pem });
+    it('프록시 HTTP에서 mobileconfig를 중계하여 200으로 응답한다', async () => {
+      // Proxy :8080이 생성한 mobileconfig를 그대로 중계
+      const profile = '<?xml version="1.0"?><plist><dict></dict></plist>';
+      mockAxiosGet.mockResolvedValueOnce({ data: profile });
 
       const app = await createApp();
       const res = await app.inject({ method: 'GET', url: '/api/tls/ca/mobileconfig' });
@@ -73,14 +73,11 @@ describe('TLS 라우트', () => {
       expect(res.headers['content-disposition']).toBe(
         'attachment; filename="smart-school-cdn.mobileconfig"',
       );
-      // Apple 구성 프로파일 XML 키 확인
-      expect(res.body).toContain('<key>PayloadContent</key>');
-      // PEM 헤더·푸터 제거 후 base64 DER이 포함되어야 함
-      expect(res.body).toContain('ABCDEF==');
+      expect(res.body).toBe(profile);
     });
 
     it('프록시 연결 실패 시 502를 반환한다', async () => {
-      // Proxy 관리 API 연결 실패 상황
+      // Proxy HTTP 연결 실패 상황
       mockAxiosGet.mockRejectedValueOnce(new Error('ECONNREFUSED'));
 
       const app = await createApp();
