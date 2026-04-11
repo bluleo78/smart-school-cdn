@@ -109,16 +109,16 @@ export function SystemPage() {
       </div>
 
       {/* CA 인증서 설치 */}
-      <div className="rounded-lg border bg-white p-6 shadow-sm">
+      <div data-testid="ca-cert-card" className="rounded-lg border bg-white p-6 shadow-sm">
         <h3 className="mb-1 text-lg font-semibold text-gray-700">CA 인증서</h3>
         <p className="mb-4 text-sm text-gray-500">
           iPad 또는 PC에 설치하면 HTTPS 콘텐츠를 캐싱합니다.
         </p>
         <div className="flex gap-3">
-          <Button variant="outline" onClick={downloadCACert}>
+          <Button data-testid="ca-download-btn" variant="outline" onClick={downloadCACert}>
             .crt 다운로드
           </Button>
-          <Button variant="outline" onClick={downloadMobileConfig}>
+          <Button data-testid="mobileconfig-download-btn" variant="outline" onClick={downloadMobileConfig}>
             iOS 프로파일 다운로드
           </Button>
         </div>
@@ -133,10 +133,10 @@ export function SystemPage() {
       </div>
 
       {/* 발급된 인증서 목록 */}
-      <div className="rounded-lg border bg-white p-6 shadow-sm">
+      <div data-testid="certificates-card" className="rounded-lg border bg-white p-6 shadow-sm">
         <h3 className="mb-4 text-lg font-semibold text-gray-700">발급된 인증서</h3>
         {certificates && certificates.length > 0 ? (
-          <table className="w-full text-sm">
+          <table data-testid="certificates-table" className="w-full text-sm">
             <thead>
               <tr className="border-b text-left text-gray-500">
                 <th className="pb-2 pr-4 font-medium">도메인</th>
@@ -161,7 +161,7 @@ export function SystemPage() {
             </tbody>
           </table>
         ) : (
-          <p className="text-sm text-gray-400">
+          <p data-testid="certificates-empty" className="text-sm text-gray-400">
             아직 발급된 인증서가 없습니다. HTTPS 요청이 들어오면 자동으로 발급됩니다.
           </p>
         )}
