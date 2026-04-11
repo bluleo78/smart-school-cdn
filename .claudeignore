@@ -1,0 +1,26 @@
+# 자동 생성 잠금 파일 — 컨텍스트 낭비 방지
+Cargo.lock
+pnpm-lock.yaml
+
+# 빌드 산출물
+target/
+dist/
+.vite/
+.turbo/
+
+# 의존성
+node_modules/
+
+# 런타임 데이터
+data/
+logs/
+*.log
+
+# 인증서 (자동 생성)
+certs/
+
+# 테스트 결과
+coverage/
+playwright-report/
+test-results/
+blob-report/
