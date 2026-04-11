@@ -432,7 +432,7 @@ admin-server: 3000 포트
 |--------|------|------|------|
 | Proxy | **443** | iPad HTTPS 요청 수신 | |
 | DNS | **53** (UDP/TCP) | DNS 쿼리 수신 | |
-| Admin (프로덕션) | **3000** | API + Dashboard | |
+| Admin (프로덕션) | **7777** | Dashboard (Nginx, `WEB_PORT` 환경변수로 변경 가능) | |
 | Admin Server (개발) | **4001** | Fastify API dev | smart-fire-hub 3001 회피 |
 | Admin Web (개발) | **4173** | Vite dev server | smart-fire-hub 5173 회피 |
 | Storage gRPC | **50051** | 내부 통신 | |
