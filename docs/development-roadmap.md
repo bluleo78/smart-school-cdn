@@ -106,18 +106,18 @@
 > 목표: Phase 2까지 구현된 프록시 + 캐시를 실제 서버에 배포 가능한 상태로 만든다
 
 ### 3-1. Docker Compose 운영 구성
-- [ ] `docker-compose.prod.yml` — Proxy(8080), Admin Server(3000), Admin Web 정적 빌드 포함
-- [ ] Admin Server가 프로덕션에서 Admin Web 빌드 결과물(dist/)을 정적 서빙
-- [ ] `.env.example` — `CACHE_DIR`, `CACHE_MAX_SIZE_GB`, `PROXY_ADMIN_URL`, `PORT` 등
+- [x] `docker-compose.prod.yml` — Proxy(8080), Admin Server(3000), Admin Web 정적 빌드 포함 (`~/prod/smart-school-cdn/`)
+- [x] Admin Server가 프로덕션에서 Admin Web 빌드 결과물(dist/)을 정적 서빙 (Nginx 경유)
+- [x] `.env.example` — `CACHE_DIR`, `CACHE_MAX_SIZE_GB`, `PROXY_ADMIN_URL`, `PORT` 등
 
 ### 3-2. 컨테이너 안정성
-- [ ] 모든 서비스에 `restart: always` 적용
-- [ ] Proxy 헬스체크 (`/status` 엔드포인트) Docker HEALTHCHECK 등록
-- [ ] 캐시 디렉터리를 named volume으로 마운트하여 재시작 시 데이터 유지
+- [x] 모든 서비스에 `restart: always` 적용
+- [x] Proxy 헬스체크 (`/status` 엔드포인트) Docker HEALTHCHECK 등록
+- [x] 캐시 디렉터리를 named volume으로 마운트하여 재시작 시 데이터 유지
 
 ### 3-3. Dashboard — 시스템 페이지 (v1)
-- [ ] 디스크 사용량 경고 배너 (캐시 사용량 90% 이상 시 표시)
-- [ ] 서버 업타임 표시 (기존 ProxyStatus.uptime 활용)
+- [x] 디스크 사용량 경고 배너 (캐시 사용량 90% 이상 시 표시)
+- [x] 서버 업타임 표시 (기존 ProxyStatus.uptime 활용)
 
 ### 검증
 > `docker compose -f docker-compose.prod.yml up -d` → `http://<서버IP>:3000` 대시보드 접속
