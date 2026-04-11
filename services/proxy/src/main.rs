@@ -10,7 +10,8 @@ use tracing_subscriber::EnvFilter;
 use proxy::cache::CacheLayer;
 use proxy::config::ProxyConfig;
 use proxy::state::{AppState, SharedState};
-use proxy::{build_admin_router, build_proxy_router};
+use proxy::tls::TlsManager;
+use proxy::{build_admin_router, build_proxy_router, ProxyState};
 
 #[tokio::main]
 async fn main() {
@@ -35,6 +36,13 @@ async fn main() {
         * 1024;
     let cache = Arc::new(CacheLayer::new(cache_dir, max_size_bytes));
 
+    // TLS 관리자 생성 — CA 인증서 로드 또는 신규 생성
+    let certs_dir = std::path::PathBuf::from(
+        std::env::var("CERTS_DIR").unwrap_or_else(|_| "./certs".to_string()),
+    );
+    let tls_manager = TlsManager::load_or_create(&certs_dir)
+        .expect("TLS 관리자 초기화 실패");
+
     // 매분 히트율 스냅샷 기록 배경 태스크
     let state_for_snapshot = shared_state.clone();
     tokio::spawn(async move {
@@ -45,9 +53,15 @@ async fn main() {
         }
     });
 
-    let proxy_router =
-        build_proxy_router(shared_state.clone(), proxy_config, http_client, cache.clone());
-    let admin_router = build_admin_router(shared_state.clone(), cache);
+    let ps = ProxyState {
+        shared: shared_state.clone(),
+        config: proxy_config,
+        http_client,
+        cache: cache.clone(),
+        tls_manager: tls_manager.clone(),
+    };
+    let proxy_router = build_proxy_router(ps);
+    let admin_router = build_admin_router(shared_state.clone(), cache, tls_manager);
 
     tracing::info!("Proxy Service started — proxy :8080, admin :8081");
 

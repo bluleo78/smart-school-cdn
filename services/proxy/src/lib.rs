@@ -16,54 +16,70 @@ use axum::Router;
 use cache::{CacheDirective, CacheLayer, compute_cache_key, parse_cache_control};
 use config::ProxyConfig;
 use state::{RequestLog, SharedState};
+use crate::tls::TlsManager;
 
-/// 프록시 핸들러 상태 — (공유상태, 설정, HTTP클라이언트, 캐시)
-type ProxyHandlerState = (SharedState, Arc<ProxyConfig>, reqwest::Client, Arc<CacheLayer>);
+/// 프록시 핸들러 공유 상태
+#[derive(Clone)]
+pub struct ProxyState {
+    pub shared: SharedState,
+    pub config: Arc<ProxyConfig>,
+    pub http_client: reqwest::Client,
+    pub cache: Arc<CacheLayer>,
+    pub tls_manager: Arc<TlsManager>,
+}
 
-/// 관리 API 핸들러 상태 — (공유상태, 캐시)
+/// 관리 API 핸들러 상태 — (공유상태, 캐시, TLS관리자)
 #[derive(Clone)]
 struct AdminState {
     state: SharedState,
     cache: Arc<CacheLayer>,
+    tls_manager: Arc<TlsManager>,
 }
 
 /// 기본 캐시 TTL (Cache-Control 헤더 없을 때)
 const DEFAULT_TTL: Duration = Duration::from_secs(3600);
 
 /// 프록시 라우터 빌드
-pub fn build_proxy_router(
-    shared_state: SharedState,
-    proxy_config: Arc<ProxyConfig>,
-    http_client: reqwest::Client,
-    cache: Arc<CacheLayer>,
-) -> Router {
+pub fn build_proxy_router(ps: ProxyState) -> Router {
     Router::new()
+        .route("/ca.crt", get(ca_cert_handler))
+        .route("/ca.mobileconfig", get(ca_mobileconfig_handler))
         .fallback(proxy_handler)
-        .with_state((shared_state, proxy_config, http_client, cache))
+        .with_state(ps)
 }
 
 /// 관리 API 라우터 빌드
-pub fn build_admin_router(shared_state: SharedState, cache: Arc<CacheLayer>) -> Router {
-    let admin_state = AdminState { state: shared_state, cache };
+pub fn build_admin_router(
+    shared_state: SharedState,
+    cache: Arc<CacheLayer>,
+    tls_manager: Arc<TlsManager>,
+) -> Router {
+    let admin_state = AdminState { state: shared_state, cache, tls_manager };
     Router::new()
         .route("/status", get(status_handler))
         .route("/requests", get(requests_handler))
         .route("/cache/stats", get(cache_stats_handler))
         .route("/cache/popular", get(cache_popular_handler))
         .route("/cache/purge", delete(cache_purge_handler))
+        .route("/tls/ca", get(tls_ca_handler))
+        .route("/tls/certificates", get(tls_certificates_handler))
         .with_state(admin_state)
 }
 
 // ─── 프록시 핸들러 ──────────────────────────────────────────────
 
 async fn proxy_handler(
-    State((state, config, client, cache)): State<ProxyHandlerState>,
+    State(ps): State<ProxyState>,
     method: Method,
     uri: Uri,
     headers: HeaderMap,
     body: Body,
 ) -> Response {
     let start = Instant::now();
+    let state = ps.shared;
+    let config = ps.config;
+    let client = ps.http_client;
+    let cache = ps.cache;
 
     let host = match headers.get("host").and_then(|v| v.to_str().ok()) {
         Some(h) => h.to_string(),
@@ -242,6 +258,82 @@ async fn proxy_handler(
         .unwrap()
 }
 
+// ─── CA 다운로드 핸들러 ─────────────────────────────────────────
+
+/// CA 인증서 다운로드 — iPad/PC 설치용 (.crt)
+async fn ca_cert_handler(State(ps): State<ProxyState>) -> Response {
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", "application/x-pem-file")
+        .header(
+            "Content-Disposition",
+            "attachment; filename=\"smart-school-cdn-ca.crt\"",
+        )
+        .body(Body::from(ps.tls_manager.ca_cert_pem.clone()))
+        .unwrap()
+}
+
+/// iOS 구성 프로파일 다운로드 (.mobileconfig)
+async fn ca_mobileconfig_handler(State(ps): State<ProxyState>) -> Response {
+    // PEM 헤더·푸터·줄바꿈 제거하여 base64 DER 추출
+    let pem = &ps.tls_manager.ca_cert_pem;
+    let b64: String = pem
+        .lines()
+        .filter(|l| !l.starts_with("-----"))
+        .collect::<Vec<_>>()
+        .join("");
+
+    let profile = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>PayloadContent</key>
+    <array>
+        <dict>
+            <key>PayloadCertificateFileName</key>
+            <string>ca.crt</string>
+            <key>PayloadContent</key>
+            <data>{b64}</data>
+            <key>PayloadDescription</key>
+            <string>Smart School CDN 루트 인증 기관</string>
+            <key>PayloadDisplayName</key>
+            <string>Smart School CDN CA</string>
+            <key>PayloadIdentifier</key>
+            <string>com.smartschool.cdn.ca</string>
+            <key>PayloadType</key>
+            <string>com.apple.security.root</string>
+            <key>PayloadUUID</key>
+            <string>A1B2C3D4-E5F6-7890-ABCD-EF1234567890</string>
+            <key>PayloadVersion</key>
+            <integer>1</integer>
+        </dict>
+    </array>
+    <key>PayloadDisplayName</key>
+    <string>Smart School CDN</string>
+    <key>PayloadIdentifier</key>
+    <string>com.smartschool.cdn</string>
+    <key>PayloadType</key>
+    <string>Configuration</string>
+    <key>PayloadUUID</key>
+    <string>B2C3D4E5-F6A7-8901-BCDE-F12345678901</string>
+    <key>PayloadVersion</key>
+    <integer>1</integer>
+</dict>
+</plist>"#
+    );
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", "application/x-apple-aspen-config")
+        .header(
+            "Content-Disposition",
+            "attachment; filename=\"smart-school-cdn.mobileconfig\"",
+        )
+        .body(Body::from(profile))
+        .unwrap()
+}
+
 // ─── 관리 API 핸들러 ────────────────────────────────────────────
 
 async fn status_handler(State(admin): State<AdminState>) -> Json<state::ProxyStatus> {
@@ -324,4 +416,18 @@ async fn cache_purge_handler(
         "purged_count": purged_count,
         "freed_bytes": freed_bytes,
     })).into_response()
+}
+
+/// CA 인증서 PEM 반환 — Admin Server 중계용
+async fn tls_ca_handler(State(admin): State<AdminState>) -> Response {
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", "application/x-pem-file")
+        .body(Body::from(admin.tls_manager.ca_cert_pem.clone()))
+        .unwrap()
+}
+
+/// 발급된 도메인 인증서 목록 반환
+async fn tls_certificates_handler(State(admin): State<AdminState>) -> impl IntoResponse {
+    Json(admin.tls_manager.list_certificates())
 }
