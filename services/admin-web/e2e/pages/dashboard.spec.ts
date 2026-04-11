@@ -1,6 +1,6 @@
 /// 대시보드 페이지 E2E 테스트
 /// API 모킹으로 프록시 상태 카드와 요청 로그 테이블의 렌더링을 검증한다.
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../fixtures/test';
 import { mockApi } from '../fixtures/api-mock';
 import {
   createProxyStatusOnline,

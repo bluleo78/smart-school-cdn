@@ -1,6 +1,6 @@
 /// 도메인 관리 페이지 E2E 테스트
 /// API 모킹으로 프록시 테스트 기능의 성공/실패/에러 시나리오를 검증한다.
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../fixtures/test';
 import { mockApi } from '../fixtures/api-mock';
 import { createProxyStatusOnline, createRequestLogs } from '../factories/proxy.factory';
 import { createCacheStats } from '../factories/cache.factory';

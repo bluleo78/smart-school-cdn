@@ -1,5 +1,5 @@
 /// 캐시 기능 E2E 테스트 — 대시보드 캐시 카드 + 캐시 관리 페이지 전체 검증
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../fixtures/test';
 import { mockApi } from '../fixtures/api-mock';
 import { createCacheStats, createPopularContent } from '../factories/cache.factory';
 import { createProxyStatusOnline } from '../factories/proxy.factory';

@@ -47,3 +47,6 @@ certs/
 # Superpowers brainstorm artifacts
 docs/superpowers/
 .superpowers/
+
+# Rust proxy 캐시 데이터 (테스트/런타임 생성)
+cache/

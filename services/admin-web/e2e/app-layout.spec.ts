@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures/test';
 
 test.describe('AppLayout', () => {
   test('사이드바와 대시보드 페이지가 렌더링된다', async ({ page }) => {
