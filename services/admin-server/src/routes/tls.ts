@@ -2,6 +2,7 @@
 /// Proxy Service 관리 API(8081)를 중계하여 CA 인증서·iOS 프로파일·인증서 목록을 제공한다.
 import type { FastifyInstance } from 'fastify';
 import axios from 'axios';
+import { createHash } from 'crypto';
 
 const PROXY_ADMIN_URL = process.env.PROXY_ADMIN_URL || 'http://localhost:8081';
 const TIMEOUT_MS = 3000;
@@ -11,6 +12,18 @@ interface CertInfo {
   domain: string;
   issued_at: string;
   expires_at: string;
+}
+
+/** CA PEM 해시 기반 결정론적 UUID 생성 — 같은 CA는 항상 같은 UUID */
+function pemToUuid(pem: string): string {
+  const hash = createHash('sha256').update(pem).digest('hex');
+  return [
+    hash.slice(0, 8),
+    hash.slice(8, 12),
+    '5' + hash.slice(13, 16),  // version 5
+    '8' + hash.slice(17, 20),  // variant
+    hash.slice(20, 32),
+  ].join('-');
 }
 
 export async function tlsRoutes(app: FastifyInstance) {
@@ -45,6 +58,10 @@ export async function tlsRoutes(app: FastifyInstance) {
         .filter((line) => !line.startsWith('-----'))
         .join('');
 
+      // CA PEM 기반 결정론적 UUID 생성
+      const innerUuid = pemToUuid(pem);
+      const outerUuid = pemToUuid(pem + 'outer');
+
       const profile = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -65,7 +82,7 @@ export async function tlsRoutes(app: FastifyInstance) {
             <key>PayloadType</key>
             <string>com.apple.security.root</string>
             <key>PayloadUUID</key>
-            <string>A1B2C3D4-E5F6-7890-ABCD-EF1234567890</string>
+            <string>${innerUuid}</string>
             <key>PayloadVersion</key>
             <integer>1</integer>
         </dict>
@@ -77,7 +94,7 @@ export async function tlsRoutes(app: FastifyInstance) {
     <key>PayloadType</key>
     <string>Configuration</string>
     <key>PayloadUUID</key>
-    <string>B2C3D4E5-F6A7-8901-BCDE-F12345678901</string>
+    <string>${outerUuid}</string>
     <key>PayloadVersion</key>
     <integer>1</integer>
 </dict>
@@ -88,6 +105,7 @@ export async function tlsRoutes(app: FastifyInstance) {
         .header('Content-Disposition', 'attachment; filename="smart-school-cdn.mobileconfig"')
         .send(profile);
     } catch {
+      // 인증서 다운로드 실패는 graceful degradation 불가 — 사용자에게 명시적 에러 표시
       return reply.status(502).send({ error: 'Proxy 서버에 연결할 수 없습니다.' });
     }
   });
