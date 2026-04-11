@@ -34,7 +34,19 @@ impl ResolvesServerCert for SniCertResolver {
     fn resolve(&self, client_hello: ClientHello) -> Option<Arc<CertifiedKey>> {
         // SNI 없으면 거부
         let domain = client_hello.server_name()?;
-        let cached = self.tls_manager.get_or_issue(domain);
+        // 인증서 발급 실패 시 패닉이 서비스를 종료하는 것을 방지
+        // — resolve가 None을 반환하면 해당 핸드셰이크만 거부됨
+        let tls_manager = Arc::clone(&self.tls_manager);
+        let domain_owned = domain.to_string();
+        let cached = match std::panic::catch_unwind(
+            std::panic::AssertUnwindSafe(move || tls_manager.get_or_issue(&domain_owned))
+        ) {
+            Ok(cert) => cert,
+            Err(_) => {
+                tracing::error!(domain = %domain, "SNI 인증서 발급 실패 — TLS 핸드셰이크 거부");
+                return None;
+            }
+        };
 
         // PEM → rustls 인증서 체인 변환
         let mut cert_reader = cached.cert_pem.as_bytes();
