@@ -2,12 +2,16 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import Database from 'better-sqlite3';
 import { proxyRoutes } from './routes/proxy.js';
+import { cacheRoutes } from './routes/cache.js';
 import { DomainRepository, DOMAIN_SCHEMA } from './db/domain-repo.js';
 
 // SQLite DB 초기화 — 앱 기동 시 1회 실행
 const db = new Database(process.env.DB_PATH || './data/admin.db');
 db.exec(DOMAIN_SCHEMA);
 const domainRepo = new DomainRepository(db);
+
+// Rust 프록시 기본 도메인 시드 — 없으면 삽입, 있으면 무시
+domainRepo.upsert('httpbin.org', 'https://httpbin.org');
 
 const app = Fastify({ logger: true });
 
@@ -20,6 +24,9 @@ app.get('/api/health', async () => {
 
 /** 프록시 상태/로그 API 라우트 등록 */
 await app.register(proxyRoutes, { domainRepo });
+
+/** 캐시 통계/퍼지 API 라우트 등록 */
+await app.register(cacheRoutes);
 
 const port = Number(process.env.PORT) || 4001;
 

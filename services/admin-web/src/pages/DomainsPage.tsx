@@ -4,7 +4,8 @@
  * Phase 4에서 도메인 CRUD 기능이 추가될 예정이다.
  */
 import { useState } from 'react';
-import { testProxy, type ProxyTestResult } from '../api/proxy';
+import { type ProxyTestResult } from '../api/proxy';
+import { useTestProxy } from '../hooks/useTestProxy';
 
 /** 테스트에 사용할 사전 등록 도메인 목록 (Phase 4에서 API로 대체 예정) */
 const DEFAULT_DOMAINS = ['httpbin.org'];
@@ -12,25 +13,20 @@ const DEFAULT_DOMAINS = ['httpbin.org'];
 export function DomainsPage() {
   const [domain, setDomain] = useState(DEFAULT_DOMAINS[0]);
   const [path, setPath] = useState('/get');
-  const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ProxyTestResult | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const testProxy = useTestProxy();
 
-  /** 프록시 테스트 요청 전송 */
+  /** 프록시 테스트 요청 전송 — 성공 시 프록시/캐시 쿼리 자동 갱신 */
   async function handleTest() {
     if (!domain.trim() || !path.trim()) return;
-
-    setLoading(true);
     setResult(null);
     setErrorMsg(null);
-
     try {
-      const data = await testProxy(domain.trim(), path.trim());
+      const data = await testProxy.mutateAsync({ domain: domain.trim(), path: path.trim() });
       setResult(data);
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : '요청 실패');
-    } finally {
-      setLoading(false);
     }
   }
 
@@ -97,11 +93,11 @@ export function DomainsPage() {
           <div className="flex flex-col justify-end">
             <button
               onClick={handleTest}
-              disabled={loading || !domain.trim() || !path.trim()}
+              disabled={testProxy.isPending || !domain.trim() || !path.trim()}
               className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               data-testid="proxy-test-button"
             >
-              {loading ? '테스트 중…' : '테스트'}
+              {testProxy.isPending ? '테스트 중…' : '테스트'}
             </button>
           </div>
         </div>
