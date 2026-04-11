@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use axum::routing::get;
 use axum::Router;
+use proxy::cache::CacheLayer;
 use proxy::config::ProxyConfig;
 use proxy::state::{AppState, SharedState};
 use proxy::{build_admin_router, build_proxy_router};
@@ -38,12 +39,13 @@ pub async fn setup_env() -> TestEnv {
     domains.insert("test.local".to_string(), mock_origin_url);
     let proxy_config = Arc::new(ProxyConfig::with_domains(domains));
 
-    // 3. 공유 상태 + HTTP 클라이언트
+    // 3. 공유 상태 + HTTP 클라이언트 + CacheLayer
     let shared_state: SharedState = Arc::new(RwLock::new(AppState::new()));
     let http_client = reqwest::Client::new();
+    let cache = Arc::new(CacheLayer::new(std::path::PathBuf::from("/tmp/test-cache"), 64 * 1024 * 1024));
 
     // 4. 프록시 라우터 → 임의 포트 바인드
-    let proxy_router = build_proxy_router(shared_state.clone(), proxy_config, http_client);
+    let proxy_router = build_proxy_router(shared_state.clone(), proxy_config, http_client, cache.clone());
     let proxy_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = proxy_listener.local_addr().unwrap().port();
     tokio::spawn(async move {
@@ -51,7 +53,7 @@ pub async fn setup_env() -> TestEnv {
     });
 
     // 5. 관리 API 라우터 → 임의 포트 바인드
-    let admin_router = build_admin_router(shared_state.clone());
+    let admin_router = build_admin_router(shared_state.clone(), cache);
     let admin_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let admin_port = admin_listener.local_addr().unwrap().port();
     tokio::spawn(async move {

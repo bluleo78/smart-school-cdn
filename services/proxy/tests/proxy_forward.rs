@@ -38,7 +38,8 @@ async fn 등록된_도메인_요청은_원본_서버로_중계된다() {
         resp.headers().get("x-served-by").unwrap(),
         "smart-school-cdn"
     );
-    assert_eq!(resp.headers().get("x-cache-status").unwrap(), "BYPASS");
+    // Cache-Control 없는 응답 → 캐시 가능, 첫 요청이므로 MISS
+    assert_eq!(resp.headers().get("x-cache-status").unwrap(), "MISS");
 
     // 응답 본문은 mock origin에서 온 문자열 그대로
     let body = resp.text().await.unwrap();
