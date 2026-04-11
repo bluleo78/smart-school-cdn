@@ -43,3 +43,7 @@ certs/
 # Claude Code
 .claude/
 .omc/
+
+# Superpowers brainstorm artifacts
+docs/superpowers/
+.superpowers/
