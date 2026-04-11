@@ -18,6 +18,7 @@ target/
 .DS_Store
 
 # Logs
+logs/
 *.log
 npm-debug.log*
 
@@ -25,12 +26,16 @@ npm-debug.log*
 coverage/
 playwright-report/
 test-results/
+blob-report/
 
 # Docker
 data/
 
 # Certificates (generated)
 certs/
+
+# Vite
+.vite/
 
 # Turbo
 .turbo/

@@ -1,0 +1,40 @@
+{
+  "name": "smart-school-cdn",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "학교 내부 네트워크용 온프레미스 CDN 서비스",
+  "scripts": {
+    "dev": "bash scripts/dev.sh",
+    "dev:infra": "bash scripts/dev.sh --infra",
+    "build": "turbo build",
+    "test": "turbo test",
+    "test:e2e": "turbo test:e2e --filter=admin-web",
+    "lint": "turbo lint",
+    "typecheck": "turbo typecheck",
+    "docker:build": "docker compose -f docker-compose.prod.yml build",
+    "docker:up": "docker compose -f docker-compose.prod.yml up -d",
+    "docker:down": "docker compose -f docker-compose.prod.yml down",
+    "clean": "turbo clean",
+    "prepare": "husky"
+  },
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "eslint": "^10.2.0",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "globals": "^17.4.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
+    "turbo": "^2.9.6",
+    "typescript-eslint": "^8.58.1"
+  },
+  "lint-staged": {
+    "services/admin-server/**/*.ts": "pnpm --filter admin-server exec eslint --fix",
+    "services/admin-web/**/*.{ts,tsx}": "pnpm --filter admin-web exec eslint --fix"
+  }
+}
