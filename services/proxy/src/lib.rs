@@ -1,5 +1,6 @@
 /// Proxy 서비스의 라이브러리 진입점
 pub mod cache;
+pub mod tls;
 pub mod config;
 pub mod state;
 
