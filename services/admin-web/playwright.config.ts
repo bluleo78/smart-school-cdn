@@ -17,9 +17,11 @@ export default defineConfig({
           // V8 커버리지 수집 대상: 로컬 dev 서버 URL만 포함
           entryFilter: (entry: { url: string }) =>
             entry.url.includes('localhost:4173'),
-          // 소스 필터: src/ 경로만 리포트에 포함
+          // 소스 필터: 앱 소스만 포함 (.tsx/.ts/.mjs, node_modules·chunk 제외)
           sourceFilter: (sourcePath: string) =>
-            sourcePath.includes('/src/'),
+            /\.(tsx|ts|mjs)$/.test(sourcePath) &&
+            !sourcePath.includes('node_modules') &&
+            !sourcePath.startsWith('chunk-'),
           reports: [
             ['v8'],
             ['lcov', { outputFile: 'coverage/lcov.info' }],
