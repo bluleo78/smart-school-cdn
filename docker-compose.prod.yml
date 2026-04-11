@@ -1,0 +1,48 @@
+# 운영 환경 Docker Compose
+# 사용법: docker compose -f docker-compose.prod.yml up -d
+services:
+  proxy:
+    build:
+      context: services/proxy
+      dockerfile: Dockerfile
+    restart: always
+    ports:
+      - "8080:8080"   # HTTP 프록시 + CA 다운로드
+      - "443:443"     # HTTPS 프록시
+    volumes:
+      - cache_data:/app/cache
+      - certs_data:/app/certs
+    environment:
+      - CACHE_DIR=/app/cache
+      - CACHE_MAX_SIZE_GB=${CACHE_MAX_SIZE_GB:-20}
+      - CERTS_DIR=/app/certs
+      - RUST_LOG=info
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/ca.crt"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  admin-server:
+    build:
+      context: services/admin-server
+      dockerfile: Dockerfile
+    restart: always
+    ports:
+      - "${WEB_PORT:-7777}:3000"
+    volumes:
+      - admin_data:/app/data
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DB_PATH=/app/data/admin.db
+      - PROXY_ADMIN_URL=http://proxy:8081
+    depends_on:
+      proxy:
+        condition: service_healthy
+
+volumes:
+  cache_data:
+  certs_data:
+  admin_data:
