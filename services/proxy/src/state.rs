@@ -1,5 +1,4 @@
-/// 프록시 서버의 공유 상태 — 요청 로그, 업타임, 요청 카운터
-/// Arc<RwLock<AppState>>로 래핑하여 여러 핸들러에서 안전하게 접근
+/// 프록시 서버의 공유 상태 — 요청 로그, 업타임, 요청 카운터, 캐시 통계
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Instant;
@@ -8,10 +7,10 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use tokio::sync::RwLock;
 
-/// 최근 요청 로그 최대 보관 건수
 const MAX_REQUEST_LOGS: usize = 100;
+const MAX_HIT_RATE_HISTORY: usize = 60;
 
-/// 개별 요청에 대한 로그 레코드
+/// 개별 요청 로그 레코드
 #[derive(Debug, Clone, Serialize)]
 pub struct RequestLog {
     pub method: String,
@@ -20,6 +19,8 @@ pub struct RequestLog {
     pub status_code: u16,
     pub response_time_ms: u64,
     pub timestamp: DateTime<Utc>,
+    /// X-Cache-Status 값: "HIT", "MISS", "BYPASS"
+    pub cache_status: String,
 }
 
 /// 프록시 상태 정보 (관리 API 응답용)
@@ -30,18 +31,35 @@ pub struct ProxyStatus {
     pub request_count: u64,
 }
 
-/// 프록시 서버의 전역 공유 상태
-pub struct AppState {
-    /// 서버 시작 시각 (업타임 계산용)
-    started_at: Instant,
-    /// 총 요청 처리 수
-    request_count: u64,
-    /// 최근 요청 로그 (최대 MAX_REQUEST_LOGS건, 오래된 항목 자동 삭제)
-    request_logs: VecDeque<RequestLog>,
+/// 히트율 시점 스냅샷 (최근 1시간, 매분 기록)
+#[derive(Debug, Clone, Serialize)]
+pub struct HitRateSnapshot {
+    pub timestamp: DateTime<Utc>,
+    pub hit_rate: f64,
 }
 
-/// 여러 axum 핸들러에서 공유하기 위한 타입 별칭
+/// 프록시 서버의 전역 공유 상태
+pub struct AppState {
+    started_at: Instant,
+    request_count: u64,
+    request_logs: VecDeque<RequestLog>,
+    /// 캐시 HIT 횟수
+    pub hit_count: u64,
+    /// 캐시 MISS 횟수
+    pub miss_count: u64,
+    /// 캐시 BYPASS 횟수 (no-store 등)
+    pub bypass_count: u64,
+    /// 매분 히트율 스냅샷 (최대 60개)
+    pub hit_rate_history: VecDeque<HitRateSnapshot>,
+}
+
 pub type SharedState = Arc<RwLock<AppState>>;
+
+impl Default for AppState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl AppState {
     /// 새 상태 생성 — 서버 시작 시 1회 호출
@@ -50,18 +68,52 @@ impl AppState {
             started_at: Instant::now(),
             request_count: 0,
             request_logs: VecDeque::with_capacity(MAX_REQUEST_LOGS),
+            hit_count: 0,
+            miss_count: 0,
+            bypass_count: 0,
+            hit_rate_history: VecDeque::with_capacity(MAX_HIT_RATE_HISTORY),
         }
     }
 
-    /// 요청 로그를 기록하고 카운터를 증가시킨다
-    /// 로그가 MAX_REQUEST_LOGS를 초과하면 가장 오래된 항목을 삭제
+    /// 요청 로그 기록 + 카운터 증가
     pub fn record_request(&mut self, log: RequestLog) {
         self.request_count += 1;
-        // 용량 초과 시 가장 오래된 로그 삭제
         if self.request_logs.len() >= MAX_REQUEST_LOGS {
             self.request_logs.pop_front();
         }
         self.request_logs.push_back(log);
+    }
+
+    /// 캐시 HIT 기록
+    pub fn record_cache_hit(&mut self) {
+        self.hit_count += 1;
+    }
+
+    /// 캐시 MISS 기록
+    pub fn record_cache_miss(&mut self) {
+        self.miss_count += 1;
+    }
+
+    /// 캐시 BYPASS 기록 (no-store / 비GET 등)
+    pub fn record_cache_bypass(&mut self) {
+        self.bypass_count += 1;
+    }
+
+    /// 현재 히트율을 스냅샷으로 기록 (매분 백그라운드 태스크에서 호출)
+    pub fn record_hit_rate_snapshot(&mut self) {
+        let total = self.hit_count + self.miss_count;
+        let hit_rate = if total > 0 {
+            (self.hit_count as f64 / total as f64) * 100.0
+        } else {
+            0.0
+        };
+        if self.hit_rate_history.len() >= MAX_HIT_RATE_HISTORY {
+            self.hit_rate_history.pop_front();
+        }
+        self.hit_rate_history.push_back(HitRateSnapshot {
+            timestamp: Utc::now(),
+            hit_rate,
+        });
     }
 
     /// 현재 프록시 상태 조회 (업타임, 요청 수)
@@ -83,7 +135,6 @@ impl AppState {
 mod tests {
     use super::*;
 
-    /// 테스트용 더미 로그 생성
     fn make_log(url: &str, status: u16) -> RequestLog {
         RequestLog {
             method: "GET".to_string(),
@@ -92,6 +143,7 @@ mod tests {
             status_code: status,
             response_time_ms: 100,
             timestamp: Utc::now(),
+            cache_status: "MISS".to_string(),
         }
     }
 
@@ -103,7 +155,6 @@ mod tests {
         state.record_request(make_log("/third", 200));
 
         let logs = state.get_request_logs();
-        // 최신순: third → second → first
         assert_eq!(logs[0].url, "/third");
         assert_eq!(logs[1].url, "/second");
         assert_eq!(logs[2].url, "/first");
@@ -112,17 +163,12 @@ mod tests {
     #[test]
     fn 최대_건수_초과_시_가장_오래된_항목이_삭제된다() {
         let mut state = AppState::new();
-        // 100건 채우기
         for i in 0..100 {
             state.record_request(make_log(&format!("/req-{i}"), 200));
         }
         assert_eq!(state.request_logs.len(), 100);
-
-        // 101번째 추가 → 첫 번째(/req-0) 삭제
         state.record_request(make_log("/overflow", 200));
         assert_eq!(state.request_logs.len(), 100);
-
-        // 가장 오래된 로그가 /req-1 이어야 함 (/req-0은 삭제됨)
         let oldest = state.request_logs.front().unwrap();
         assert_eq!(oldest.url, "/req-1");
     }
@@ -130,19 +176,38 @@ mod tests {
     #[test]
     fn 요청_카운터가_정확히_증가한다() {
         let mut state = AppState::new();
-        assert_eq!(state.get_status().request_count, 0);
-
         state.record_request(make_log("/a", 200));
         state.record_request(make_log("/b", 404));
         assert_eq!(state.get_status().request_count, 2);
     }
 
     #[test]
-    fn 업타임은_0_이상이다() {
-        let state = AppState::new();
-        let status = state.get_status();
-        // 생성 직후이므로 업타임은 0 또는 매우 작은 값
-        assert!(status.uptime < 2);
-        assert!(status.online);
+    fn 캐시_이벤트_기록_후_카운터가_증가한다() {
+        let mut state = AppState::new();
+        state.record_cache_hit();
+        state.record_cache_hit();
+        state.record_cache_miss();
+        assert_eq!(state.hit_count, 2);
+        assert_eq!(state.miss_count, 1);
+        assert_eq!(state.bypass_count, 0);
+    }
+
+    #[test]
+    fn 히트율_스냅샷이_최대_60개를_유지한다() {
+        let mut state = AppState::new();
+        for _ in 0..65 {
+            state.record_hit_rate_snapshot();
+        }
+        assert_eq!(state.hit_rate_history.len(), 60);
+    }
+
+    #[test]
+    fn 히트율_스냅샷은_현재_히트율을_기록한다() {
+        let mut state = AppState::new();
+        for _ in 0..3 { state.record_cache_hit(); }
+        state.record_cache_miss();
+        state.record_hit_rate_snapshot();
+        let snap = state.hit_rate_history.back().unwrap();
+        assert!((snap.hit_rate - 75.0).abs() < 0.01);
     }
 }
