@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+target/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
+
+# Test
+coverage/
+playwright-report/
+test-results/
+
+# Docker
+data/
+
+# Certificates (generated)
+certs/
+
+# Turbo
+.turbo/
+
+# Claude Code
+.claude/
+.omc/
