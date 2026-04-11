@@ -1,5 +1,5 @@
 /// Smart School CDN Proxy Service
-/// HTTP 리버스 프록시(8080) + 관리 API(8081)를 동시에 실행한다.
+/// HTTP 리버스 프록시(8080) + HTTPS 443 + 관리 API(8081)를 동시에 실행한다.
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -7,11 +7,50 @@ use std::time::Duration;
 use tokio::sync::RwLock;
 use tracing_subscriber::EnvFilter;
 
+use rustls::ServerConfig;
+use rustls::server::{ClientHello, ResolvesServerCert};
+use rustls::sign::CertifiedKey;
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use axum_server::tls_rustls::RustlsConfig;
+
 use proxy::cache::CacheLayer;
 use proxy::config::ProxyConfig;
 use proxy::state::{AppState, SharedState};
 use proxy::tls::TlsManager;
 use proxy::{build_admin_router, build_proxy_router, ProxyState};
+
+/// rustls SNI 핸들러 — 클라이언트의 서버명에 맞는 인증서를 TlsManager에서 조회·발급
+struct SniCertResolver {
+    tls_manager: Arc<TlsManager>,
+}
+
+impl std::fmt::Debug for SniCertResolver {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SniCertResolver").finish()
+    }
+}
+
+impl ResolvesServerCert for SniCertResolver {
+    fn resolve(&self, client_hello: ClientHello) -> Option<Arc<CertifiedKey>> {
+        // SNI 없으면 거부
+        let domain = client_hello.server_name()?;
+        let cached = self.tls_manager.get_or_issue(domain);
+
+        // PEM → rustls 인증서 체인 변환
+        let mut cert_reader = cached.cert_pem.as_bytes();
+        let certs: Vec<CertificateDer<'static>> = rustls_pemfile::certs(&mut cert_reader)
+            .filter_map(|r| r.ok())
+            .collect();
+
+        // PEM → 개인키 변환
+        let mut key_reader = cached.key_pem.as_bytes();
+        let key: PrivateKeyDer<'static> = rustls_pemfile::private_key(&mut key_reader)
+            .ok()??;
+
+        let signing_key = rustls::crypto::ring::sign::any_supported_type(&key).ok()?;
+        Some(Arc::new(CertifiedKey::new(certs, signing_key)))
+    }
+}
 
 #[tokio::main]
 async fn main() {
@@ -61,13 +100,30 @@ async fn main() {
         tls_manager: tls_manager.clone(),
     };
     let proxy_router = build_proxy_router(ps);
-    let admin_router = build_admin_router(shared_state.clone(), cache, tls_manager);
+    let admin_router = build_admin_router(shared_state.clone(), cache, tls_manager.clone());
 
-    tracing::info!("Proxy Service started — proxy :8080, admin :8081");
+    // rustls ServerConfig — SNI 기반 인증서 선택
+    let server_config = ServerConfig::builder()
+        .with_no_client_auth()
+        .with_cert_resolver(Arc::new(SniCertResolver {
+            tls_manager: tls_manager.clone(),
+        }));
+    let rustls_config = RustlsConfig::from_config(Arc::new(server_config));
+
+    tracing::info!("Proxy Service 시작 — HTTP :8080, HTTPS :443, Admin :8081");
+
+    // HTTPS 프록시 서버 (443) — proxy_router clone은 move 전에 수행
+    let https_router = proxy_router.clone();
 
     let proxy_server = tokio::spawn(async move {
         let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await.unwrap();
         axum::serve(listener, proxy_router).await.unwrap();
+    });
+    let https_server = tokio::spawn(async move {
+        axum_server::bind_rustls("0.0.0.0:443".parse().unwrap(), rustls_config)
+            .serve(https_router.into_make_service())
+            .await
+            .unwrap();
     });
 
     let admin_server = tokio::spawn(async move {
@@ -76,8 +132,9 @@ async fn main() {
     });
 
     tokio::select! {
-        _ = proxy_server => tracing::error!("Proxy server exited"),
-        _ = admin_server => tracing::error!("Admin API server exited"),
-        _ = tokio::signal::ctrl_c() => tracing::info!("Shutting down"),
+        _ = proxy_server => tracing::error!("HTTP 프록시 서버 종료"),
+        _ = https_server => tracing::error!("HTTPS 프록시 서버 종료"),
+        _ = admin_server => tracing::error!("Admin API 서버 종료"),
+        _ = tokio::signal::ctrl_c() => tracing::info!("종료 신호 수신"),
     }
 }
