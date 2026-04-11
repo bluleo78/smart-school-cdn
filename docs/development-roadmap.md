@@ -14,34 +14,34 @@
 > 목표: 모노레포 빌드 + 빈 Dashboard 렌더링
 
 ### 0-1. 루트 모노레포 설정
-- [ ] `package.json` (pnpm workspace root, turbo 스크립트)
-- [ ] `pnpm-workspace.yaml` (`services/*`)
-- [ ] `turbo.json` (build/dev/test/lint 파이프라인)
-- [ ] `.npmrc`
-- **검증**: `pnpm install` 성공
+- [x] `package.json` (pnpm workspace root, turbo 스크립트)
+- [x] `pnpm-workspace.yaml` (`services/*`)
+- [x] `turbo.json` (build/dev/test/lint 파이프라인)
+- [x] `.npmrc`
+- **검증**: `pnpm install` 성공 ✅
 
 ### 0-2. Rust 워크스페이스
-- [ ] 루트 `Cargo.toml` (workspace members)
-- [ ] `services/proxy/` — 최소 crate (tokio + 시작 로그)
-- **검증**: `cargo build --workspace` 성공
+- [x] 루트 `Cargo.toml` (workspace members)
+- [x] `services/proxy/` — 최소 crate (tokio + 시작 로그)
+- **검증**: `cargo build --workspace` 성공 ✅
 
 ### 0-3. Admin Server 스캐폴딩
-- [ ] `services/admin-server/` (Fastify + TypeScript)
-- [ ] `GET /api/health` → `{ status: "ok" }`
-- **검증**: `pnpm --filter admin-server dev` → `localhost:4001/api/health` 200 OK
+- [x] `services/admin-server/` (Fastify + TypeScript)
+- [x] `GET /api/health` → `{ status: "ok" }`
+- **검증**: `pnpm --filter admin-server dev` → `localhost:4001/api/health` 200 OK ✅
 
 ### 0-4. Admin Web 스캐폴딩
-- [ ] `services/admin-web/` (Vite + React 19 + TypeScript)
-- [ ] Tailwind CSS v4 + shadcn/ui (new-york) 초기 설정
-- [ ] AppLayout (사이드바 + 헤더)
-- [ ] React Router v7 페이지 라우팅 (대시보드, 도메인, 캐시, 최적화, 시스템)
-- [ ] `vite.config.ts` — `/api/*` → `localhost:4001` 프록시
-- **검증**: 브라우저 `localhost:4173` → 사이드바 + 빈 대시보드 페이지 렌더링
+- [x] `services/admin-web/` (Vite + React 19 + TypeScript)
+- [x] Tailwind CSS v4 + shadcn/ui (new-york) 초기 설정
+- [x] AppLayout (사이드바 + 헤더)
+- [x] React Router v7 페이지 라우팅 (대시보드, 도메인, 캐시, 최적화, 시스템)
+- [x] `vite.config.ts` — `/api/*` → `localhost:4001` 프록시
+- **검증**: 브라우저 `localhost:4173` → 사이드바 + 빈 대시보드 페이지 렌더링 ✅
 
 ### 0-5. 린팅 / Git 훅
-- [ ] ESLint flat config + Rust clippy
-- [ ] `.husky/pre-commit` + `lint-staged`
-- **검증**: 린트 에러 코드 → `git commit` 차단
+- [x] ESLint flat config + Rust clippy
+- [x] `.husky/pre-commit` + `lint-staged`
+- **검증**: 린트 에러 코드 → `git commit` 차단 ✅
 
 ---
 
