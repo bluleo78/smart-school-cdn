@@ -10,6 +10,7 @@ use rcgen::{BasicConstraints, CertificateParams, DnType, IsCa, KeyPair};
 use time::{Duration, OffsetDateTime};
 
 /// CA 서명으로 발급된 도메인 인증서 캐시 항목
+#[derive(serde::Serialize)]
 pub struct CachedCert {
     pub domain: String,
     pub cert_pem: String,
@@ -84,8 +85,14 @@ impl TlsManager {
     }
 
     /// 도메인 인증서 조회 (캐시 HIT) 또는 온디맨드 발급 (캐시 MISS)
+    ///
+    /// TOCTOU 방지: 캐시 확인은 락 보유 중에, 발급은 락 밖에서 수행하고
+    /// 저장 전 double-check으로 다른 스레드의 중복 발급을 방지한다.
+    ///
+    /// TODO(Task 5): SNI resolver 구현 시 반환 타입을 Result<Arc<CachedCert>, _>로
+    /// 변경하여 panic 대신 에러 전파로 개선 예정.
     pub fn get_or_issue(&self, domain: &str) -> Arc<CachedCert> {
-        // 캐시 HIT 확인
+        // 캐시 HIT 확인 (락 보유 중)
         {
             let cache = self.cert_cache.lock().unwrap();
             if let Some(cached) = cache.get(domain) {
@@ -95,11 +102,23 @@ impl TlsManager {
             }
         }
 
-        // 캐시 MISS → 신규 발급
-        let cert = self.issue_domain_cert(domain);
-        let cert = Arc::new(cert);
+        // 캐시 MISS → 발급 후 저장 (발급은 CPU 작업이므로 락 밖에서 수행)
+        let cert = match self.issue_domain_cert(domain) {
+            Ok(c) => Arc::new(c),
+            Err(e) => {
+                tracing::error!(domain = %domain, error = %e, "도메인 인증서 발급 실패");
+                // 발급 실패는 복구 불가 — 추후 Task 5에서 Result 전파로 개선 예정
+                panic!("도메인 인증서 발급 실패: {}", e);
+            }
+        };
         {
             let mut cache = self.cert_cache.lock().unwrap();
+            // double-check: 다른 스레드가 먼저 발급했을 수 있음
+            if let Some(existing) = cache.get(domain) {
+                if existing.expires_at > Utc::now() {
+                    return Arc::clone(existing);
+                }
+            }
             cache.insert(domain.to_string(), Arc::clone(&cert));
         }
         tracing::info!(domain = %domain, "도메인 인증서 발급 완료");
@@ -107,31 +126,28 @@ impl TlsManager {
     }
 
     /// CA 서명으로 도메인 인증서 발급 (유효기간 30일)
-    fn issue_domain_cert(&self, domain: &str) -> CachedCert {
-        let domain_key = KeyPair::generate().expect("도메인 키 생성 실패");
+    fn issue_domain_cert(&self, domain: &str) -> Result<CachedCert, rcgen::Error> {
+        let domain_key = KeyPair::generate()?;
         let expires_offset = OffsetDateTime::now_utc()
             .checked_add(Duration::days(30))
-            .expect("날짜 계산 실패");
+            .expect("날짜 계산 실패"); // time 계산 실패는 실질적 불가 → expect 허용
 
-        let mut params = CertificateParams::new(vec![domain.to_string()])
-            .expect("SAN 설정 실패");
+        let mut params = CertificateParams::new(vec![domain.to_string()])?;
         params.distinguished_name.push(DnType::CommonName, domain);
         params.not_after = expires_offset;
 
-        let domain_cert = params
-            .signed_by(&domain_key, &self.ca_cert, &self.ca_key)
-            .expect("도메인 인증서 서명 실패");
+        let domain_cert = params.signed_by(&domain_key, &self.ca_cert, &self.ca_key)?;
 
         let issued_at = Utc::now();
         let expires_at = issued_at + chrono::Duration::days(30);
 
-        CachedCert {
+        Ok(CachedCert {
             domain: domain.to_string(),
             cert_pem: domain_cert.pem(),
             key_pem: domain_key.serialize_pem(),
             issued_at,
             expires_at,
-        }
+        })
     }
 
     /// 관리 API용: 현재 캐시된 인증서 목록 반환
