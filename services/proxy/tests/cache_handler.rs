@@ -12,7 +12,8 @@ use tokio::net::TcpListener;
 use proxy::cache::CacheLayer;
 use proxy::config::ProxyConfig;
 use proxy::state::{AppState, SharedState};
-use proxy::{build_admin_router, build_proxy_router};
+use proxy::tls::TlsManager;
+use proxy::{build_admin_router, build_proxy_router, ProxyState};
 use serde_json::{json, Value};
 use tokio::sync::RwLock;
 
@@ -22,6 +23,8 @@ struct CacheTestEnv {
     admin_addr: String,
     /// TempDir을 보유하여 테스트 종료 전까지 디렉터리가 삭제되지 않게 한다.
     _tmp: TempDir,
+    /// TlsManager 임시 디렉터리 — 테스트 종료 전까지 삭제되지 않아야 한다.
+    _tls_tmp: TempDir,
 }
 
 /// 테스트 환경 부트스트랩 — CacheLayer를 포함한 admin 라우터 기동
@@ -42,21 +45,31 @@ async fn setup_cache_env() -> CacheTestEnv {
     // 임시 디렉터리에 CacheLayer 생성 (100 MiB 한도)
     let tmp = tempfile::tempdir().unwrap();
     let cache = Arc::new(CacheLayer::new(tmp.path().to_path_buf(), 100 * 1024 * 1024));
+    let tls_tmp = tempfile::tempdir().unwrap();
+    let tls_manager = TlsManager::load_or_create(tls_tmp.path()).unwrap();
 
     // 프록시 라우터 — admin과 별도 포트
     let proxy_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let proxy_router = build_proxy_router(state.clone(), config, client, cache.clone());
+    let ps = ProxyState {
+        shared: state.clone(),
+        config,
+        http_client: client,
+        cache: cache.clone(),
+        tls_manager: tls_manager.clone(),
+    };
+    let proxy_router = build_proxy_router(ps);
     tokio::spawn(async move { axum::serve(proxy_listener, proxy_router).await.unwrap() });
 
     // 관리 API 라우터 — cache 포함
     let admin_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let admin_port = admin_listener.local_addr().unwrap().port();
-    let admin_router = build_admin_router(state, cache);
+    let admin_router = build_admin_router(state, cache, tls_manager);
     tokio::spawn(async move { axum::serve(admin_listener, admin_router).await.unwrap() });
 
     CacheTestEnv {
         admin_addr: format!("http://127.0.0.1:{admin_port}"),
         _tmp: tmp,
+        _tls_tmp: tls_tmp,
     }
 }
 

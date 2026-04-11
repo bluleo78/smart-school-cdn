@@ -13,13 +13,14 @@ use tokio::sync::RwLock;
 use proxy::cache::CacheLayer;
 use proxy::config::ProxyConfig;
 use proxy::state::{AppState, SharedState};
-use proxy::{build_admin_router, build_proxy_router};
+use proxy::tls::TlsManager;
+use proxy::{build_admin_router, build_proxy_router, ProxyState};
 
 /// 테스트용 mock 원본 서버 + 프록시 서버 기동
-/// 반환: (proxy_addr, admin_addr, _tmp_dir)
+/// 반환: (proxy_addr, admin_addr, _tmp_dir, _tls_tmp_dir)
 async fn start_test_proxy(
     response_headers: Vec<(&'static str, &'static str)>,
-) -> (String, String, TempDir) {
+) -> (String, String, TempDir, TempDir) {
     // mock 원본 서버 — 지정 헤더와 함께 "hello" 반환
     let origin_router = Router::new().route(
         "/{*path}",
@@ -54,19 +55,28 @@ async fn start_test_proxy(
     let proxy_addr = proxy_listener.local_addr().unwrap().to_string();
     let admin_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let admin_addr = admin_listener.local_addr().unwrap().to_string();
+    let tls_tmp = tempfile::tempdir().unwrap();
+    let tls_manager = TlsManager::load_or_create(tls_tmp.path()).unwrap();
 
-    let proxy_router = build_proxy_router(state.clone(), config, client, cache.clone());
-    let admin_router = build_admin_router(state.clone(), cache);
+    let ps = ProxyState {
+        shared: state.clone(),
+        config,
+        http_client: client,
+        cache: cache.clone(),
+        tls_manager: tls_manager.clone(),
+    };
+    let proxy_router = build_proxy_router(ps);
+    let admin_router = build_admin_router(state.clone(), cache, tls_manager);
 
     tokio::spawn(async move { axum::serve(proxy_listener, proxy_router).await.unwrap() });
     tokio::spawn(async move { axum::serve(admin_listener, admin_router).await.unwrap() });
 
-    (proxy_addr, admin_addr, tmp)
+    (proxy_addr, admin_addr, tmp, tls_tmp)
 }
 
 #[tokio::test]
 async fn 동일_url_두번_요청하면_첫번째_miss_두번째_hit() {
-    let (proxy_addr, _admin_addr, _tmp) = start_test_proxy(vec![]).await;
+    let (proxy_addr, _admin_addr, _tmp, _tls_tmp) = start_test_proxy(vec![]).await;
     let client = Client::new();
 
     // 첫 번째 요청 → MISS
@@ -91,7 +101,7 @@ async fn 동일_url_두번_요청하면_첫번째_miss_두번째_hit() {
 
 #[tokio::test]
 async fn no_store_응답은_bypass_처리된다() {
-    let (proxy_addr, _admin_addr, _tmp) =
+    let (proxy_addr, _admin_addr, _tmp, _tls_tmp) =
         start_test_proxy(vec![("Cache-Control", "no-store")]).await;
     let client = Client::new();
 
@@ -115,7 +125,7 @@ async fn no_store_응답은_bypass_처리된다() {
 
 #[tokio::test]
 async fn 캐시_통계_api가_hit_miss를_반영한다() {
-    let (proxy_addr, admin_addr, _tmp) = start_test_proxy(vec![]).await;
+    let (proxy_addr, admin_addr, _tmp, _tls_tmp) = start_test_proxy(vec![]).await;
     let client = Client::new();
 
     // 2회 요청 (MISS + HIT)

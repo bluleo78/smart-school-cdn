@@ -10,7 +10,8 @@ use axum::Router;
 use proxy::cache::CacheLayer;
 use proxy::config::ProxyConfig;
 use proxy::state::{AppState, SharedState};
-use proxy::{build_admin_router, build_proxy_router};
+use proxy::tls::TlsManager;
+use proxy::{build_admin_router, build_proxy_router, ProxyState};
 use tokio::sync::RwLock;
 
 /// 한 번의 테스트에 필요한 엔드포인트 주소 묶음
@@ -18,6 +19,8 @@ pub struct TestEnv {
     pub proxy_addr: String,
     pub admin_addr: String,
     pub mock_origin_host: String,
+    /// TlsManager 임시 디렉터리 — 테스트 종료 전까지 삭제되지 않아야 한다.
+    _tls_tmp: tempfile::TempDir,
 }
 
 /// 테스트 환경 부트스트랩
@@ -39,13 +42,22 @@ pub async fn setup_env() -> TestEnv {
     domains.insert("test.local".to_string(), mock_origin_url);
     let proxy_config = Arc::new(ProxyConfig::with_domains(domains));
 
-    // 3. 공유 상태 + HTTP 클라이언트 + CacheLayer
+    // 3. 공유 상태 + HTTP 클라이언트 + CacheLayer + TlsManager
     let shared_state: SharedState = Arc::new(RwLock::new(AppState::new()));
     let http_client = reqwest::Client::new();
     let cache = Arc::new(CacheLayer::new(std::path::PathBuf::from("/tmp/test-cache"), 64 * 1024 * 1024));
+    let tls_tmp = tempfile::tempdir().unwrap();
+    let tls_manager = TlsManager::load_or_create(tls_tmp.path()).unwrap();
 
     // 4. 프록시 라우터 → 임의 포트 바인드
-    let proxy_router = build_proxy_router(shared_state.clone(), proxy_config, http_client, cache.clone());
+    let ps = ProxyState {
+        shared: shared_state.clone(),
+        config: proxy_config,
+        http_client,
+        cache: cache.clone(),
+        tls_manager: tls_manager.clone(),
+    };
+    let proxy_router = build_proxy_router(ps);
     let proxy_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_port = proxy_listener.local_addr().unwrap().port();
     tokio::spawn(async move {
@@ -53,7 +65,7 @@ pub async fn setup_env() -> TestEnv {
     });
 
     // 5. 관리 API 라우터 → 임의 포트 바인드
-    let admin_router = build_admin_router(shared_state.clone(), cache);
+    let admin_router = build_admin_router(shared_state.clone(), cache, tls_manager);
     let admin_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let admin_port = admin_listener.local_addr().unwrap().port();
     tokio::spawn(async move {
@@ -64,5 +76,6 @@ pub async fn setup_env() -> TestEnv {
         proxy_addr: format!("http://127.0.0.1:{proxy_port}"),
         admin_addr: format!("http://127.0.0.1:{admin_port}"),
         mock_origin_host: "test.local".to_string(),
+        _tls_tmp: tls_tmp,
     }
 }

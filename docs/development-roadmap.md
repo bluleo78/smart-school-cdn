@@ -78,21 +78,21 @@
 > 목표: 캐시 HIT/MISS가 동작하고, Dashboard에서 히트율/용량을 확인
 
 ### 2-1. 디스크 캐시
-- [ ] 요청 URL → 해시 키 → 로컬 파일 저장
-- [ ] 캐시 HIT → `X-Cache-Status: HIT`, MISS → 원본 fetch + 저장 + `X-Cache-Status: MISS`
-- [ ] Cache-Control / ETag / Last-Modified 처리
-- [ ] max_size 설정 + LRU 퇴거
+- [x] 요청 URL → 해시 키 → 로컬 파일 저장
+- [x] 캐시 HIT → `X-Cache-Status: HIT`, MISS → 원본 fetch + 저장 + `X-Cache-Status: MISS`
+- [x] Cache-Control / ETag / Last-Modified 처리
+- [x] max_size 설정 + LRU 퇴거
 
 ### 2-2. Admin API — 캐시 관리
-- [ ] `GET /api/cache/stats` — 히트율, 총 용량, 사용량, 도메인별 통계
-- [ ] `DELETE /api/cache/purge` — URL별/도메인별/전체 퍼지
-- [ ] `GET /api/cache/popular` — 인기 콘텐츠 목록
+- [x] `GET /api/cache/stats` — 히트율, 총 용량, 사용량, 도메인별 통계
+- [x] `DELETE /api/cache/purge` — URL별/도메인별/전체 퍼지
+- [x] `GET /api/cache/popular` — 인기 콘텐츠 목록
 
 ### 2-3. Dashboard — 대시보드 페이지 (v2) + 캐시 관리 페이지
-- [ ] 대시보드: 캐시 히트율 카드 + 대역폭 절감 카드 + Recharts 히트율 추이 그래프
-- [ ] 대시보드: 스토리지 사용량 프로그레스 바
-- [ ] 캐시 관리 페이지: 퍼지 UI (URL/도메인/전체) + 확인 다이얼로그
-- [ ] 캐시 관리 페이지: 인기 콘텐츠 테이블
+- [x] 대시보드: 캐시 히트율 카드 + 대역폭 절감 카드 + Recharts 히트율 추이 그래프
+- [x] 대시보드: 스토리지 사용량 프로그레스 바
+- [x] 캐시 관리 페이지: 퍼지 UI (URL/도메인/전체) + 확인 다이얼로그
+- [x] 캐시 관리 페이지: 인기 콘텐츠 테이블
 
 ### 검증
 > 프록시를 통해 동일 URL 2회 요청 → 대시보드에서 히트율 50% 표시, MISS 1 / HIT 1
@@ -131,20 +131,20 @@
 > 목표: 자체 CA로 HTTPS 프록시 동작, Dashboard에서 인증서 다운로드/상태 확인
 
 ### 4-1. 자체 CA + HTTPS 프록시
-- [ ] 서버 시작 시 CA 키 쌍 생성 (rcgen), 영속화
-- [ ] 프록시 대상 도메인별 서버 인증서 자동 발급
-- [ ] axum HTTPS 서버 (포트 443) + SNI 기반 인증서 선택
-- [ ] CA 다운로드용 HTTP 엔드포인트 유지 (포트 8080)
+- [x] 서버 시작 시 CA 키 쌍 생성 (rcgen), 영속화
+- [x] 프록시 대상 도메인별 서버 인증서 자동 발급
+- [x] axum HTTPS 서버 (포트 443) + SNI 기반 인증서 선택
+- [x] CA 다운로드용 HTTP 엔드포인트 유지 (포트 8080)
 
 ### 4-2. Admin API — 인증서 관리
-- [ ] `GET /api/tls/ca` — CA 인증서 다운로드 (.crt)
-- [ ] `GET /api/tls/ca/mobileconfig` — iOS 프로파일 다운로드
-- [ ] `GET /api/tls/certificates` — 발급된 인증서 목록 (도메인, 만료일, 상태)
+- [x] `GET /api/tls/ca` — CA 인증서 다운로드 (.crt)
+- [x] `GET /api/tls/ca/mobileconfig` — iOS 프로파일 다운로드
+- [x] `GET /api/tls/certificates` — 발급된 인증서 목록 (도메인, 만료일, 상태)
 
 ### 4-3. Dashboard — 시스템 페이지 (v2)
-- [ ] CA 인증서 다운로드 버튼 (.crt + .mobileconfig)
-- [ ] 인증서 목록 테이블 (도메인, 발급일, 만료일, 상태 배지)
-- [ ] CA 설치 안내 문구 (iPad 수동 설치 / MDM 배포 가이드 링크)
+- [x] CA 인증서 다운로드 버튼 (.crt + .mobileconfig)
+- [x] 인증서 목록 테이블 (도메인, 발급일, 만료일, 상태 배지)
+- [x] CA 설치 안내 문구 (iPad 수동 설치 / MDM 배포 가이드 링크)
 
 ### 검증
 > 대시보드 시스템 페이지 → CA 인증서 다운로드 클릭 → 유효한 .crt 파일 저장
