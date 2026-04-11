@@ -8,7 +8,7 @@ export async function mockApi(
   method: string,
   path: string,
   data: unknown,
-  options?: { delay?: number },
+  options?: { delay?: number; status?: number },
 ) {
   await page.route(`**/api${path.startsWith('/') ? path : '/' + path}`, async (route) => {
     // 메서드가 일치하지 않으면 원래대로 처리
@@ -22,7 +22,7 @@ export async function mockApi(
     }
 
     await route.fulfill({
-      status: 200,
+      status: options?.status ?? 200,
       contentType: 'application/json',
       body: JSON.stringify(data),
     });

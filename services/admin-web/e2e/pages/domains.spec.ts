@@ -2,7 +2,8 @@
 /// API 모킹으로 프록시 테스트 기능의 성공/실패/에러 시나리오를 검증한다.
 import { test, expect } from '@playwright/test';
 import { mockApi } from '../fixtures/api-mock';
-import { createProxyStatusOnline } from '../factories/proxy.factory';
+import { createProxyStatusOnline, createRequestLogs } from '../factories/proxy.factory';
+import { createCacheStats } from '../factories/cache.factory';
 
 test.describe('도메인 관리 — 등록 도메인 목록', () => {
   test('기본 등록 도메인이 표시된다', async ({ page }) => {
@@ -87,5 +88,30 @@ test.describe('도메인 관리 — 프록시 테스트', () => {
 
     const button = page.getByTestId('proxy-test-button');
     await expect(button).toBeDisabled();
+  });
+
+  test('테스트 성공 후 프록시/캐시 쿼리가 즉시 갱신된다', async ({ page }) => {
+    // 초기 상태: request_count 0
+    await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline({ request_count: 0 }));
+    await mockApi(page, 'GET', '/proxy/requests', []);
+    await mockApi(page, 'GET', '/cache/stats', createCacheStats({ hit_count: 0, miss_count: 0, hit_rate: 0 }));
+    await mockApi(page, 'POST', '/proxy/test', {
+      success: true,
+      status_code: 200,
+      response_time_ms: 42,
+    });
+
+    await page.goto('/domains');
+
+    // 테스트 실행 전 갱신된 응답 준비 — invalidation 후 refetch 시 반환될 데이터
+    await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline({ request_count: 1 }));
+    await mockApi(page, 'GET', '/proxy/requests', createRequestLogs());
+    await mockApi(page, 'GET', '/cache/stats', createCacheStats({ miss_count: 1, hit_rate: 0 }));
+
+    await page.getByTestId('proxy-test-button').click();
+
+    // 테스트 결과 표시 확인
+    await expect(page.getByTestId('proxy-test-result')).toBeVisible();
+    await expect(page.getByText('HTTP 200')).toBeVisible();
   });
 });

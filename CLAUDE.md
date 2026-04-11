@@ -23,6 +23,7 @@
 - 사용자 가이드: `docs/guides/user-guide.md`
 - 디자인 시스템: `docs/design-system/` (smart-fire-hub 참조)
 - E2E 테스트 가이드: `docs/guides/playwright-e2e-guide.md`
+- **TC 작성 가이드라인**: `docs/guides/tc-guideline.md` — **기능 구현 시 반드시 참조**
 - 커밋 컨벤션: `docs/guides/commit-convention.md` — **커밋 시 반드시 참조**
 - 코딩 컨벤션: `docs/guides/coding-convention.md` — **코드 작성 시 반드시 참조**
 
