@@ -7,6 +7,8 @@ pub mod state;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use sha2::{Digest, Sha256};
+
 use axum::body::Body;
 use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri};
@@ -273,6 +275,21 @@ async fn ca_cert_handler(State(ps): State<ProxyState>) -> Response {
         .unwrap()
 }
 
+/// PEM 문자열을 SHA-256 해시하여 UUID v5 형식으로 변환
+/// Admin Server와 동일한 로직으로 CA가 같으면 UUID도 동일하게 유지
+fn pem_to_uuid(input: &str) -> String {
+    let hash = Sha256::digest(input.as_bytes());
+    let h = format!("{:x}", hash);
+    format!(
+        "{}-{}-5{}-8{}-{}",
+        &h[..8],
+        &h[8..12],
+        &h[13..16],
+        &h[17..20],
+        &h[20..32]
+    )
+}
+
 /// iOS 구성 프로파일 다운로드 (.mobileconfig)
 async fn ca_mobileconfig_handler(State(ps): State<ProxyState>) -> Response {
     // PEM 헤더·푸터·줄바꿈 제거하여 base64 DER 추출
@@ -282,6 +299,10 @@ async fn ca_mobileconfig_handler(State(ps): State<ProxyState>) -> Response {
         .filter(|l| !l.starts_with("-----"))
         .collect::<Vec<_>>()
         .join("");
+
+    // CA PEM 해시 기반 UUID 동적 생성 — Admin Server와 동일 CA라면 UUID도 동일
+    let inner_uuid = pem_to_uuid(pem);
+    let outer_uuid = pem_to_uuid(&format!("{}outer", pem));
 
     let profile = format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -304,7 +325,7 @@ async fn ca_mobileconfig_handler(State(ps): State<ProxyState>) -> Response {
             <key>PayloadType</key>
             <string>com.apple.security.root</string>
             <key>PayloadUUID</key>
-            <string>A1B2C3D4-E5F6-7890-ABCD-EF1234567890</string>
+            <string>{inner_uuid}</string>
             <key>PayloadVersion</key>
             <integer>1</integer>
         </dict>
@@ -316,7 +337,7 @@ async fn ca_mobileconfig_handler(State(ps): State<ProxyState>) -> Response {
     <key>PayloadType</key>
     <string>Configuration</string>
     <key>PayloadUUID</key>
-    <string>B2C3D4E5-F6A7-8901-BCDE-F12345678901</string>
+    <string>{outer_uuid}</string>
     <key>PayloadVersion</key>
     <integer>1</integer>
 </dict>

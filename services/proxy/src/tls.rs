@@ -94,7 +94,7 @@ impl TlsManager {
     pub fn get_or_issue(&self, domain: &str) -> Arc<CachedCert> {
         // 캐시 HIT 확인 (락 보유 중)
         {
-            let cache = self.cert_cache.lock().unwrap();
+            let cache = self.cert_cache.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(cached) = cache.get(domain) {
                 if cached.expires_at > Utc::now() {
                     return Arc::clone(cached);
@@ -112,7 +112,7 @@ impl TlsManager {
             }
         };
         {
-            let mut cache = self.cert_cache.lock().unwrap();
+            let mut cache = self.cert_cache.lock().unwrap_or_else(|e| e.into_inner());
             // double-check: 다른 스레드가 먼저 발급했을 수 있음
             if let Some(existing) = cache.get(domain) {
                 if existing.expires_at > Utc::now() {
@@ -152,7 +152,7 @@ impl TlsManager {
 
     /// 관리 API용: 현재 캐시된 인증서 목록 반환
     pub fn list_certificates(&self) -> Vec<CertInfo> {
-        let cache = self.cert_cache.lock().unwrap();
+        let cache = self.cert_cache.lock().unwrap_or_else(|e| e.into_inner());
         cache
             .values()
             .map(|c| CertInfo {
