@@ -163,3 +163,80 @@ impl TlsManager {
             .collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    /// CA 신규 생성 → PEM 비어있지 않음, 파일 생성 확인
+    #[test]
+    fn test_load_or_create_new() {
+        let dir = TempDir::new().unwrap();
+        let manager = TlsManager::load_or_create(dir.path()).unwrap();
+
+        assert!(!manager.ca_cert_pem.is_empty());
+        assert!(manager.ca_cert_pem.contains("BEGIN CERTIFICATE"));
+        assert!(dir.path().join("ca.key").exists());
+        assert!(dir.path().join("ca.crt").exists());
+    }
+
+    /// 기존 CA 로드 → 같은 PEM 반환 (파일 내용 동일)
+    #[test]
+    fn test_load_or_create_existing() {
+        let dir = TempDir::new().unwrap();
+        let pem1 = {
+            let m = TlsManager::load_or_create(dir.path()).unwrap();
+            m.ca_cert_pem.clone()
+        };
+        let pem2 = {
+            let m = TlsManager::load_or_create(dir.path()).unwrap();
+            m.ca_cert_pem.clone()
+        };
+        assert_eq!(pem1, pem2);
+    }
+
+    /// 도메인 인증서 발급 → domain/cert_pem/key_pem/expires 확인
+    #[test]
+    fn test_get_or_issue() {
+        let dir = TempDir::new().unwrap();
+        let manager = TlsManager::load_or_create(dir.path()).unwrap();
+
+        let cert = manager.get_or_issue("textbook.co.kr");
+
+        assert_eq!(cert.domain, "textbook.co.kr");
+        assert!(cert.cert_pem.contains("BEGIN CERTIFICATE"));
+        assert!(!cert.key_pem.is_empty());
+        assert!(cert.expires_at > cert.issued_at);
+    }
+
+    /// 같은 도메인 재요청 → 캐시 HIT (동일 Arc 인스턴스)
+    #[test]
+    fn test_cert_cache_hit() {
+        let dir = TempDir::new().unwrap();
+        let manager = TlsManager::load_or_create(dir.path()).unwrap();
+
+        let cert1 = manager.get_or_issue("test.example.com");
+        let cert2 = manager.get_or_issue("test.example.com");
+
+        assert!(Arc::ptr_eq(&cert1, &cert2));
+    }
+
+    /// 발급 후 목록에 포함 확인
+    #[test]
+    fn test_list_certificates() {
+        let dir = TempDir::new().unwrap();
+        let manager = TlsManager::load_or_create(dir.path()).unwrap();
+
+        assert!(manager.list_certificates().is_empty());
+
+        manager.get_or_issue("a.example.com");
+        manager.get_or_issue("b.example.com");
+
+        let list = manager.list_certificates();
+        assert_eq!(list.len(), 2);
+        let domains: Vec<&str> = list.iter().map(|c| c.domain.as_str()).collect();
+        assert!(domains.contains(&"a.example.com"));
+        assert!(domains.contains(&"b.example.com"));
+    }
+}
