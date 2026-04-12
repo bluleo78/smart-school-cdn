@@ -80,7 +80,7 @@ export function CachePage() {
       {/* E2E 테스트용 상태 토스트 — sonner와 병행 */}
       {toastMsg && (
         <div
-          className="fixed bottom-4 right-4 bg-gray-800 text-white text-sm px-4 py-3 rounded-lg shadow-lg z-50"
+          className="fixed bottom-4 right-4 bg-foreground text-background text-sm px-4 py-3 rounded-lg shadow-lg z-50"
           data-testid="purge-toast"
         >
           {toastMsg}
