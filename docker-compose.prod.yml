@@ -14,6 +14,7 @@ services:
     ports:
       - "8082:8080"   # HTTP 프록시 (로컬 테스트 전용)
       - "4443:443"    # HTTPS 프록시 (로컬 테스트 전용)
+      - "5353:53/udp" # DNS 서버 (로컬 테스트 전용 — prod 53과 충돌 방지)
     volumes:
       - cache_data:/app/cache
       - certs_data:/app/certs
@@ -21,6 +22,8 @@ services:
       - CACHE_DIR=/app/cache
       - CACHE_MAX_SIZE_GB=${CACHE_MAX_SIZE_GB:-5}
       - CERTS_DIR=/app/certs
+      - CDN_IP=${CDN_IP:-127.0.0.1}              # 로컬 테스트용 기본값
+      - DNS_UPSTREAM=${DNS_UPSTREAM:-8.8.8.8}
       - RUST_LOG=info
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8081/status"]
