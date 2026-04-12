@@ -10,7 +10,7 @@ import type { DomainRepository } from '../db/domain-repo.js';
 const PROXY_ADMIN_URL = process.env.PROXY_ADMIN_URL || 'http://localhost:8081';
 
 /** 프록시 서버 URL — HTTP 테스트 요청 대상 */
-const PROXY_URL = process.env.PROXY_URL || 'http://localhost:8080';
+const PROXY_URL = process.env.PROXY_HTTP_URL || 'http://localhost:8080';
 /** 프록시 HTTPS URL — HTTPS 테스트 요청 대상 */
 const PROXY_HTTPS_URL = process.env.PROXY_HTTPS_URL || 'https://localhost:443';
 /** HTTPS 테스트용 Agent — 자체 CA이므로 인증서 검증 생략 (내부 테스트 전용) */
