@@ -16,9 +16,8 @@ pub struct StorageClient {
 }
 
 impl StorageClient {
-    pub async fn connect(url: &str) -> Result<Self, tonic::transport::Error> {
-        let ch = tonic::transport::Channel::from_shared(url.to_string())
-            .expect("유효하지 않은 storage URL")
+    pub async fn connect(url: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let ch = tonic::transport::Channel::from_shared(url.to_string())?
             .timeout(Duration::from_secs(10))
             .connect()
             .await?;
@@ -48,14 +47,16 @@ impl StorageClient {
         body: Bytes,
         ttl: Option<Duration>,
     ) {
-        let _ = self.inner.put(PutRequest {
+        if let Err(e) = self.inner.put(PutRequest {
             key:          key.to_string(),
             url:          url.to_string(),
             domain:       domain.to_string(),
             content_type: content_type.unwrap_or_default(),
             body:         body.to_vec(),
             ttl_secs:     ttl.map(|d| d.as_secs()).unwrap_or(0),
-        }).await;
+        }).await {
+            tracing::warn!("캐시 저장 실패 (key: {}): {}", key, e);
+        }
     }
 
     /// 통계 조회

@@ -24,8 +24,7 @@ pub struct TlsClient {
 
 impl TlsClient {
     pub async fn connect(url: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let ch = tonic::transport::Channel::from_shared(url.to_string())
-            .expect("유효하지 않은 TLS URL")
+        let ch = tonic::transport::Channel::from_shared(url.to_string())?
             .connect()
             .await?;
         let mut inner = TlsServiceClient::new(ch);
@@ -59,7 +58,7 @@ impl TlsClient {
     }
 
     /// CA 인증서 PEM (mobileconfig 생성용)
-    pub async fn get_ca_cert_pem(&self) -> String {
+    pub fn get_ca_cert_pem(&self) -> String {
         self.ca_cert_pem.clone()
     }
 

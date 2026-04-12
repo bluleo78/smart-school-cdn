@@ -347,7 +347,7 @@ async fn proxy_handler(
 
 /// CA 인증서 다운로드 — iPad/PC 설치용 (.crt)
 async fn ca_cert_handler(State(ps): State<ProxyState>) -> Response {
-    let pem = ps.tls_client.lock().await.get_ca_cert_pem().await;
+    let pem = ps.tls_client.lock().await.get_ca_cert_pem();
     Response::builder()
         .status(StatusCode::OK)
         .header("Content-Type", "application/x-pem-file")
@@ -375,7 +375,7 @@ fn pem_to_uuid(input: &str) -> String {
 
 /// iOS 구성 프로파일 다운로드 (.mobileconfig)
 async fn ca_mobileconfig_handler(State(ps): State<ProxyState>) -> Response {
-    let pem = ps.tls_client.lock().await.get_ca_cert_pem().await;
+    let pem = ps.tls_client.lock().await.get_ca_cert_pem();
     let b64: String = pem
         .lines()
         .filter(|l| !l.starts_with("-----"))
@@ -547,7 +547,7 @@ async fn cache_purge_handler(
 
 /// CA 인증서 PEM 반환 — Admin Server 중계용
 async fn tls_ca_handler(State(admin): State<AdminState>) -> Response {
-    let pem = admin.tls_client.lock().await.get_ca_cert_pem().await;
+    let pem = admin.tls_client.lock().await.get_ca_cert_pem();
     Response::builder()
         .status(StatusCode::OK)
         .header("Content-Type", "application/x-pem-file")
