@@ -2,12 +2,15 @@
 set -euo pipefail
 
 # Smart School CDN 운영 배포 스크립트
-# Usage: ./scripts/deploy.sh [proxy|admin-server|admin-web|all]
+# Usage: ./scripts/deploy.sh [proxy|storage-service|tls-service|dns-service|admin-server|admin-web|all]
 #
-# proxy        — Rust 프록시 (HTTP :8080, HTTPS :443, 관리 API :8081)
-# admin-server — Fastify API (:4001 내부)
-# admin-web    — nginx 정적 서빙 + API 프록시 (:7777)
-# all          — 전체 재배포 (기본값)
+# proxy           — Rust 프록시 (HTTP :8080, HTTPS :443, 관리 API :8081)
+# storage-service — 캐시 스토리지 gRPC 서비스 (:50051)
+# tls-service     — TLS 인증서 gRPC 서비스 (:50052)
+# dns-service     — DNS gRPC + UDP 서비스 (:50053, :53)
+# admin-server    — Fastify API (:4001 내부)
+# admin-web       — nginx 정적 서빙 + API 프록시 (:7777)
+# all             — 전체 재배포 (기본값)
 #
 # 흐름:
 #   1. docker buildx로 멀티플랫폼 이미지 빌드 + GHCR push
@@ -63,6 +66,24 @@ build_and_push() {
         -t "$REGISTRY/admin-server:latest" \
         -f services/admin-server/Dockerfile --push .
       ;;
+    storage-service)
+      log "Building + pushing storage-service..."
+      docker buildx build --platform "$PLATFORM" --no-cache \
+        -t "$REGISTRY/storage-service:latest" \
+        -f services/storage-service/Dockerfile --push .
+      ;;
+    tls-service)
+      log "Building + pushing tls-service..."
+      docker buildx build --platform "$PLATFORM" --no-cache \
+        -t "$REGISTRY/tls-service:latest" \
+        -f services/tls-service/Dockerfile --push .
+      ;;
+    dns-service)
+      log "Building + pushing dns-service..."
+      docker buildx build --platform "$PLATFORM" --no-cache \
+        -t "$REGISTRY/dns-service:latest" \
+        -f services/dns-service/Dockerfile --push .
+      ;;
     admin-web)
       log "Building + pushing admin-web..."
       docker buildx build --platform "$PLATFORM" --no-cache \
@@ -102,12 +123,15 @@ verify_service() {
 TARGET=${1:-all}
 
 case $TARGET in
-  proxy)        SERVICES=("proxy") ;;
-  admin-server) SERVICES=("admin-server") ;;
-  admin-web)    SERVICES=("admin-web") ;;
-  admin)        SERVICES=("admin-server" "admin-web") ;;
-  all)          SERVICES=("proxy" "admin-server" "admin-web") ;;
-  *)            error "알 수 없는 대상: $TARGET (유효값: proxy | admin-server | admin-web | admin | all)" ;;
+  proxy)           SERVICES=("proxy") ;;
+  storage-service) SERVICES=("storage-service") ;;
+  tls-service)     SERVICES=("tls-service") ;;
+  dns-service)     SERVICES=("dns-service") ;;
+  admin-server)    SERVICES=("admin-server") ;;
+  admin-web)       SERVICES=("admin-web") ;;
+  admin)           SERVICES=("admin-server" "admin-web") ;;
+  all)             SERVICES=("storage-service" "tls-service" "dns-service" "proxy" "admin-server" "admin-web") ;;
+  *)               error "알 수 없는 대상: $TARGET (유효값: proxy | storage-service | tls-service | dns-service | admin-server | admin-web | admin | all)" ;;
 esac
 
 log "=== 빌드 + Push → GHCR ==="
