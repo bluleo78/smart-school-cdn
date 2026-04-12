@@ -103,8 +103,9 @@ case $TARGET in
   proxy)        SERVICES=("proxy") ;;
   admin-server) SERVICES=("admin-server") ;;
   admin-web)    SERVICES=("admin-web") ;;
+  admin)        SERVICES=("admin-server" "admin-web") ;;
   all)          SERVICES=("proxy" "admin-server" "admin-web") ;;
-  *)            error "알 수 없는 대상: $TARGET (유효값: proxy | admin-server | admin-web | all)" ;;
+  *)            error "알 수 없는 대상: $TARGET (유효값: proxy | admin-server | admin-web | admin | all)" ;;
 esac
 
 log "=== 빌드 + Push → GHCR ==="
