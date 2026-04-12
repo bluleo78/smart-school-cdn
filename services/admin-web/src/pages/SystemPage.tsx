@@ -1,7 +1,10 @@
-/** 시스템 페이지 v2
+/** 시스템 페이지 v3
  * Card·Skeleton 기반, 에러 상태 처리, formatUptime 공통 유틸 사용
+ * 마이크로서비스 상태 그리드 + 장애 배너 추가
  */
 import { useProxyStatus } from '../hooks/useProxyStatus';
+import { useSystemStatus } from '../api/system';
+import { ServiceStatusCard } from '../components/system/ServiceStatusCard';
 import { useCacheStats } from '../hooks/useCacheStats';
 import { Link } from 'react-router';
 import { Button } from '../components/ui/button';
@@ -12,6 +15,15 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { downloadCACert, downloadMobileConfig } from '../api/tls';
 import { useCertificates } from '../hooks/useTls';
 import { formatUptime } from '../lib/format';
+import type { SystemStatus } from '../api/system';
+
+/** 서비스 키 → 표시 레이블 매핑 (SystemStatus 타입과 동기화) */
+const SERVICE_LABELS: Record<keyof SystemStatus, string> = {
+  proxy: 'Proxy',
+  storage: 'Storage',
+  tls: 'TLS',
+  dns: 'DNS',
+};
 
 /** 인증서 만료일 기준 상태 배지 */
 function certStatusBadge(expiresAt: string) {
@@ -35,6 +47,12 @@ export function SystemPage() {
   const { data: status, isLoading: statusLoading, error: statusError } = useProxyStatus();
   const { data: cache, isLoading: cacheLoading, error: cacheError } = useCacheStats();
   const { data: certificates, isLoading: certsLoading, error: certsError } = useCertificates();
+  const { data: systemStatus } = useSystemStatus();
+
+  // 하나라도 오프라인인 서비스가 있으면 장애 배너 표시
+  const anyOffline = systemStatus
+    ? !systemStatus.proxy.online || !systemStatus.storage.online || !systemStatus.tls.online || !systemStatus.dns.online
+    : false;
 
   const diskUsageRatio =
     cache && cache.max_size_bytes > 0
@@ -49,6 +67,26 @@ export function SystemPage() {
   return (
     <div className="space-y-6">
       <h2 className="text-2xl font-semibold tracking-tight">시스템</h2>
+
+      {/* 마이크로서비스 상태 그리드 */}
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        {(['proxy', 'storage', 'tls', 'dns'] as const).map((key) => (
+          <ServiceStatusCard
+            key={key}
+            name={SERVICE_LABELS[key]}
+            online={systemStatus?.[key]?.online ?? true}
+            latency_ms={systemStatus?.[key]?.latency_ms ?? 0}
+          />
+        ))}
+      </div>
+
+      {/* 서비스 장애 배너 */}
+      {anyOffline && (
+        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-destructive">
+          <p className="font-semibold">일부 서비스가 오프라인입니다.</p>
+          <p className="mt-1 text-sm">서비스 상태를 확인하세요.</p>
+        </div>
+      )}
 
       {/* 디스크 사용량 경고 배너 */}
       {isDiskWarning && (
