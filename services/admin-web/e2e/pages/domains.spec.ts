@@ -22,7 +22,8 @@ test.describe('도메인 관리 — 로딩 및 에러 상태', () => {
 
     await page.goto('/domains');
 
-    await expect(page.getByText('로딩 중…')).toBeVisible();
+    // Skeleton 컴포넌트로 로딩 상태 표시 (텍스트 대신 스켈레톤)
+    await expect(page.locator('[data-testid="domains-table"], .animate-pulse').first()).toBeVisible();
     // 로딩 완료 후 테이블이 나타나야 한다
     await expect(page.getByTestId('domains-table')).toBeVisible();
   });
@@ -266,5 +267,52 @@ test.describe('도메인 관리 — 도메인 삭제', () => {
 
     await expect(page.getByTestId('delete-domain-dialog')).not.toBeVisible();
     await expect(page.getByTestId('domain-side-panel')).not.toBeVisible();
+  });
+});
+
+test.describe('도메인 관리 — 사이드 패널 X 버튼', () => {
+  test('X 버튼 클릭 시 사이드 패널이 닫힌다', async ({ page }) => {
+    await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
+    await mockApi(page, 'GET', '/proxy/requests', []);
+    await mockApi(page, 'GET', '/domains', createDomains());
+
+    await page.goto('/domains');
+
+    await page.getByTestId('domain-row-textbook.com').click();
+    await expect(page.getByTestId('domain-side-panel')).toBeVisible();
+
+    await page.getByTestId('panel-close-button').click();
+    await expect(page.getByTestId('domain-side-panel')).not.toBeVisible();
+  });
+});
+
+test.describe('도메인 관리 — 다이얼로그 ESC 닫기', () => {
+  test('추가 다이얼로그에서 ESC 키를 누르면 닫힌다', async ({ page }) => {
+    await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
+    await mockApi(page, 'GET', '/proxy/requests', []);
+    await mockApi(page, 'GET', '/domains', []);
+
+    await page.goto('/domains');
+
+    await page.getByTestId('add-domain-button').click();
+    await expect(page.getByTestId('add-domain-dialog')).toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('add-domain-dialog')).not.toBeVisible();
+  });
+
+  test('삭제 확인 다이얼로그에서 ESC 키를 누르면 닫힌다', async ({ page }) => {
+    await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
+    await mockApi(page, 'GET', '/proxy/requests', []);
+    await mockApi(page, 'GET', '/domains', createDomains());
+
+    await page.goto('/domains');
+
+    await page.getByTestId('domain-row-textbook.com').click();
+    await page.getByTestId('panel-delete-button').click();
+    await expect(page.getByTestId('delete-domain-dialog')).toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('delete-domain-dialog')).not.toBeVisible();
   });
 });
