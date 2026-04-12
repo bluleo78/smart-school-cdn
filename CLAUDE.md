@@ -24,11 +24,20 @@ pnpm ship:proxy          # Proxy만 재배포
 pnpm ship:admin          # Admin Server+Web만 재배포
 ```
 
-- 스크립트: `scripts/deploy.sh [proxy|admin|all]`
-- 빌드 → `docker compose -f docker-compose.prod.yml build --no-cache`
-- 배포 → `docker compose up -d --force-recreate`
-- 검증 → 컨테이너 상태 자동 확인 (10초 대기)
-- Admin Web은 `admin-server` 이미지에 nginx로 내장됨 (별도 서비스 없음)
+**흐름:** `docker buildx` 멀티플랫폼 빌드 → `ghcr.io/bluleo78/smart-school-cdn` push → `~/prod/smart-school-cdn` 에서 pull + up
+
+**최초 prod 세팅:**
+```bash
+git clone git@github.com:bluleo78/smart-school-cdn.git ~/prod/smart-school-cdn
+cp deploy/docker-compose.yml ~/prod/smart-school-cdn/docker-compose.yml
+cp .env.example ~/prod/smart-school-cdn/.env
+# .env 편집 후
+pnpm ship
+```
+
+- Registry: `ghcr.io/bluleo78/smart-school-cdn/{proxy|admin}:latest`
+- Prod compose: `deploy/docker-compose.yml` (이미지 참조) / 개발 빌드: `docker-compose.prod.yml`
+- Admin Web은 `admin` 이미지에 nginx로 내장됨
 
 ## Key Files
 

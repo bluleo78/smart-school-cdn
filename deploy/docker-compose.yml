@@ -1,0 +1,50 @@
+# ~/prod/smart-school-cdn/docker-compose.yml
+# 운영 서버 런타임 — GHCR 이미지를 pull하여 실행한다.
+# 최초 세팅:
+#   cp <repo>/deploy/docker-compose.yml ~/prod/smart-school-cdn/docker-compose.yml
+#   cp <repo>/.env.example ~/prod/smart-school-cdn/.env
+#   # .env 편집 후 pnpm ship
+services:
+  proxy:
+    image: ghcr.io/bluleo78/smart-school-cdn/proxy:latest
+    restart: always
+    ports:
+      - "8080:8080"
+      - "443:443"
+    volumes:
+      - cache_data:/app/cache
+      - certs_data:/app/certs
+    environment:
+      - CACHE_DIR=/app/cache
+      - CACHE_MAX_SIZE_GB=${CACHE_MAX_SIZE_GB:-20}
+      - CERTS_DIR=/app/certs
+      - RUST_LOG=info
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  admin:
+    image: ghcr.io/bluleo78/smart-school-cdn/admin:latest
+    restart: always
+    ports:
+      - "${WEB_PORT:-7777}:3000"
+    volumes:
+      - admin_data:/app/data
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DB_PATH=/app/data/admin.db
+      - PROXY_ADMIN_URL=http://proxy:8081
+      - PROXY_HTTP_URL=http://proxy:8080
+      - PROXY_HTTPS_URL=https://proxy:443
+    depends_on:
+      proxy:
+        condition: service_healthy
+
+volumes:
+  cache_data:
+  certs_data:
+  admin_data:
