@@ -1,1 +1,33 @@
 @import "tailwindcss";
+
+@theme {
+  /* 배경 / 텍스트 */
+  --color-background: oklch(1 0 0);
+  --color-foreground: oklch(0.145 0 0);
+
+  /* 카드 */
+  --color-card: oklch(1 0 0);
+  --color-card-foreground: oklch(0.145 0 0);
+
+  /* 뮤트 (연회색 배경·보조 텍스트) */
+  --color-muted: oklch(0.97 0 0);
+  --color-muted-foreground: oklch(0.556 0 0);
+
+  /* 테두리 */
+  --color-border: oklch(0.922 0 0);
+
+  /* 프라이머리 (버튼 등) */
+  --color-primary: oklch(0.205 0 0);
+  --color-primary-foreground: oklch(0.985 0 0);
+
+  /* 디스트럭티브 (삭제 등) */
+  --color-destructive: oklch(0.577 0.245 27.325);
+  --color-destructive-foreground: oklch(0.985 0 0);
+
+  /* 액센트 (활성 네비 등) */
+  --color-accent: oklch(0.97 0 0);
+  --color-accent-foreground: oklch(0.205 0 0);
+
+  /* 포커스 링 */
+  --color-ring: oklch(0.708 0 0);
+}
