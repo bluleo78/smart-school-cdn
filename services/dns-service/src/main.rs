@@ -39,16 +39,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    // DNS UDP 서버 (포트 53) — 백그라운드 태스크로 실행
+    // gRPC 서버 (포트 50053)
+    let addr = "0.0.0.0:50053".parse()?;
+    tracing::info!("dns-service 시작 — UDP :53, gRPC :50053");
+
+    // DNS UDP 서버를 태스크로 실행하고 핸들을 보관 — 종료 시 감지
+    // domain_map 이동 전에 클론
     let dns_map = domain_map.clone();
-    tokio::spawn(async move {
+    let svc = DnsServiceServer::new(DnsGrpc { domain_map });
+    let dns_handle = tokio::spawn(async move {
         dns::run_dns_server(dns_map, cdn_ip, dns_upstream).await;
     });
 
-    // gRPC 서버 (포트 50053) — SyncDomains + Health
-    let svc = DnsServiceServer::new(DnsGrpc { domain_map });
-    let addr = "0.0.0.0:50053".parse()?;
-    tracing::info!("dns-service 시작 — UDP :53, gRPC :50053");
-    Server::builder().add_service(svc).serve(addr).await?;
+    tokio::select! {
+        res = dns_handle => {
+            tracing::error!("DNS UDP 서버 종료: {:?}", res);
+            std::process::exit(1);
+        }
+        res = Server::builder().add_service(svc).serve(addr) => {
+            res?;
+        }
+        _ = tokio::signal::ctrl_c() => {
+            tracing::info!("종료 신호 수신");
+        }
+    }
+
     Ok(())
 }
