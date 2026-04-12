@@ -41,8 +41,13 @@ const port = Number(process.env.PORT) || 4001;
 try {
   await app.listen({ port, host: '0.0.0.0' });
   app.log.info(`Admin Server listening on port ${port}`);
-  // Proxy 재시작 대비: 시작 시 현재 도메인 목록을 Proxy에 push
-  await syncToProxy(domainRepo);
+  // Proxy가 준비될 때까지 재시도 — dev 환경에서 Proxy 컴파일 완료 전에 sync 실패하는 레이스 컨디션 방지
+  (async () => {
+    for (let i = 0; i < 10; i++) {
+      if (await syncToProxy(domainRepo)) return;
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+  })();
 } catch (err) {
   app.log.error(err);
   process.exit(1);

@@ -7,13 +7,15 @@ import type { DomainRepository } from '../db/domain-repo.js';
 const PROXY_ADMIN_URL = process.env.PROXY_ADMIN_URL || 'http://localhost:8081';
 
 /** 현재 전체 도메인 목록을 Proxy admin API에 push (실패 시 로그만, 클라이언트는 성공) */
-export async function syncToProxy(domainRepo: DomainRepository): Promise<void> {
+export async function syncToProxy(domainRepo: DomainRepository): Promise<boolean> {
   try {
     const domains = domainRepo.findAll().map(({ host, origin }) => ({ host, origin }));
     await axios.post(`${PROXY_ADMIN_URL}/domains`, { domains }, { timeout: 3000 });
     console.log(`[sync] Proxy에 도메인 ${domains.length}건 동기화 완료`);
+    return true;
   } catch (err) {
     console.error('[sync] Proxy 도메인 동기화 실패:', err instanceof Error ? err.message : err);
+    return false;
   }
 }
 
