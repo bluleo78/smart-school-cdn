@@ -4,6 +4,14 @@ import { createCertList } from '../factories/tls.factory';
 
 test.describe('시스템 페이지', () => {
   test.beforeEach(async ({ page }) => {
+    // admin-server 없이도 안정적으로 동작하도록 goto 전에 모킹
+    await mockApi(page, 'GET', '/proxy/status', { online: true, uptime: 3600 });
+    await mockApi(page, 'GET', '/cache/stats', {
+      total_size_bytes: 500_000_000,
+      max_size_bytes: 5_000_000_000,
+      hit_count: 100, miss_count: 50, bypass_count: 10,
+      hit_rate: 66.7, entry_count: 42, by_domain: [], hit_rate_history: [],
+    });
     await page.goto('/system');
   });
 
