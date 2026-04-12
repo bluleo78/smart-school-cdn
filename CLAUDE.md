@@ -16,6 +16,20 @@
 - `pnpm dev:infra` — Docker Compose 기동 후 dev
 - `pnpm docker:build` / `pnpm docker:up` / `pnpm docker:down`
 
+## Deploy
+
+```bash
+pnpm deploy              # 전체 재배포 (proxy + admin)
+pnpm deploy:proxy        # Proxy만 재배포
+pnpm deploy:admin        # Admin Server+Web만 재배포
+```
+
+- 스크립트: `scripts/deploy.sh [proxy|admin|all]`
+- 빌드 → `docker compose -f docker-compose.prod.yml build --no-cache`
+- 배포 → `docker compose up -d --force-recreate`
+- 검증 → 컨테이너 상태 자동 확인 (10초 대기)
+- Admin Web은 `admin-server` 이미지에 nginx로 내장됨 (별도 서비스 없음)
+
 ## Key Files
 
 - 아키텍처: `docs/architecture.md`
