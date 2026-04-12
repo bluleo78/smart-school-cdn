@@ -1,7 +1,7 @@
 # === Stage 1: Build ===
 FROM rust:1-alpine AS build
 # musl-dev: alpine에서 C 링킹에 필요
-RUN apk add --no-cache musl-dev
+RUN apk add --no-cache musl-dev protobuf-dev
 WORKDIR /app
 # workspace 루트 파일 먼저 복사 (레이어 캐시 최적화)
 COPY Cargo.toml Cargo.lock ./
