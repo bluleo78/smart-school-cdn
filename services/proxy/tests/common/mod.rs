@@ -11,7 +11,7 @@ use proxy::cache::CacheLayer;
 use proxy::config::ProxyConfig;
 use proxy::state::{AppState, SharedState};
 use proxy::tls::TlsManager;
-use proxy::{build_admin_router, build_proxy_router, ProxyState};
+use proxy::{DomainMap, build_admin_router, build_proxy_router, ProxyState};
 use tokio::sync::RwLock;
 
 /// 한 번의 테스트에 필요한 엔드포인트 주소 묶음
@@ -39,7 +39,7 @@ pub async fn setup_env() -> TestEnv {
     // 2. proxy 설정 — "test.local"을 mock origin으로 라우팅
     let mock_origin_url = format!("http://127.0.0.1:{origin_port}");
     let mut domains = HashMap::new();
-    domains.insert("test.local".to_string(), mock_origin_url);
+    domains.insert("test.local".to_string(), mock_origin_url.clone());
     let proxy_config = Arc::new(ProxyConfig::with_domains(domains));
 
     // 3. 공유 상태 + HTTP 클라이언트 + CacheLayer + TlsManager
@@ -49,6 +49,13 @@ pub async fn setup_env() -> TestEnv {
     let tls_tmp = tempfile::tempdir().unwrap();
     let tls_manager = TlsManager::load_or_create(tls_tmp.path()).unwrap();
 
+    // domain_map — proxy_handler가 domain_map을 사용하므로 test.local을 주입한다
+    let domain_map: DomainMap = Arc::new(RwLock::new({
+        let mut m = HashMap::new();
+        m.insert("test.local".to_string(), mock_origin_url.clone());
+        m
+    }));
+
     // 4. 프록시 라우터 → 임의 포트 바인드
     let ps = ProxyState {
         shared: shared_state.clone(),
@@ -56,6 +63,7 @@ pub async fn setup_env() -> TestEnv {
         http_client,
         cache: cache.clone(),
         tls_manager: tls_manager.clone(),
+        domain_map: domain_map.clone(),
     };
     let proxy_router = build_proxy_router(ps);
     let proxy_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -65,7 +73,7 @@ pub async fn setup_env() -> TestEnv {
     });
 
     // 5. 관리 API 라우터 → 임의 포트 바인드
-    let admin_router = build_admin_router(shared_state.clone(), cache, tls_manager);
+    let admin_router = build_admin_router(shared_state.clone(), cache, tls_manager, domain_map);
     let admin_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let admin_port = admin_listener.local_addr().unwrap().port();
     tokio::spawn(async move {

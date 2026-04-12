@@ -4,8 +4,10 @@ pub mod tls;
 pub mod config;
 pub mod state;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::sync::RwLock;
 
 use sha2::{Digest, Sha256};
 
@@ -20,6 +22,9 @@ use config::ProxyConfig;
 use state::{RequestLog, SharedState};
 use crate::tls::TlsManager;
 
+/// 런타임에 교체 가능한 도메인→원본서버 맵
+pub type DomainMap = Arc<RwLock<HashMap<String, String>>>;
+
 /// 프록시 핸들러 공유 상태
 #[derive(Clone)]
 pub struct ProxyState {
@@ -28,14 +33,16 @@ pub struct ProxyState {
     pub http_client: reqwest::Client,
     pub cache: Arc<CacheLayer>,
     pub tls_manager: Arc<TlsManager>,
+    pub domain_map: DomainMap,
 }
 
-/// 관리 API 핸들러 상태 — (공유상태, 캐시, TLS관리자)
+/// 관리 API 핸들러 상태 — (공유상태, 캐시, TLS관리자, 도메인맵)
 #[derive(Clone)]
 struct AdminState {
     state: SharedState,
     cache: Arc<CacheLayer>,
     tls_manager: Arc<TlsManager>,
+    domain_map: DomainMap,
 }
 
 /// 기본 캐시 TTL (Cache-Control 헤더 없을 때)
@@ -55,8 +62,9 @@ pub fn build_admin_router(
     shared_state: SharedState,
     cache: Arc<CacheLayer>,
     tls_manager: Arc<TlsManager>,
+    domain_map: DomainMap,
 ) -> Router {
-    let admin_state = AdminState { state: shared_state, cache, tls_manager };
+    let admin_state = AdminState { state: shared_state, cache, tls_manager, domain_map };
     Router::new()
         .route("/status", get(status_handler))
         .route("/requests", get(requests_handler))
@@ -65,6 +73,7 @@ pub fn build_admin_router(
         .route("/cache/purge", delete(cache_purge_handler))
         .route("/tls/ca", get(tls_ca_handler))
         .route("/tls/certificates", get(tls_certificates_handler))
+        .route("/domains", axum::routing::post(update_domains_handler))
         .with_state(admin_state)
 }
 
@@ -79,7 +88,6 @@ async fn proxy_handler(
 ) -> Response {
     let start = Instant::now();
     let state = ps.shared;
-    let config = ps.config;
     let client = ps.http_client;
     let cache = ps.cache;
 
@@ -88,8 +96,14 @@ async fn proxy_handler(
         None => return (StatusCode::BAD_REQUEST, "Missing Host header").into_response(),
     };
 
-    let origin = match config.get_origin(&host) {
-        Some(o) => o.to_string(),
+    // domain_map에서 호스트:포트 → 호스트 추출 후 원본 서버 URL 조회
+    let origin = {
+        let map = ps.domain_map.read().await;
+        let domain = host.split(':').next().unwrap_or(&host);
+        map.get(domain).cloned()
+    };
+    let origin = match origin {
+        Some(o) => o,
         None => {
             tracing::warn!(host = %host, "미등록 도메인 요청");
             return (StatusCode::NOT_FOUND, "Domain not configured").into_response();
@@ -453,4 +467,106 @@ async fn tls_ca_handler(State(admin): State<AdminState>) -> Response {
 /// 발급된 도메인 인증서 목록 반환
 async fn tls_certificates_handler(State(admin): State<AdminState>) -> impl IntoResponse {
     Json(admin.tls_manager.list_certificates())
+}
+
+/// POST /domains 요청 바디 — 단일 도메인 항목
+#[derive(serde::Deserialize)]
+struct DomainEntry {
+    host: String,
+    origin: String,
+}
+
+/// POST /domains 요청 바디 — 전체 도메인 목록
+#[derive(serde::Deserialize)]
+struct DomainsPayload {
+    domains: Vec<DomainEntry>,
+}
+
+/// Admin Server에서 도메인 목록을 push할 때 호출 — 전체 맵을 교체한다
+async fn update_domains_handler(
+    State(admin): State<AdminState>,
+    Json(payload): Json<DomainsPayload>,
+) -> StatusCode {
+    let mut map = admin.domain_map.write().await;
+    map.clear();
+    for entry in payload.domains {
+        map.insert(entry.host, entry.origin);
+    }
+    tracing::info!(count = map.len(), "도메인 맵 갱신");
+    StatusCode::OK
+}
+
+#[cfg(test)]
+mod domain_sync_tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use tower::util::ServiceExt;
+
+    fn make_admin_state() -> (DomainMap, Router<()>) {
+        let domain_map: DomainMap = Arc::new(RwLock::new({
+            let mut m = std::collections::HashMap::new();
+            m.insert("httpbin.org".to_string(), "https://httpbin.org".to_string());
+            m
+        }));
+        use std::path::PathBuf;
+        let cache = Arc::new(crate::cache::CacheLayer::new(
+            PathBuf::from("/tmp/test-cache-domains"),
+            1024 * 1024,
+        ));
+        let router = Router::new()
+            .route("/domains", axum::routing::post(update_domains_handler))
+            .with_state(AdminState {
+                state: Arc::new(RwLock::new(crate::state::AppState::new())),
+                cache,
+                tls_manager: crate::tls::TlsManager::load_or_create(
+                    &PathBuf::from("/tmp/test-certs-domains"),
+                ).unwrap(),
+                domain_map: domain_map.clone(),
+            });
+        (domain_map, router)
+    }
+
+    #[tokio::test]
+    async fn post_domains가_도메인_맵을_갱신한다() {
+        let (domain_map, router) = make_admin_state();
+
+        let body = serde_json::json!({
+            "domains": [
+                { "host": "textbook.com", "origin": "https://textbook.com" },
+                { "host": "cdn.edu.kr", "origin": "https://cdn.edu.kr" }
+            ]
+        });
+        let req = Request::builder()
+            .method("POST")
+            .uri("/domains")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_string(&body).unwrap()))
+            .unwrap();
+
+        let resp = router.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let map = domain_map.read().await;
+        assert_eq!(map.get("textbook.com"), Some(&"https://textbook.com".to_string()));
+        assert_eq!(map.get("cdn.edu.kr"), Some(&"https://cdn.edu.kr".to_string()));
+        assert!(!map.contains_key("httpbin.org"));
+    }
+
+    #[tokio::test]
+    async fn post_domains_빈_목록은_맵을_비운다() {
+        let (domain_map, router) = make_admin_state();
+
+        let body = serde_json::json!({ "domains": [] });
+        let req = Request::builder()
+            .method("POST")
+            .uri("/domains")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_string(&body).unwrap()))
+            .unwrap();
+
+        let resp = router.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert!(domain_map.read().await.is_empty());
+    }
 }

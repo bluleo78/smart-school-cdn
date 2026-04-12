@@ -12,11 +12,13 @@ use rustls::server::{ClientHello, ResolvesServerCert};
 use rustls::sign::CertifiedKey;
 use axum_server::tls_rustls::RustlsConfig;
 
+use std::collections::HashMap;
+
 use proxy::cache::CacheLayer;
 use proxy::config::ProxyConfig;
 use proxy::state::{AppState, SharedState};
 use proxy::tls::TlsManager;
-use proxy::{build_admin_router, build_proxy_router, ProxyState};
+use proxy::{DomainMap, build_admin_router, build_proxy_router, ProxyState};
 
 /// rustls SNI 핸들러 — 클라이언트의 서버명에 맞는 인증서를 TlsManager에서 조회·발급
 struct SniCertResolver {
@@ -51,6 +53,14 @@ async fn main() {
     let shared_state: SharedState = Arc::new(RwLock::new(AppState::new()));
     let proxy_config = Arc::new(ProxyConfig::default_config());
     let http_client = reqwest::Client::new();
+
+    // 도메인 맵 초기화 — Admin Server가 시작 시 push로 갱신한다
+    let domain_map: DomainMap = Arc::new(RwLock::new({
+        let mut m = HashMap::new();
+        // 개발/테스트용 기본값: Admin Server push 전까지 사용
+        m.insert("httpbin.org".to_string(), "https://httpbin.org".to_string());
+        m
+    }));
 
     // 캐시 레이어 생성 — 기본 20GB, 캐시 디렉토리 ./cache/
     let cache_dir = PathBuf::from(
@@ -88,9 +98,10 @@ async fn main() {
         http_client,
         cache: cache.clone(),
         tls_manager: tls_manager.clone(),
+        domain_map: domain_map.clone(),
     };
     let proxy_router = build_proxy_router(ps);
-    let admin_router = build_admin_router(shared_state.clone(), cache, tls_manager.clone());
+    let admin_router = build_admin_router(shared_state.clone(), cache, tls_manager.clone(), domain_map.clone());
 
     // rustls ServerConfig — SNI 기반 인증서 선택
     let server_config = ServerConfig::builder()

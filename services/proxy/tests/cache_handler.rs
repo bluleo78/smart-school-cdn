@@ -13,7 +13,7 @@ use proxy::cache::CacheLayer;
 use proxy::config::ProxyConfig;
 use proxy::state::{AppState, SharedState};
 use proxy::tls::TlsManager;
-use proxy::{build_admin_router, build_proxy_router, ProxyState};
+use proxy::{DomainMap, build_admin_router, build_proxy_router, ProxyState};
 use serde_json::{json, Value};
 use tokio::sync::RwLock;
 
@@ -48,6 +48,9 @@ async fn setup_cache_env() -> CacheTestEnv {
     let tls_tmp = tempfile::tempdir().unwrap();
     let tls_manager = TlsManager::load_or_create(tls_tmp.path()).unwrap();
 
+    // 도메인 맵 — 빈 맵으로 초기화 (캐시 핸들러 테스트에서는 프록시 경유 불필요)
+    let domain_map: DomainMap = Arc::new(RwLock::new(HashMap::new()));
+
     // 프록시 라우터 — admin과 별도 포트
     let proxy_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let ps = ProxyState {
@@ -56,6 +59,7 @@ async fn setup_cache_env() -> CacheTestEnv {
         http_client: client,
         cache: cache.clone(),
         tls_manager: tls_manager.clone(),
+        domain_map: domain_map.clone(),
     };
     let proxy_router = build_proxy_router(ps);
     tokio::spawn(async move { axum::serve(proxy_listener, proxy_router).await.unwrap() });
@@ -63,7 +67,7 @@ async fn setup_cache_env() -> CacheTestEnv {
     // 관리 API 라우터 — cache 포함
     let admin_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let admin_port = admin_listener.local_addr().unwrap().port();
-    let admin_router = build_admin_router(state, cache, tls_manager);
+    let admin_router = build_admin_router(state, cache, tls_manager, domain_map);
     tokio::spawn(async move { axum::serve(admin_listener, admin_router).await.unwrap() });
 
     CacheTestEnv {

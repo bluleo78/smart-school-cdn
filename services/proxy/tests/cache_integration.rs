@@ -14,7 +14,7 @@ use proxy::cache::CacheLayer;
 use proxy::config::ProxyConfig;
 use proxy::state::{AppState, SharedState};
 use proxy::tls::TlsManager;
-use proxy::{build_admin_router, build_proxy_router, ProxyState};
+use proxy::{DomainMap, build_admin_router, build_proxy_router, ProxyState};
 
 /// 테스트용 mock 원본 서버 + 프록시 서버 기동
 /// 반환: (proxy_addr, admin_addr, _tmp_dir, _tls_tmp_dir)
@@ -58,15 +58,23 @@ async fn start_test_proxy(
     let tls_tmp = tempfile::tempdir().unwrap();
     let tls_manager = TlsManager::load_or_create(tls_tmp.path()).unwrap();
 
+    // 도메인 맵 — test.local을 mock 원본으로 라우팅
+    let domain_map: DomainMap = Arc::new(RwLock::new({
+        let mut m = HashMap::new();
+        m.insert("test.local".to_string(), format!("http://{}", origin_addr));
+        m
+    }));
+
     let ps = ProxyState {
         shared: state.clone(),
         config,
         http_client: client,
         cache: cache.clone(),
         tls_manager: tls_manager.clone(),
+        domain_map: domain_map.clone(),
     };
     let proxy_router = build_proxy_router(ps);
-    let admin_router = build_admin_router(state.clone(), cache, tls_manager);
+    let admin_router = build_admin_router(state.clone(), cache, tls_manager, domain_map);
 
     tokio::spawn(async move { axum::serve(proxy_listener, proxy_router).await.unwrap() });
     tokio::spawn(async move { axum::serve(admin_listener, admin_router).await.unwrap() });
