@@ -4,7 +4,7 @@ members = [
   "services/proxy",
   "services/storage-service",
   "services/tls-service",
-  # "services/dns-service",   # Task 4: 미구현
+  "services/dns-service",
   "crates/cdn-proto",
 ]
 
