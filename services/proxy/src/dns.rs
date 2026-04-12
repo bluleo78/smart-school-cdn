@@ -110,6 +110,8 @@ fn build_a_response(
     header.set_op_code(OpCode::Query);
     header.set_authoritative(true);
     header.set_response_code(ResponseCode::NoError);
+    header.set_recursion_available(true);
+    header.set_recursion_desired(query.header().recursion_desired());
     response.set_header(header);
 
     for q in query.queries() {
@@ -131,7 +133,7 @@ async fn forward_to_upstream(
     let us = UdpSocket::bind("0.0.0.0:0").await?;
     us.send_to(buf, upstream).await?;
 
-    let mut resp_buf = [0u8; 512];
+    let mut resp_buf = [0u8; 4096];
     let (len, _) = tokio::time::timeout(
         std::time::Duration::from_secs(3),
         us.recv_from(&mut resp_buf),
