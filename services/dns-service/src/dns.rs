@@ -22,7 +22,16 @@ pub async fn run_dns_server(domain_map: DomainMap, cdn_ip: Ipv4Addr, upstream: S
             .expect("DNS 포트 53 바인딩 실패 (root 권한 또는 CAP_NET_BIND_SERVICE 필요)"),
     );
     tracing::info!("DNS 서버 시작 — UDP :53, CDN_IP={cdn_ip}, upstream={upstream}");
+    run_dns_loop(socket, domain_map, cdn_ip, upstream).await;
+}
 
+/// DNS 수신 루프 — 미리 바인딩된 소켓으로 쿼리를 처리한다 (테스트 가능)
+pub(crate) async fn run_dns_loop(
+    socket: Arc<UdpSocket>,
+    domain_map: DomainMap,
+    cdn_ip: Ipv4Addr,
+    upstream: SocketAddr,
+) {
     loop {
         let mut buf = [0u8; 512];
         let Ok((len, src)) = socket.recv_from(&mut buf).await else {
@@ -399,5 +408,53 @@ mod tests {
         let mut resp = [0u8; 512];
         client_sock.recv_from(&mut resp).await.unwrap();
         // 에코 응답이 도착하면 포워딩 성공
+    }
+
+    /// run_dns_loop: 등록 도메인 A 쿼리를 처리하고 CDN IP 응답을 반환한다
+    #[tokio::test]
+    async fn run_dns_loop_은_등록_도메인_쿼리에_응답한다() {
+        let server_sock = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        let server_addr = server_sock.local_addr().unwrap();
+
+        let client_sock = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let client_addr = client_sock.local_addr().unwrap();
+
+        let cdn_ip: Ipv4Addr = "10.0.0.1".parse().unwrap();
+        let mut map_inner = HashMap::new();
+        map_inner.insert("textbook.com".to_string(), "https://textbook.com".to_string());
+        let domain_map: DomainMap = Arc::new(RwLock::new(map_inner));
+        // upstream은 사용되지 않음 (등록 도메인 쿼리)
+        let upstream: SocketAddr = "127.0.0.1:1".parse().unwrap();
+
+        let loop_sock = server_sock.clone();
+        let loop_map = domain_map.clone();
+        let loop_handle = tokio::spawn(async move {
+            run_dns_loop(loop_sock, loop_map, cdn_ip, upstream).await;
+        });
+
+        // 등록 도메인 A 쿼리 전송
+        let buf = make_a_query(1, "textbook.com.");
+        client_sock.send_to(&buf, server_addr).await.unwrap();
+
+        // 응답 수신 (CDN IP 반환)
+        let mut resp = [0u8; 512];
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            client_sock.recv_from(&mut resp),
+        ).await;
+        loop_handle.abort();
+
+        assert!(result.is_ok(), "run_dns_loop이 A 쿼리에 응답해야 한다");
+        let (len, _) = result.unwrap().unwrap();
+        // 응답 파싱 — CDN IP가 포함되어야 한다
+        let mut decoder = BinDecoder::new(&resp[..len]);
+        let response = Message::read(&mut decoder).unwrap();
+        assert!(response.header().message_type() == MessageType::Response);
+        let answer = &response.answers()[0];
+        if let RData::A(a) = answer.data() {
+            assert_eq!(a.0, cdn_ip);
+        } else {
+            panic!("A 레코드가 아닙니다");
+        }
     }
 }
