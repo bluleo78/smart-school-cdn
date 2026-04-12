@@ -17,7 +17,8 @@ const mockStorageClient = {
 /** 테스트용 Fastify 앱 생성 — storageClient 데코레이터 주입 */
 async function createApp() {
   const app = Fastify({ logger: false });
-  app.decorate('storageClient', mockStorageClient);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  app.decorate('storageClient', mockStorageClient as any);
   await app.register(cacheRoutes);
   return app;
 }

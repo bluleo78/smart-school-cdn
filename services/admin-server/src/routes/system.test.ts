@@ -12,9 +12,12 @@ const mockDnsClient     = { health: vi.fn() };
 /** 테스트용 Fastify 앱 생성 — 모든 서비스 데코레이터 주입 */
 async function createApp(proxyAdminUrl = 'http://proxy:8081') {
   const app = Fastify({ logger: false });
-  app.decorate('storageClient', mockStorageClient);
-  app.decorate('tlsClient',     mockTlsClient);
-  app.decorate('dnsClient',     mockDnsClient);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  app.decorate('storageClient', mockStorageClient as any);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  app.decorate('tlsClient',     mockTlsClient as any);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  app.decorate('dnsClient',     mockDnsClient as any);
   app.decorate('proxyAdminUrl', proxyAdminUrl);
   await app.register(systemRoutes);
   return app;

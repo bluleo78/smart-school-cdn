@@ -23,7 +23,8 @@ const mockTlsClient = {
 /** 테스트용 Fastify 앱 생성 — tlsClient 데코레이터 주입 */
 async function createApp() {
   const app = Fastify({ logger: false });
-  app.decorate('tlsClient', mockTlsClient);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  app.decorate('tlsClient', mockTlsClient as any);
   await app.register(tlsRoutes);
   return app;
 }

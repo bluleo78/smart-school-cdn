@@ -16,8 +16,10 @@ const mockDnsClient = { syncDomains: vi.fn().mockResolvedValue({ success: true }
 function buildApp(domainRepo: DomainRepository) {
   const app = Fastify({ logger: false });
   // gRPC 클라이언트 데코레이터 — 도메인 변경 시 팬아웃 호출됨
-  app.decorate('tlsClient', mockTlsClient);
-  app.decorate('dnsClient', mockDnsClient);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  app.decorate('tlsClient', mockTlsClient as any);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  app.decorate('dnsClient', mockDnsClient as any);
   app.register(domainRoutes, { domainRepo });
   return app;
 }
