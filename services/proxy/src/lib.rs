@@ -1,26 +1,23 @@
 /// Proxy 서비스의 라이브러리 진입점
-pub mod cache;
-pub mod tls;
+pub mod clients;
 pub mod config;
 pub mod state;
-pub mod dns;
 
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
 use sha2::{Digest, Sha256};
-
 use axum::body::Body;
 use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri};
 use axum::response::{IntoResponse, Json, Response};
 use axum::routing::{delete, get};
 use axum::Router;
-use cache::{CacheDirective, CacheLayer, compute_cache_key, parse_cache_control};
 use state::{RequestLog, SharedState};
-use crate::tls::TlsManager;
+use clients::storage_client::StorageClient;
+use clients::tls_client::{TlsClient, CertCache};
 
 /// 런타임에 교체 가능한 도메인→원본서버 맵
 pub type DomainMap = Arc<RwLock<HashMap<String, String>>>;
@@ -28,20 +25,23 @@ pub type DomainMap = Arc<RwLock<HashMap<String, String>>>;
 /// 프록시 핸들러 공유 상태
 #[derive(Clone)]
 pub struct ProxyState {
-    pub shared: SharedState,
+    pub shared:      SharedState,
     pub http_client: reqwest::Client,
-    pub cache: Arc<CacheLayer>,
-    pub tls_manager: Arc<TlsManager>,
-    pub domain_map: DomainMap,
+    pub storage:     Arc<Mutex<StorageClient>>,
+    pub tls_client:  Arc<Mutex<TlsClient>>,
+    pub domain_map:  DomainMap,
+    pub cert_cache:  CertCache,
 }
 
-/// 관리 API 핸들러 상태 — (공유상태, 캐시, TLS관리자, 도메인맵)
+/// 관리 API 핸들러 상태
 #[derive(Clone)]
+#[allow(dead_code)]
 struct AdminState {
-    state: SharedState,
-    cache: Arc<CacheLayer>,
-    tls_manager: Arc<TlsManager>,
+    state:      SharedState,
+    storage:    Arc<Mutex<StorageClient>>,
+    tls_client: Arc<Mutex<TlsClient>>,
     domain_map: DomainMap,
+    cert_cache: CertCache,
 }
 
 /// 기본 캐시 TTL (Cache-Control 헤더 없을 때)
@@ -59,11 +59,12 @@ pub fn build_proxy_router(ps: ProxyState) -> Router {
 /// 관리 API 라우터 빌드
 pub fn build_admin_router(
     shared_state: SharedState,
-    cache: Arc<CacheLayer>,
-    tls_manager: Arc<TlsManager>,
-    domain_map: DomainMap,
+    storage:      Arc<Mutex<StorageClient>>,
+    tls_client:   Arc<Mutex<TlsClient>>,
+    domain_map:   DomainMap,
+    cert_cache:   CertCache,
 ) -> Router {
-    let admin_state = AdminState { state: shared_state, cache, tls_manager, domain_map };
+    let admin_state = AdminState { state: shared_state, storage, tls_client, domain_map, cert_cache };
     Router::new()
         .route("/status", get(status_handler))
         .route("/requests", get(requests_handler))
@@ -74,6 +75,70 @@ pub fn build_admin_router(
         .route("/tls/certificates", get(tls_certificates_handler))
         .route("/domains", axum::routing::post(update_domains_handler))
         .with_state(admin_state)
+}
+
+// ─── 캐시 키·파싱 유틸 (기존 cache.rs에서 이전) ───────────────────
+
+/// HTTP 요청에서 캐시 키 계산 — SHA-256 hex string 반환
+fn compute_cache_key(method: &str, host: &str, path: &str, query: &str) -> String {
+    let input = format!("{method}:{host}{path}?{query}");
+    let hash = Sha256::digest(input.as_bytes());
+    hex::encode(hash)
+}
+
+/// Cache-Control 헤더 해석 결과
+#[derive(Debug, PartialEq)]
+enum CacheDirective {
+    /// 캐시 불가 (no-store / no-cache / private / Pragma:no-cache)
+    NoStore,
+    /// 캐시 가능 — TTL이 None이면 만료 없음
+    Cacheable(Option<Duration>),
+}
+
+/// Cache-Control 및 Pragma 헤더를 파싱해 캐싱 지시자 반환
+fn parse_cache_control(cache_control: Option<&str>, pragma: Option<&str>) -> CacheDirective {
+    if cache_control.is_none() {
+        if let Some(p) = pragma {
+            if p.contains("no-cache") {
+                return CacheDirective::NoStore;
+            }
+        }
+        return CacheDirective::Cacheable(None);
+    }
+    let cc = cache_control.unwrap();
+    for directive in cc.split(',').map(str::trim) {
+        let lower = directive.to_lowercase();
+        if lower == "no-store" || lower == "no-cache" || lower == "private" {
+            return CacheDirective::NoStore;
+        }
+    }
+    let s_maxage = parse_duration_directive(cc, "s-maxage");
+    if s_maxage.is_some() {
+        return CacheDirective::Cacheable(s_maxage);
+    }
+    let max_age = parse_duration_directive(cc, "max-age");
+    if max_age.is_some() {
+        return CacheDirective::Cacheable(max_age);
+    }
+    CacheDirective::Cacheable(None)
+}
+
+/// "directive=N" 형태에서 Duration 추출
+fn parse_duration_directive(cc: &str, directive: &str) -> Option<Duration> {
+    for part in cc.split(',').map(str::trim) {
+        let (name, value) = match part.find('=') {
+            Some(pos) => (part[..pos].trim(), Some(part[pos + 1..].trim())),
+            None => (part.trim(), None),
+        };
+        if name.to_lowercase() == directive {
+            if let Some(v) = value {
+                if let Ok(secs) = v.parse::<u64>() {
+                    return Some(Duration::from_secs(secs));
+                }
+            }
+        }
+    }
+    None
 }
 
 // ─── 프록시 핸들러 ──────────────────────────────────────────────
@@ -88,7 +153,6 @@ async fn proxy_handler(
     let start = Instant::now();
     let state = ps.shared;
     let client = ps.http_client;
-    let cache = ps.cache;
 
     let host = match headers.get("host").and_then(|v| v.to_str().ok()) {
         Some(h) => h.to_string(),
@@ -96,7 +160,6 @@ async fn proxy_handler(
     };
 
     // domain_map에서 호스트:포트 → 호스트 추출 후 원본 서버 URL 조회
-    // 정확한 매칭 실패 시 와일드카드(*.parent.com) 폴백 적용
     let origin = {
         let map = ps.domain_map.read().await;
         let domain = host.split(':').next().unwrap_or(&host);
@@ -115,7 +178,7 @@ async fn proxy_handler(
         }
     };
 
-    // GET 요청만 캐시 대상 — POST/PUT 등은 항상 BYPASS
+    // GET 요청만 캐시 대상
     let cache_key = if method == Method::GET {
         Some(compute_cache_key(
             method.as_str(),
@@ -127,9 +190,9 @@ async fn proxy_handler(
         None
     };
 
-    // ── 캐시 HIT 확인 ────────────────────────────────────────
+    // ── 캐시 HIT 확인 (storage gRPC) ─────────────────────────────
     if let Some(ref key) = cache_key {
-        if let Some((cached_bytes, content_type)) = cache.get(key).await {
+        if let Some((cached_bytes, content_type)) = ps.storage.lock().await.get(key).await {
             let elapsed_ms = start.elapsed().as_millis() as u64;
             {
                 let mut app_state = state.write().await;
@@ -158,8 +221,7 @@ async fn proxy_handler(
         }
     }
 
-    // ── 원본 서버에 요청 전달 ─────────────────────────────────
-    // HTTP 프록시 요청 시 uri가 절대 URL(http://host/path)로 오므로 path+query만 사용
+    // ── 원본 서버에 요청 전달 ─────────────────────────────────────
     let path_and_query = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
     let origin_url = format!("{}{}", origin, path_and_query);
     let body_bytes = match axum::body::to_bytes(body, 10 * 1024 * 1024).await {
@@ -224,7 +286,7 @@ async fn proxy_handler(
     };
     let elapsed_ms = start.elapsed().as_millis() as u64;
 
-    // ── 캐시 저장 또는 BYPASS ─────────────────────────────────
+    // ── 캐시 저장 또는 BYPASS (storage gRPC) ─────────────────────
     let cache_status_str = if let Some(ref key) = cache_key {
         match &cache_directive {
             CacheDirective::Cacheable(maybe_ttl) if status.is_success() => {
@@ -234,7 +296,7 @@ async fn proxy_handler(
                     .and_then(|v| v.to_str().ok())
                     .map(|s| s.to_string());
                 let full_url = format!("https://{}{}", host, uri);
-                cache
+                ps.storage.lock().await
                     .put(key, &full_url, &host, content_type, response_body.clone(), Some(ttl))
                     .await;
                 "MISS"
@@ -269,7 +331,7 @@ async fn proxy_handler(
         cache = %cache_status_str, "프록시 요청 처리 완료"
     );
 
-    // ── 응답 빌드 ─────────────────────────────────────────────
+    // ── 응답 빌드 ─────────────────────────────────────────────────
     let mut response = Response::builder().status(status);
     for (key, value) in response_headers.iter() {
         response = response.header(key, value);
@@ -281,10 +343,11 @@ async fn proxy_handler(
         .unwrap()
 }
 
-// ─── CA 다운로드 핸들러 ─────────────────────────────────────────
+// ─── CA 다운로드 핸들러 ─────────────────────────────────────────────
 
 /// CA 인증서 다운로드 — iPad/PC 설치용 (.crt)
 async fn ca_cert_handler(State(ps): State<ProxyState>) -> Response {
+    let pem = ps.tls_client.lock().await.get_ca_cert_pem().await;
     Response::builder()
         .status(StatusCode::OK)
         .header("Content-Type", "application/x-pem-file")
@@ -292,12 +355,11 @@ async fn ca_cert_handler(State(ps): State<ProxyState>) -> Response {
             "Content-Disposition",
             "attachment; filename=\"smart-school-cdn-ca.crt\"",
         )
-        .body(Body::from(ps.tls_manager.ca_cert_pem.clone()))
+        .body(Body::from(pem))
         .unwrap()
 }
 
 /// PEM 문자열을 SHA-256 해시하여 UUID v5 형식으로 변환
-/// Admin Server와 동일한 로직으로 CA가 같으면 UUID도 동일하게 유지
 fn pem_to_uuid(input: &str) -> String {
     let hash = Sha256::digest(input.as_bytes());
     let h = format!("{:x}", hash);
@@ -313,16 +375,14 @@ fn pem_to_uuid(input: &str) -> String {
 
 /// iOS 구성 프로파일 다운로드 (.mobileconfig)
 async fn ca_mobileconfig_handler(State(ps): State<ProxyState>) -> Response {
-    // PEM 헤더·푸터·줄바꿈 제거하여 base64 DER 추출
-    let pem = &ps.tls_manager.ca_cert_pem;
+    let pem = ps.tls_client.lock().await.get_ca_cert_pem().await;
     let b64: String = pem
         .lines()
         .filter(|l| !l.starts_with("-----"))
         .collect::<Vec<_>>()
         .join("");
 
-    // CA PEM 해시 기반 UUID 동적 생성 — Admin Server와 동일 CA라면 UUID도 동일
-    let inner_uuid = pem_to_uuid(pem);
+    let inner_uuid = pem_to_uuid(&pem);
     let outer_uuid = pem_to_uuid(&format!("{}outer", pem));
 
     let profile = format!(
@@ -376,7 +436,7 @@ async fn ca_mobileconfig_handler(State(ps): State<ProxyState>) -> Response {
         .unwrap()
 }
 
-// ─── 관리 API 핸들러 ────────────────────────────────────────────
+// ─── 관리 API 핸들러 ────────────────────────────────────────────────
 
 async fn status_handler(State(admin): State<AdminState>) -> Json<state::ProxyStatus> {
     Json(admin.state.read().await.get_status())
@@ -400,10 +460,22 @@ async fn cache_stats_handler(State(admin): State<AdminState>) -> impl IntoRespon
     let hit_rate_history: Vec<_> = state.hit_rate_history.iter().cloned().collect();
     drop(state);
 
-    let domain_stats = admin.cache.get_domain_stats().await;
-    let total_size_bytes = admin.cache.current_size_bytes();
-    let max_size_bytes = admin.cache.max_size_bytes;
-    let entry_count = admin.cache.entry_count().await;
+    let stats = admin.storage.lock().await.stats().await;
+
+    // storage gRPC 통계에서 도메인 통계·크기 추출
+    let (total_size_bytes, max_size_bytes, entry_count, domain_stats) = match stats {
+        Some(s) => {
+            let domains: Vec<serde_json::Value> = s.domain_stats.iter().map(|d| {
+                serde_json::json!({
+                    "domain": d.domain,
+                    "hit_count": d.file_count,
+                    "size_bytes": d.size_bytes,
+                })
+            }).collect();
+            (s.used_bytes, s.total_bytes, s.domain_stats.iter().map(|d| d.file_count).sum::<u64>(), domains)
+        }
+        None => (0, 0, 0, vec![]),
+    };
 
     Json(serde_json::json!({
         "hit_count": hit_count,
@@ -419,13 +491,26 @@ async fn cache_stats_handler(State(admin): State<AdminState>) -> impl IntoRespon
 }
 
 async fn cache_popular_handler(State(admin): State<AdminState>) -> impl IntoResponse {
-    let popular = admin.cache.get_popular(20).await;
-    Json(popular)
+    let popular = admin.storage.lock().await.popular(20).await;
+    match popular {
+        Some(p) => {
+            let entries: Vec<serde_json::Value> = p.entries.iter().map(|e| {
+                serde_json::json!({
+                    "url": e.url,
+                    "domain": e.domain,
+                    "size_bytes": e.size_bytes,
+                    "hit_count": e.hit_count,
+                })
+            }).collect();
+            Json(entries)
+        }
+        None => Json(vec![]),
+    }
 }
 
 /// 퍼지 요청 바디
 #[derive(serde::Deserialize)]
-struct PurgeRequest {
+struct PurgeBody {
     /// "url" | "domain" | "all"
     r#type: String,
     /// url 또는 domain 퍼지 시 대상 (all은 불필요)
@@ -434,23 +519,23 @@ struct PurgeRequest {
 
 async fn cache_purge_handler(
     State(admin): State<AdminState>,
-    Json(req): Json<PurgeRequest>,
+    Json(req): Json<PurgeBody>,
 ) -> Response {
+    let mut storage = admin.storage.lock().await;
     let (purged_count, freed_bytes) = match req.r#type.as_str() {
         "url" => {
-            // URL로 인덱스를 스캔해 일치하는 항목 삭제
             let Some(url) = req.target.filter(|t| !t.is_empty()) else {
                 return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "target required"}))).into_response();
             };
-            admin.cache.purge_by_url(&url).await
+            storage.purge_url(&url).await
         }
         "domain" => {
             let Some(domain) = req.target.filter(|t| !t.is_empty()) else {
                 return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "target required"}))).into_response();
             };
-            admin.cache.purge_domain(&domain).await
+            storage.purge_domain(&domain).await
         }
-        "all" => admin.cache.purge_all().await,
+        "all" => storage.purge_all().await,
         _ => (0, 0),
     };
 
@@ -462,16 +547,25 @@ async fn cache_purge_handler(
 
 /// CA 인증서 PEM 반환 — Admin Server 중계용
 async fn tls_ca_handler(State(admin): State<AdminState>) -> Response {
+    let pem = admin.tls_client.lock().await.get_ca_cert_pem().await;
     Response::builder()
         .status(StatusCode::OK)
         .header("Content-Type", "application/x-pem-file")
-        .body(Body::from(admin.tls_manager.ca_cert_pem.clone()))
+        .body(Body::from(pem))
         .unwrap()
 }
 
 /// 발급된 도메인 인증서 목록 반환
 async fn tls_certificates_handler(State(admin): State<AdminState>) -> impl IntoResponse {
-    Json(admin.tls_manager.list_certificates())
+    let certs = admin.tls_client.lock().await.list_certificates().await;
+    let list: Vec<serde_json::Value> = certs.iter().map(|c| {
+        serde_json::json!({
+            "domain": c.domain,
+            "issued_at": c.issued_at,
+            "expires_at": c.expires_at,
+        })
+    }).collect();
+    Json(list)
 }
 
 /// POST /domains 요청 바디 — 단일 도메인 항목
@@ -487,91 +581,89 @@ struct DomainsPayload {
     domains: Vec<DomainEntry>,
 }
 
-/// Admin Server에서 도메인 목록을 push할 때 호출 — 전체 맵을 교체한다
+/// Admin Server에서 도메인 목록을 push할 때 호출 — 전체 맵 교체 + 인증서 사전 발급
 async fn update_domains_handler(
     State(admin): State<AdminState>,
     Json(payload): Json<DomainsPayload>,
 ) -> StatusCode {
-    let mut map = admin.domain_map.write().await;
-    map.clear();
-    for entry in payload.domains {
-        map.insert(entry.host, entry.origin);
+    // 도메인 맵 업데이트
+    {
+        let mut map = admin.domain_map.write().await;
+        map.clear();
+        for entry in &payload.domains {
+            map.insert(entry.host.clone(), entry.origin.clone());
+        }
+        tracing::info!(count = map.len(), "도메인 맵 갱신");
     }
-    tracing::info!(count = map.len(), "도메인 맵 갱신");
+    // 각 도메인 인증서 사전 발급 (SNI 핸들러 로컬 캐시 갱신)
+    let mut tls = admin.tls_client.lock().await;
+    for entry in &payload.domains {
+        tls.prefetch_cert(&entry.host).await;
+    }
     StatusCode::OK
 }
 
 #[cfg(test)]
-mod domain_sync_tests {
+mod tests {
     use super::*;
-    use axum::body::Body;
-    use axum::http::{Request, StatusCode};
-    use tower::util::ServiceExt;
 
-    fn make_admin_state() -> (DomainMap, Router<()>) {
-        let domain_map: DomainMap = Arc::new(RwLock::new({
-            let mut m = std::collections::HashMap::new();
-            m.insert("httpbin.org".to_string(), "https://httpbin.org".to_string());
-            m
-        }));
-        use std::path::PathBuf;
-        let cache = Arc::new(crate::cache::CacheLayer::new(
-            PathBuf::from("/tmp/test-cache-domains"),
-            1024 * 1024,
-        ));
-        let router = Router::new()
-            .route("/domains", axum::routing::post(update_domains_handler))
-            .with_state(AdminState {
-                state: Arc::new(RwLock::new(crate::state::AppState::new())),
-                cache,
-                tls_manager: crate::tls::TlsManager::load_or_create(
-                    &PathBuf::from("/tmp/test-certs-domains"),
-                ).unwrap(),
-                domain_map: domain_map.clone(),
-            });
-        (domain_map, router)
+    // ── compute_cache_key ────────────────────────────────────────
+
+    #[test]
+    fn test_cache_key_deterministic() {
+        let k1 = compute_cache_key("GET", "example.com", "/foo", "bar=1");
+        let k2 = compute_cache_key("GET", "example.com", "/foo", "bar=1");
+        assert_eq!(k1, k2);
+        assert_eq!(k1.len(), 64);
     }
 
-    #[tokio::test]
-    async fn post_domains가_도메인_맵을_갱신한다() {
-        let (domain_map, router) = make_admin_state();
-
-        let body = serde_json::json!({
-            "domains": [
-                { "host": "textbook.com", "origin": "https://textbook.com" },
-                { "host": "cdn.edu.kr", "origin": "https://cdn.edu.kr" }
-            ]
-        });
-        let req = Request::builder()
-            .method("POST")
-            .uri("/domains")
-            .header("content-type", "application/json")
-            .body(Body::from(serde_json::to_string(&body).unwrap()))
-            .unwrap();
-
-        let resp = router.oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::OK);
-
-        let map = domain_map.read().await;
-        assert_eq!(map.get("textbook.com"), Some(&"https://textbook.com".to_string()));
-        assert_eq!(map.get("cdn.edu.kr"), Some(&"https://cdn.edu.kr".to_string()));
-        assert!(!map.contains_key("httpbin.org"));
+    #[test]
+    fn test_cache_key_different_method() {
+        let get = compute_cache_key("GET", "example.com", "/foo", "");
+        let post = compute_cache_key("POST", "example.com", "/foo", "");
+        assert_ne!(get, post);
     }
 
-    #[tokio::test]
-    async fn post_domains_빈_목록은_맵을_비운다() {
-        let (domain_map, router) = make_admin_state();
+    // ── parse_cache_control ──────────────────────────────────────
 
-        let body = serde_json::json!({ "domains": [] });
-        let req = Request::builder()
-            .method("POST")
-            .uri("/domains")
-            .header("content-type", "application/json")
-            .body(Body::from(serde_json::to_string(&body).unwrap()))
-            .unwrap();
+    #[test]
+    fn test_no_store() {
+        assert_eq!(parse_cache_control(Some("no-store"), None), CacheDirective::NoStore);
+    }
 
-        let resp = router.oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::OK);
-        assert!(domain_map.read().await.is_empty());
+    #[test]
+    fn test_no_cache() {
+        assert_eq!(parse_cache_control(Some("no-cache"), None), CacheDirective::NoStore);
+    }
+
+    #[test]
+    fn test_private() {
+        assert_eq!(parse_cache_control(Some("private"), None), CacheDirective::NoStore);
+    }
+
+    #[test]
+    fn test_max_age() {
+        assert_eq!(
+            parse_cache_control(Some("max-age=300"), None),
+            CacheDirective::Cacheable(Some(Duration::from_secs(300)))
+        );
+    }
+
+    #[test]
+    fn test_s_maxage_beats_max_age() {
+        assert_eq!(
+            parse_cache_control(Some("max-age=300, s-maxage=600"), None),
+            CacheDirective::Cacheable(Some(Duration::from_secs(600)))
+        );
+    }
+
+    #[test]
+    fn test_no_header() {
+        assert_eq!(parse_cache_control(None, None), CacheDirective::Cacheable(None));
+    }
+
+    #[test]
+    fn test_pragma_no_cache() {
+        assert_eq!(parse_cache_control(None, Some("no-cache")), CacheDirective::NoStore);
     }
 }

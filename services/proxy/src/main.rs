@@ -1,28 +1,20 @@
 /// Smart School CDN Proxy Service
-/// HTTP 리버스 프록시(8080) + HTTPS 443 + 관리 API(8081)를 동시에 실행한다.
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::time::Duration;
-
-use tokio::sync::RwLock;
+/// HTTP 리버스 프록시(8080) + HTTPS 443 + 관리 API(8081)
+use std::{collections::HashMap, sync::Arc};
+use tokio::sync::{Mutex, RwLock};
 use tracing_subscriber::EnvFilter;
 
-use rustls::ServerConfig;
-use rustls::server::{ClientHello, ResolvesServerCert};
-use rustls::sign::CertifiedKey;
+use rustls::{ServerConfig, server::{ClientHello, ResolvesServerCert}, sign::CertifiedKey};
 use axum_server::tls_rustls::RustlsConfig;
 
-use std::collections::HashMap;
-
-use proxy::cache::CacheLayer;
-use proxy::dns::run_dns_server;
-use proxy::state::{AppState, SharedState};
-use proxy::tls::TlsManager;
 use proxy::{DomainMap, build_admin_router, build_proxy_router, ProxyState};
+use proxy::clients::storage_client::StorageClient;
+use proxy::clients::tls_client::{TlsClient, CertCache};
+use proxy::state::{AppState, SharedState};
 
-/// rustls SNI 핸들러 — 클라이언트의 서버명에 맞는 인증서를 TlsManager에서 조회·발급
+/// rustls SNI 핸들러 — 로컬 cert_cache에서 CertifiedKey 조회 (sync)
 struct SniCertResolver {
-    tls_manager: Arc<TlsManager>,
+    cert_cache: CertCache,
 }
 
 impl std::fmt::Debug for SniCertResolver {
@@ -34,119 +26,87 @@ impl std::fmt::Debug for SniCertResolver {
 impl ResolvesServerCert for SniCertResolver {
     fn resolve(&self, client_hello: ClientHello) -> Option<Arc<CertifiedKey>> {
         let domain = client_hello.server_name()?;
-        let cached = self.tls_manager.get_or_issue(domain)?;
-        Some(cached.certified_key.clone())
+        // blocking_lock: SNI 핸들러는 sync 컨텍스트
+        self.cert_cache.blocking_lock().get(domain).cloned()
     }
 }
 
 #[tokio::main]
 async fn main() {
-    // ring CryptoProvider 명시적 등록 (rustls 0.23 필수)
     rustls::crypto::ring::default_provider()
-        .install_default()
-        .expect("ring CryptoProvider 설치 실패");
+        .install_default().expect("ring CryptoProvider 설치 실패");
 
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env().add_directive("info".parse().unwrap()))
         .init();
 
+    let storage_url = std::env::var("STORAGE_GRPC_URL")
+        .unwrap_or_else(|_| "http://storage-service:50051".to_string());
+    let tls_url = std::env::var("TLS_GRPC_URL")
+        .unwrap_or_else(|_| "http://tls-service:50052".to_string());
+
+    let storage = StorageClient::connect(&storage_url).await
+        .expect("storage-service gRPC 연결 실패");
+    let tls_client = TlsClient::connect(&tls_url).await
+        .expect("tls-service gRPC 연결 실패");
+
     let shared_state: SharedState = Arc::new(RwLock::new(AppState::new()));
     let http_client = reqwest::Client::new();
-
-    // 도메인 맵 초기화 — Admin Server 시작 시 POST /domains push로 채워진다
     let domain_map: DomainMap = Arc::new(RwLock::new(HashMap::new()));
+    let cert_cache = tls_client.cert_cache.clone();
 
-    // 캐시 레이어 생성 — 기본 20GB, 캐시 디렉토리 ./cache/
-    let cache_dir = PathBuf::from(
-        std::env::var("CACHE_DIR").unwrap_or_else(|_| "./cache".to_string()),
-    );
-    let max_size_bytes: u64 = std::env::var("CACHE_MAX_SIZE_GB")
-        .ok()
-        .and_then(|v| v.parse::<u64>().ok())
-        .unwrap_or(20)
-        * 1024
-        * 1024
-        * 1024;
-    let cache = Arc::new(CacheLayer::new(cache_dir, max_size_bytes));
-
-    // TLS 관리자 생성 — CA 인증서 로드 또는 신규 생성
-    let certs_dir = std::path::PathBuf::from(
-        std::env::var("CERTS_DIR").unwrap_or_else(|_| "./certs".to_string()),
-    );
-    let tls_manager = TlsManager::load_or_create(&certs_dir)
-        .expect("TLS 관리자 초기화 실패");
+    let storage = Arc::new(Mutex::new(storage));
+    let tls_client = Arc::new(Mutex::new(tls_client));
 
     // 매분 히트율 스냅샷 기록 배경 태스크
     let state_for_snapshot = shared_state.clone();
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(60));
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
         loop {
             interval.tick().await;
             state_for_snapshot.write().await.record_hit_rate_snapshot();
         }
     });
 
-    // DNS 서버 환경변수
-    let cdn_ip: std::net::Ipv4Addr = std::env::var("CDN_IP")
-        .unwrap_or_else(|_| "127.0.0.1".to_string())
-        .parse()
-        .expect("CDN_IP 환경변수가 유효한 IPv4 주소가 아닙니다");
-    let dns_upstream: std::net::SocketAddr = {
-        let s = std::env::var("DNS_UPSTREAM").unwrap_or_else(|_| "8.8.8.8".to_string());
-        // 포트 없으면 53 붙임
-        if s.contains(':') { s.parse().expect("DNS_UPSTREAM 형식 오류") }
-        else { format!("{s}:53").parse().unwrap() }
-    };
-
     let ps = ProxyState {
         shared: shared_state.clone(),
         http_client,
-        cache: cache.clone(),
-        tls_manager: tls_manager.clone(),
+        storage: storage.clone(),
+        tls_client: tls_client.clone(),
         domain_map: domain_map.clone(),
+        cert_cache: cert_cache.clone(),
     };
-    let proxy_router = build_proxy_router(ps);
-    let admin_router = build_admin_router(shared_state.clone(), cache, tls_manager.clone(), domain_map.clone());
 
-    // rustls ServerConfig — SNI 기반 인증서 선택
+    let proxy_router = build_proxy_router(ps);
+    let admin_router = build_admin_router(
+        shared_state, storage, tls_client, domain_map, cert_cache.clone(),
+    );
+
     let server_config = ServerConfig::builder()
         .with_no_client_auth()
-        .with_cert_resolver(Arc::new(SniCertResolver {
-            tls_manager: tls_manager.clone(),
-        }));
+        .with_cert_resolver(Arc::new(SniCertResolver { cert_cache }));
     let rustls_config = RustlsConfig::from_config(Arc::new(server_config));
 
     tracing::info!("Proxy Service 시작 — HTTP :8080, HTTPS :443, Admin :8081");
 
-    // HTTPS 프록시 서버 (443) — proxy_router clone은 move 전에 수행
     let https_router = proxy_router.clone();
-
     let proxy_server = tokio::spawn(async move {
         let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await.unwrap();
         axum::serve(listener, proxy_router).await.unwrap();
     });
     let https_server = tokio::spawn(async move {
         axum_server::bind_rustls("0.0.0.0:443".parse().unwrap(), rustls_config)
-            .serve(https_router.into_make_service())
-            .await
-            .unwrap();
+            .serve(https_router.into_make_service()).await.unwrap();
     });
-
     let admin_server = tokio::spawn(async move {
         let listener = tokio::net::TcpListener::bind("0.0.0.0:8081").await.unwrap();
         axum::serve(listener, admin_router).await.unwrap();
     });
 
-    let dns_server = tokio::spawn({
-        let domain_map = domain_map.clone();
-        async move { run_dns_server(domain_map, cdn_ip, dns_upstream).await }
-    });
-
     tokio::select! {
-        _ = proxy_server => tracing::error!("HTTP 프록시 서버 종료"),
-        _ = https_server => tracing::error!("HTTPS 프록시 서버 종료"),
-        _ = admin_server => tracing::error!("Admin API 서버 종료"),
-        _ = dns_server   => tracing::error!("DNS 서버 종료"),
+        _ = proxy_server  => tracing::error!("HTTP 프록시 서버 종료"),
+        _ = https_server  => tracing::error!("HTTPS 프록시 서버 종료"),
+        _ = admin_server  => tracing::error!("Admin API 서버 종료"),
         _ = tokio::signal::ctrl_c() => tracing::info!("종료 신호 수신"),
     }
 }
