@@ -140,7 +140,9 @@ async fn proxy_handler(
     }
 
     // ── 원본 서버에 요청 전달 ─────────────────────────────────
-    let origin_url = format!("{}{}", origin, uri);
+    // HTTP 프록시 요청 시 uri가 절대 URL(http://host/path)로 오므로 path+query만 사용
+    let path_and_query = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
+    let origin_url = format!("{}{}", origin, path_and_query);
     let body_bytes = match axum::body::to_bytes(body, 10 * 1024 * 1024).await {
         Ok(b) => b,
         Err(_) => return (StatusCode::BAD_REQUEST, "Failed to read request body").into_response(),
