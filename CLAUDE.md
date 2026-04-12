@@ -28,7 +28,7 @@ pnpm ship:admin          # Admin Server+Web만 재배포
 
 **최초 prod 세팅:**
 ```bash
-git clone git@github.com:bluleo78/smart-school-cdn.git ~/prod/smart-school-cdn
+mkdir -p ~/prod/smart-school-cdn
 cp deploy/docker-compose.yml ~/prod/smart-school-cdn/docker-compose.yml
 cp .env.example ~/prod/smart-school-cdn/.env
 # .env 편집 후

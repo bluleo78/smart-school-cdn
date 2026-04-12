@@ -2,11 +2,12 @@
 set -euo pipefail
 
 # Smart School CDN 운영 배포 스크립트
-# Usage: ./scripts/deploy.sh [proxy|admin|all]
+# Usage: ./scripts/deploy.sh [proxy|admin-server|admin-web|all]
 #
-# proxy  — Rust 프록시 (HTTP :8080, HTTPS :443, 관리 API :8081)
-# admin  — Admin Server (Fastify :7777) + Admin Web (nginx 내장)
-# all    — 전체 재배포 (기본값)
+# proxy        — Rust 프록시 (HTTP :8080, HTTPS :443, 관리 API :8081)
+# admin-server — Fastify API (:4001 내부)
+# admin-web    — nginx 정적 서빙 + API 프록시 (:7777)
+# all          — 전체 재배포 (기본값)
 #
 # 흐름:
 #   1. docker buildx로 멀티플랫폼 이미지 빌드 + GHCR push
@@ -29,7 +30,7 @@ error() { echo -e "${RED}[error]${NC} $1"; exit 1; }
 # --- 사전 검사 ---
 
 docker info &>/dev/null || error "Docker가 실행 중이지 않습니다."
-[ -d "$PROD_DIR" ] || error "운영 디렉터리가 없습니다: $PROD_DIR\n  git clone git@github.com:bluleo78/smart-school-cdn.git $PROD_DIR"
+[ -d "$PROD_DIR" ] || error "운영 디렉터리가 없습니다: $PROD_DIR"
 
 # --- buildx 멀티플랫폼 빌더 확인 ---
 
@@ -43,6 +44,7 @@ ensure_builder() {
 }
 
 # --- 서비스별 빌드 + push ---
+# admin-server / admin-web은 pnpm workspace 루트를 context로 사용한다.
 
 build_and_push() {
   local svc=$1
@@ -53,11 +55,17 @@ build_and_push() {
         -t "$REGISTRY/proxy:latest" --push \
         services/proxy/
       ;;
-    admin)
-      log "Building + pushing admin..."
+    admin-server)
+      log "Building + pushing admin-server..."
       docker buildx build --platform "$PLATFORM" --no-cache \
-        -t "$REGISTRY/admin:latest" --push \
-        services/admin-server/
+        -t "$REGISTRY/admin-server:latest" \
+        -f services/admin-server/Dockerfile --push .
+      ;;
+    admin-web)
+      log "Building + pushing admin-web..."
+      docker buildx build --platform "$PLATFORM" --no-cache \
+        -t "$REGISTRY/admin-web:latest" \
+        -f services/admin-web/Dockerfile --push .
       ;;
   esac
 }
@@ -92,10 +100,11 @@ verify_service() {
 TARGET=${1:-all}
 
 case $TARGET in
-  proxy)  SERVICES=("proxy") ;;
-  admin)  SERVICES=("admin") ;;
-  all)    SERVICES=("proxy" "admin") ;;
-  *)      error "알 수 없는 대상: $TARGET (유효값: proxy | admin | all)" ;;
+  proxy)        SERVICES=("proxy") ;;
+  admin-server) SERVICES=("admin-server") ;;
+  admin-web)    SERVICES=("admin-web") ;;
+  all)          SERVICES=("proxy" "admin-server" "admin-web") ;;
+  *)            error "알 수 없는 대상: $TARGET (유효값: proxy | admin-server | admin-web | all)" ;;
 esac
 
 log "=== 빌드 + Push → GHCR ==="
