@@ -5,8 +5,8 @@ import { testProxy } from '../api/proxy';
 export function useTestProxy() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ domain, path }: { domain: string; path: string }) =>
-      testProxy(domain, path),
+    mutationFn: ({ domain, path, protocol }: { domain: string; path: string; protocol?: 'http' | 'https' }) =>
+      testProxy(domain, path, protocol),
     onSuccess: () => {
       // 테스트 요청이 프록시를 경유했으므로 관련 쿼리 즉시 갱신
       queryClient.invalidateQueries({ queryKey: ['proxy', 'status'] });

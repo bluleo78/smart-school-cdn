@@ -3,13 +3,18 @@
 /// Proxy 서버가 내려가 있으면 오프라인 상태로 응답한다.
 import type { FastifyInstance } from 'fastify';
 import axios from 'axios';
+import https from 'https';
 import type { DomainRepository } from '../db/domain-repo.js';
 
 /** Proxy 관리 API 기본 URL */
 const PROXY_ADMIN_URL = process.env.PROXY_ADMIN_URL || 'http://localhost:8081';
 
-/** 프록시 서버 URL — 테스트 요청을 실제로 전송하는 대상 */
+/** 프록시 서버 URL — HTTP 테스트 요청 대상 */
 const PROXY_URL = process.env.PROXY_URL || 'http://localhost:8080';
+/** 프록시 HTTPS URL — HTTPS 테스트 요청 대상 */
+const PROXY_HTTPS_URL = process.env.PROXY_HTTPS_URL || 'https://localhost:443';
+/** HTTPS 테스트용 Agent — 자체 CA이므로 인증서 검증 생략 (내부 테스트 전용) */
+const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 
 /** 연결 타임아웃 (3초) — Proxy 서버가 내려가 있을 때 빠르게 실패하도록 */
 const TIMEOUT_MS = 3000;
@@ -59,9 +64,9 @@ export async function proxyRoutes(app: FastifyInstance, opts: ProxyRouteOptions 
    * - path에 상대 경로(..) 또는 @ 포함 시 400 반환 (URL 조작 방지)
    */
   app.post<{
-    Body: { domain: string; path: string };
+    Body: { domain: string; path: string; protocol?: 'http' | 'https' };
   }>('/api/proxy/test', async (request, reply) => {
-    const { domain, path } = request.body;
+    const { domain, path, protocol = 'http' } = request.body;
 
     if (!domain || !path) {
       return reply.status(400).send({ error: 'domain과 path는 필수 항목입니다.' });
@@ -81,7 +86,8 @@ export async function proxyRoutes(app: FastifyInstance, opts: ProxyRouteOptions 
       return reply.status(400).send({ error: '유효하지 않은 경로입니다.' });
     }
 
-    const targetUrl = `${PROXY_URL}${path.startsWith('/') ? path : `/${path}`}`;
+    const baseUrl = protocol === 'https' ? PROXY_HTTPS_URL : PROXY_URL;
+    const targetUrl = `${baseUrl}${path.startsWith('/') ? path : `/${path}`}`;
     const startMs = Date.now();
 
     try {
@@ -91,6 +97,8 @@ export async function proxyRoutes(app: FastifyInstance, opts: ProxyRouteOptions 
         timeout: 10000,
         // 리다이렉트 및 오류 응답도 그대로 받아서 status_code를 반환한다.
         validateStatus: () => true,
+        // HTTPS 테스트: 자체 CA이므로 인증서 검증 생략
+        ...(protocol === 'https' ? { httpsAgent } : {}),
       });
       return {
         success: true,

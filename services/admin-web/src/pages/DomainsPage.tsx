@@ -13,6 +13,7 @@ const DEFAULT_DOMAINS = ['httpbin.org'];
 export function DomainsPage() {
   const [domain, setDomain] = useState(DEFAULT_DOMAINS[0]);
   const [path, setPath] = useState('/get');
+  const [protocol, setProtocol] = useState<'http' | 'https'>('http');
   const [result, setResult] = useState<ProxyTestResult | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const testProxy = useTestProxy();
@@ -23,7 +24,7 @@ export function DomainsPage() {
     setResult(null);
     setErrorMsg(null);
     try {
-      const data = await testProxy.mutateAsync({ domain: domain.trim(), path: path.trim() });
+      const data = await testProxy.mutateAsync({ domain: domain.trim(), path: path.trim(), protocol });
       setResult(data);
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : '요청 실패');
@@ -61,6 +62,24 @@ export function DomainsPage() {
         <p className="text-sm text-muted-foreground">
           선택한 도메인과 경로로 프록시를 통해 실제 요청을 전송하고 결과를 확인합니다.
         </p>
+
+        {/* 프로토콜 선택 */}
+        <div className="flex gap-1 rounded-md border w-fit p-1 bg-muted/30">
+          {(['http', 'https'] as const).map((p) => (
+            <button
+              key={p}
+              onClick={() => setProtocol(p)}
+              className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
+                protocol === p
+                  ? 'bg-white shadow text-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+              data-testid={`protocol-${p}`}
+            >
+              {p.toUpperCase()}
+            </button>
+          ))}
+        </div>
 
         <div className="flex flex-col gap-3 sm:flex-row">
           {/* 도메인 입력 */}

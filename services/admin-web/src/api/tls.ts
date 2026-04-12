@@ -7,20 +7,24 @@ export interface CertInfo {
   expires_at: string;  // ISO 8601
 }
 
-/** CA 인증서 파일 다운로드 (.crt) — 브라우저 파일 다운로드 트리거 */
-export function downloadCACert(): void {
+/** 브라우저 파일 다운로드 트리거 헬퍼 */
+function triggerDownload(href: string, filename: string): void {
   const a = document.createElement('a');
-  a.href = '/api/tls/ca';
-  a.download = 'smart-school-cdn-ca.crt';
+  a.href = href;
+  a.download = filename;
+  document.body.appendChild(a);
   a.click();
+  document.body.removeChild(a);
+}
+
+/** CA 인증서 파일 다운로드 (.crt) */
+export function downloadCACert(): void {
+  triggerDownload('/api/tls/ca', 'smart-school-cdn-ca.crt');
 }
 
 /** iOS 구성 프로파일 다운로드 (.mobileconfig) */
 export function downloadMobileConfig(): void {
-  const a = document.createElement('a');
-  a.href = '/api/tls/ca/mobileconfig';
-  a.download = 'smart-school-cdn.mobileconfig';
-  a.click();
+  triggerDownload('/api/tls/ca/mobileconfig', 'smart-school-cdn.mobileconfig');
 }
 
 /** 발급된 도메인 인증서 목록 조회 */

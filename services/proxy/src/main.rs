@@ -39,6 +39,11 @@ impl ResolvesServerCert for SniCertResolver {
 
 #[tokio::main]
 async fn main() {
+    // ring CryptoProvider 명시적 등록 (rustls 0.23 필수)
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("ring CryptoProvider 설치 실패");
+
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env().add_directive("info".parse().unwrap()))
         .init();

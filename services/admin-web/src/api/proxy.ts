@@ -40,7 +40,11 @@ export interface ProxyTestResult {
 }
 
 /** 프록시 테스트 — 지정 도메인+경로로 실제 요청을 전송하고 결과를 반환한다 */
-export async function testProxy(domain: string, path: string): Promise<ProxyTestResult> {
-  const res = await axios.post<ProxyTestResult>('/api/proxy/test', { domain, path });
+export async function testProxy(
+  domain: string,
+  path: string,
+  protocol: 'http' | 'https' = 'http',
+): Promise<ProxyTestResult> {
+  const res = await axios.post<ProxyTestResult>('/api/proxy/test', { domain, path, protocol });
   return res.data;
 }
