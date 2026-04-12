@@ -19,9 +19,9 @@
 ## Deploy
 
 ```bash
-pnpm deploy              # 전체 재배포 (proxy + admin)
-pnpm deploy:proxy        # Proxy만 재배포
-pnpm deploy:admin        # Admin Server+Web만 재배포
+pnpm ship                # 전체 재배포 (proxy + admin)
+pnpm ship:proxy          # Proxy만 재배포
+pnpm ship:admin          # Admin Server+Web만 재배포
 ```
 
 - 스크립트: `scripts/deploy.sh [proxy|admin|all]`

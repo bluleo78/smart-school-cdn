@@ -7,8 +7,10 @@ set -euo pipefail
 # proxy  — Rust 프록시 (HTTP :8080, HTTPS :443, 관리 API :8081)
 # admin  — Admin Server (Fastify :7777) + Admin Web (nginx 내장)
 # all    — 전체 재배포 (기본값)
+#
+# 배포 디렉터리: ~/prod/smart-school-cdn (없으면 현재 디렉터리)
 
-COMPOSE="docker compose -f docker-compose.prod.yml"
+PROD_DIR="$HOME/prod/smart-school-cdn"
 
 # 색상
 GREEN='\033[0;32m'
@@ -20,16 +22,24 @@ log()   { echo -e "${GREEN}[deploy]${NC} $1"; }
 warn()  { echo -e "${YELLOW}[warn]${NC} $1"; }
 error() { echo -e "${RED}[error]${NC} $1"; exit 1; }
 
-# --- 사전 검사 ---
+# --- 배포 디렉터리 이동 ---
 
-# 미커밋 변경사항 경고
-if ! git diff --quiet || ! git diff --cached --quiet; then
-  warn "미커밋 변경사항이 있습니다. 계속하려면 Enter, 중단하려면 Ctrl+C"
-  read -r
+if [ -d "$PROD_DIR" ]; then
+  log "배포 디렉터리: $PROD_DIR"
+  cd "$PROD_DIR"
+else
+  warn "~/prod/smart-school-cdn 없음 — 현재 디렉터리에서 배포"
 fi
+
+COMPOSE="docker compose -f docker-compose.prod.yml"
 
 # Docker 실행 확인
 docker info &>/dev/null || error "Docker가 실행 중이지 않습니다."
+
+# --- git pull ---
+
+log "=== 코드 갱신 ==="
+git pull origin main
 
 # --- 서비스 매핑 ---
 

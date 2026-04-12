@@ -15,9 +15,9 @@
     "docker:build": "docker compose -f docker-compose.prod.yml build",
     "docker:up": "docker compose -f docker-compose.prod.yml up -d",
     "docker:down": "docker compose -f docker-compose.prod.yml down",
-    "deploy": "bash scripts/deploy.sh",
-    "deploy:proxy": "bash scripts/deploy.sh proxy",
-    "deploy:admin": "bash scripts/deploy.sh admin",
+    "ship": "bash scripts/deploy.sh",
+    "ship:proxy": "bash scripts/deploy.sh proxy",
+    "ship:admin": "bash scripts/deploy.sh admin",
     "clean": "turbo clean",
     "prepare": "husky"
   },
