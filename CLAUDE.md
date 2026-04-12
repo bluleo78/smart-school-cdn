@@ -4,40 +4,48 @@
 
 ## Architecture
 
-- **Rust 엔진**: Proxy(443), Storage, Optimizer, DNS(53), TLS — 고성능 네트워크 처리
-- **Node.js Admin**: Fastify API(4001 dev / 3000 prod) + React Dashboard(4173 dev)
-- **통신**: Rust↔Rust gRPC (tonic), Admin↔Rust gRPC (@grpc/grpc-js)
-- **DB**: SQLite (Storage: 캐시 메타, Admin: 설정/통계/로그)
-- **배포**: Docker Compose
+- **Rust 엔진**: Proxy(443/8080), TLS — 고성능 네트워크 처리
+- **Node.js Admin**: Fastify API(4001) — 내부 전용, 외부 미노출
+- **Admin Web**: React + nginx(7777) — API 리버스 프록시 내장
+- **통신**: Admin↔Proxy HTTP (`http://proxy:8081`)
+- **DB**: SQLite (Admin: 설정/통계/로그)
+- **배포**: Docker Compose (로컬 테스트 / 운영 분리)
 
 ## Commands
 
 - `pnpm dev` / `pnpm build` / `pnpm test` / `pnpm lint`
 - `pnpm dev:infra` — Docker Compose 기동 후 dev
-- `pnpm docker:build` / `pnpm docker:up` / `pnpm docker:down`
+- `pnpm docker:build` / `pnpm docker:up` / `pnpm docker:down` — 로컬 통합 테스트용 (포트: 8082/4443/7778)
 
 ## Deploy
 
 ```bash
-pnpm ship                # 전체 재배포 (proxy + admin)
+pnpm ship                # 전체 재배포 (proxy + admin-server + admin-web)
 pnpm ship:proxy          # Proxy만 재배포
-pnpm ship:admin          # Admin Server+Web만 재배포
+pnpm ship:admin          # Admin Server + Admin Web만 재배포
 ```
 
 **흐름:** `docker buildx` 멀티플랫폼 빌드 → `ghcr.io/bluleo78/smart-school-cdn` push → `~/prod/smart-school-cdn` 에서 pull + up
+
+**이미지 (3개):**
+- `ghcr.io/bluleo78/smart-school-cdn/proxy:latest`
+- `ghcr.io/bluleo78/smart-school-cdn/admin-server:latest`
+- `ghcr.io/bluleo78/smart-school-cdn/admin-web:latest`
+
+**운영 설정 변경:** `~/prod/smart-school-cdn/` 파일 직접 수정 후 `docker compose up -d`
+- `docker-compose.yml` — 컨테이너 구성 (레퍼런스: `deploy/docker-compose.yml`)
+- `nginx.conf` — Admin Web 리버스 프록시 (레퍼런스: `deploy/nginx.conf`)
+- `.env` — 환경 변수
 
 **최초 prod 세팅:**
 ```bash
 mkdir -p ~/prod/smart-school-cdn
 cp deploy/docker-compose.yml ~/prod/smart-school-cdn/docker-compose.yml
+cp deploy/nginx.conf ~/prod/smart-school-cdn/nginx.conf
 cp .env.example ~/prod/smart-school-cdn/.env
 # .env 편집 후
 pnpm ship
 ```
-
-- Registry: `ghcr.io/bluleo78/smart-school-cdn/{proxy|admin}:latest`
-- Prod compose: `deploy/docker-compose.yml` (이미지 참조) / 개발 빌드: `docker-compose.prod.yml`
-- Admin Web은 `admin` 이미지에 nginx로 내장됨
 
 ## Key Files
 
