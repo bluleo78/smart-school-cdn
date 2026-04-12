@@ -159,21 +159,21 @@
 > **핵심 파이프라인 완성: DNS → HTTPS Proxy → 캐시**
 
 ### 5-1. DNS 서버
-- [ ] hickory-dns 기반 DNS 서버 (포트 53)
-- [ ] 미등록 도메인 → upstream DNS 포워딩
-- [ ] 등록 도메인 → CDN 서버 IP 반환 + 와일드카드 지원
+- [x] hickory-dns 기반 DNS 서버 (포트 53)
+- [x] 미등록 도메인 → upstream DNS 포워딩
+- [x] 등록 도메인 → CDN 서버 IP 반환 + 와일드카드 지원
 
 ### 5-2. Admin API — 도메인 관리
-- [ ] `POST /api/domains` — 도메인 추가 → DNS 오버라이드 + 인증서 발급
-- [ ] `GET /api/domains` — 목록 (DNS 상태, 인증서 상태 포함)
-- [ ] `DELETE /api/domains/:id` — 삭제 → DNS 해제 + 인증서 제거
-- [ ] `GET /api/domains/:id` — 상세 (캐시 통계, 인증서 정보)
+- [x] `POST /api/domains` — 도메인 추가 → DNS 오버라이드 + 인증서 발급
+- [x] `GET /api/domains` — 목록 (DNS 상태, 인증서 상태 포함)
+- [x] `DELETE /api/domains/:id` — 삭제 → DNS 해제 + 인증서 제거
+- [x] `GET /api/domains/:id` — 상세 (캐시 통계, 인증서 정보)
 
 ### 5-3. Dashboard — 도메인 관리 페이지
-- [ ] 도메인 목록 테이블 (도메인명, DNS 상태, 인증서 상태, 캐시 사용량)
-- [ ] 도메인 추가 다이얼로그 (React Hook Form + Zod v4 검증)
-- [ ] 도메인 삭제 확인 다이얼로그
-- [ ] 도메인 상세 페이지 (캐시 통계 탭, 인증서 정보 탭)
+- [x] 도메인 목록 테이블 (도메인명, DNS 상태, 인증서 상태, 캐시 사용량)
+- [x] 도메인 추가 다이얼로그 (React Hook Form + Zod v4 검증)
+- [x] 도메인 삭제 확인 다이얼로그
+- [x] 도메인 상세 페이지 (캐시 통계 탭, 인증서 정보 탭)
 
 ### 검증 (전체 E2E)
 > 대시보드에서 `cdn.textbook.com` 도메인 추가 → 목록에 "활성" 배지 표시
@@ -182,6 +182,55 @@
 > 태블릿 DNS를 CDN으로 설정 → 교과서 앱에서 콘텐츠 로딩 → 대시보드에 HIT/MISS 통계 반영
 > 도메인 상세 페이지에서 캐시 히트율, 트래픽 확인
 > 도메인 삭제 → DNS 오버라이드 해제 → `dig` 원본 IP 응답
+
+---
+
+## Phase 5.5: Admin Web 디자인 시스템 통합 + UX 개선
+
+> 목표: 전 페이지에 일관된 디자인 시스템 적용. Tailwind v4 @theme 토큰, 공통 UI 컴포넌트 라이브러리, UX 결함 수정.
+
+### 5.5-1. 디자인 토큰 + 공통 유틸리티
+- [ ] `index.css` — Tailwind v4 `@theme` 블록으로 시맨틱 CSS 변수 정의
+- [ ] `lib/utils.ts` — `cn()` 유틸리티 (clsx + tailwind-merge)
+- [ ] `lib/format.ts` — `formatUptime()` 공유 유틸리티 (중복 제거)
+- [ ] `sonner` 설치 — 통합 토스트 알림
+
+### 5.5-2. UI 컴포넌트 라이브러리
+- [ ] `Card`, `CardHeader`, `CardContent`, `CardTitle` — 시맨틱 토큰 적용
+- [ ] `Dialog` — ESC 키 + 배경 클릭으로 닫기
+- [ ] `AlertDialog` — 삭제 확인 전용
+- [ ] `Input`, `Table`, `Skeleton` — 시맨틱 토큰 적용
+
+### 5.5-3. App 셸 + AppLayout
+- [ ] `App.tsx` — `<Toaster />` 마운트 + 404 폴백 라우트
+- [ ] `AppLayout.tsx` — 시맨틱 토큰으로 전면 교체
+
+### 5.5-4. DashboardPage + 카드 컴포넌트
+- [ ] `ProxyStatusCard`, `CacheHitRateCard`, `BandwidthCard`, `StorageUsageCard` — 에러 상태 표시 + 시맨틱 토큰
+- [ ] `DashboardPage` — 반응형 그리드 + 공통 컴포넌트 적용
+
+### 5.5-5. SystemPage 마이그레이션
+- [ ] 시맨틱 토큰 전면 적용, `formatUptime` 공유 유틸 사용
+
+### 5.5-6. CachePage 마이그레이션
+- [ ] 시맨틱 토큰 + 공통 컴포넌트 적용, 퍼지 성공 토스트
+
+### 5.5-7. DomainsPage 마이그레이션 + UX 개선
+- [ ] 추가/삭제 성공 토스트, API 에러 표시
+- [ ] 사이드 패널 `AlertDialog` 기반 삭제 확인
+- [ ] 시맨틱 토큰 전면 적용
+
+### 5.5-8. 차트/테이블 컴포넌트 + 최종 검증
+- [ ] `CacheHitRateChart`, `RequestLogTable` 시맨틱 토큰 적용
+- [ ] E2E 전체 통과 확인
+
+### 검증
+> 브라우저에서 전 페이지 일관된 디자인 확인
+> 도메인 추가/삭제 → 토스트 알림 표시
+> 다이얼로그 ESC·배경 클릭으로 닫히는지 확인
+> API 에러 → 에러 메시지 (false zero 없음)
+> 404 경로 접근 → 폴백 페이지 표시
+> `pnpm test:e2e` → 전체 E2E 통과
 
 ---
 
@@ -297,6 +346,7 @@
 | 3 | 운영 환경 구성 | Docker Compose prod | prod 환경에서 전체 동작 |
 | 4 | + HTTPS | 자체 CA | 인증서 다운로드 + 상태 확인 |
 | 5 | + DNS | **핵심 파이프라인 완성** | 도메인 CRUD + 전체 E2E |
+| 5.5 | Admin Web 디자인 시스템 | 일관된 UI + UX 개선 | 전 페이지 디자인 통합 + 토스트 + 에러 상태 |
 | 6 | 서비스 분리 | 마이크로서비스 | 서비스별 헬스체크 카드 |
 | 7 | + 최적화 | 이미지 WebP | 프로파일 편집 + 절감 통계 |
 | 8 | + 고급 기능 | 요청 병합, 로그 | 메모리 캐시 비율 + 로그 뷰어 |
