@@ -1,6 +1,9 @@
 /// 최근 프록시 요청 로그를 테이블로 보여주는 컴포넌트
 /// 5초 간격으로 API를 폴링하여 최신 로그를 표시한다.
 import { useProxyRequests } from '../../hooks/useProxyRequests';
+import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
+import { Skeleton } from '../ui/skeleton';
 
 /** 상태코드에 따른 배지 색상 반환
  *  2xx: 초록 (성공), 3xx: 파랑 (리다이렉트), 4xx: 노랑 (클라이언트 에러), 5xx: 빨강 (서버 에러) */
@@ -18,64 +21,80 @@ function formatTime(timestamp: string): string {
 }
 
 export function RequestLogTable() {
-  const { data: logs, isLoading } = useProxyRequests();
+  const { data: logs, isLoading, error } = useProxyRequests();
 
   // 로딩 중일 때 스켈레톤 표시
   if (isLoading) {
     return (
-      <div className="rounded-lg border border-gray-200 bg-white p-6" data-testid="request-log-loading">
-        <div className="animate-pulse space-y-3">
-          <div className="h-4 w-32 rounded bg-gray-200" />
-          <div className="h-4 w-full rounded bg-gray-200" />
-          <div className="h-4 w-full rounded bg-gray-200" />
-        </div>
-      </div>
+      <Card data-testid="request-log-loading">
+        <CardHeader><CardTitle>최근 요청</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-full" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (error) {
+    return (
+      <Card>
+        <CardHeader><CardTitle>최근 요청</CardTitle></CardHeader>
+        <CardContent>
+          <p className="text-sm text-destructive">요청 로그를 불러오지 못했습니다.</p>
+        </CardContent>
+      </Card>
     );
   }
 
   // 로그가 없을 때 안내 메시지
   if (!logs || logs.length === 0) {
     return (
-      <div className="rounded-lg border border-gray-200 bg-white p-6">
-        <h3 className="text-sm font-medium text-gray-500 mb-3">최근 요청 로그</h3>
-        <p className="text-gray-400 text-sm">요청 로그가 없습니다</p>
-      </div>
+      <Card>
+        <CardHeader><CardTitle>최근 요청</CardTitle></CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">요청 로그가 없습니다</p>
+        </CardContent>
+      </Card>
     );
   }
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-6">
-      <h3 className="text-sm font-medium text-gray-500 mb-3">최근 요청 로그</h3>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-gray-100 text-left text-gray-500">
-              <th className="pb-2 pr-4 font-medium">시간</th>
-              <th className="pb-2 pr-4 font-medium">메서드</th>
-              <th className="pb-2 pr-4 font-medium">Host</th>
-              <th className="pb-2 pr-4 font-medium">URL</th>
-              <th className="pb-2 pr-4 font-medium">상태</th>
-              <th className="pb-2 font-medium">응답시간</th>
-            </tr>
-          </thead>
-          <tbody>
-            {logs.map((log) => (
-              <tr key={`${log.timestamp}-${log.host}-${log.url}`} className="border-b border-gray-50">
-                <td className="py-2 pr-4 text-gray-500">{formatTime(log.timestamp)}</td>
-                <td className="py-2 pr-4 font-mono">{log.method}</td>
-                <td className="py-2 pr-4 text-gray-600">{log.host}</td>
-                <td className="py-2 pr-4 font-mono text-gray-800 max-w-xs truncate">{log.url}</td>
-                <td className="py-2 pr-4">
-                  <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${statusColor(log.status_code)}`}>
-                    {log.status_code}
-                  </span>
-                </td>
-                <td className="py-2 text-gray-600">{log.response_time_ms}ms</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
+    <Card>
+      <CardHeader><CardTitle>최근 요청</CardTitle></CardHeader>
+      <CardContent>
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>시간</TableHead>
+                <TableHead>메서드</TableHead>
+                <TableHead>Host</TableHead>
+                <TableHead>URL</TableHead>
+                <TableHead>상태</TableHead>
+                <TableHead>응답시간</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {logs.map((log) => (
+                <TableRow key={`${log.timestamp}-${log.host}-${log.url}`}>
+                  <TableCell className="text-muted-foreground">{formatTime(log.timestamp)}</TableCell>
+                  <TableCell className="font-mono">{log.method}</TableCell>
+                  <TableCell>{log.host}</TableCell>
+                  <TableCell className="font-mono max-w-xs truncate">{log.url}</TableCell>
+                  <TableCell>
+                    <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${statusColor(log.status_code)}`}>
+                      {log.status_code}
+                    </span>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">{log.response_time_ms}ms</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
