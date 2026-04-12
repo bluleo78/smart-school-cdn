@@ -9,8 +9,15 @@ vi.mock('axios', () => ({
   default: { post: vi.fn().mockResolvedValue({ status: 200 }) },
 }));
 
+/** tls-service / dns-service gRPC 팬아웃 mock */
+const mockTlsClient = { syncDomains: vi.fn().mockResolvedValue({ success: true }) };
+const mockDnsClient = { syncDomains: vi.fn().mockResolvedValue({ success: true }) };
+
 function buildApp(domainRepo: DomainRepository) {
   const app = Fastify({ logger: false });
+  // gRPC 클라이언트 데코레이터 — 도메인 변경 시 팬아웃 호출됨
+  app.decorate('tlsClient', mockTlsClient);
+  app.decorate('dnsClient', mockDnsClient);
   app.register(domainRoutes, { domainRepo });
   return app;
 }
@@ -121,6 +128,35 @@ describe('POST /api/domains', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/domains',
+      payload: { host: 'textbook.com', origin: 'https://textbook.com' },
+    });
+    expect(res.statusCode).toBe(201);
+  });
+
+  it('도메인 추가 시 tls-service와 dns-service에 syncDomains가 호출된다', async () => {
+    mockTlsClient.syncDomains.mockClear();
+    mockDnsClient.syncDomains.mockClear();
+
+    const repo = makeRepo();
+    const app = buildApp(repo);
+    await app.inject({
+      method: 'POST', url: '/api/domains',
+      payload: { host: 'textbook.com', origin: 'https://textbook.com' },
+    });
+
+    expect(mockTlsClient.syncDomains).toHaveBeenCalledWith(
+      expect.arrayContaining([{ host: 'textbook.com', origin: 'https://textbook.com' }]),
+    );
+    expect(mockDnsClient.syncDomains).toHaveBeenCalled();
+  });
+
+  it('gRPC 팬아웃 실패해도 클라이언트에는 201을 반환한다', async () => {
+    mockTlsClient.syncDomains.mockRejectedValueOnce(new Error('UNAVAILABLE'));
+
+    const repo = makeRepo();
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'POST', url: '/api/domains',
       payload: { host: 'textbook.com', origin: 'https://textbook.com' },
     });
     expect(res.statusCode).toBe(201);

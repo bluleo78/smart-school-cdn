@@ -87,3 +87,97 @@ test.describe('발급된 인증서 목록', () => {
   // 30초마다 자동 갱신: useTls 훅의 refetchInterval: 30_000 옵션으로 구현됨.
   // E2E에서 타이머 기반 폴링을 직접 검증하는 것은 신뢰성이 낮으므로 생략한다.
 });
+
+/// 서비스 상태 그리드 — Phase 6 마이크로서비스 헬스체크 UI
+/// 커버리지:
+///   정상 렌더링  ✅
+///   오프라인 상태 ✅
+///   장애 배너    ✅
+test.describe('서비스 상태 그리드', () => {
+  const allOnlineStatus = {
+    proxy:   { online: true,  latency_ms: 12 },
+    storage: { online: true,  latency_ms: 3  },
+    tls:     { online: true,  latency_ms: 5  },
+    dns:     { online: true,  latency_ms: 2  },
+  };
+
+  test('4개 서비스 카드가 모두 렌더링된다', async ({ page }) => {
+    await mockApi(page, 'GET', '/system/status', allOnlineStatus);
+    await page.goto('/system');
+
+    const cards = page.getByTestId('service-status-card');
+    await expect(cards).toHaveCount(4);
+  });
+
+  test('모든 서비스 온라인일 때 온라인 배지가 4개 표시된다', async ({ page }) => {
+    await mockApi(page, 'GET', '/system/status', allOnlineStatus);
+    await page.goto('/system');
+
+    // 온라인 배지 텍스트 확인
+    const badges = page.getByTestId('service-status-badge');
+    await expect(badges).toHaveCount(4);
+    for (const badge of await badges.all()) {
+      await expect(badge).toHaveText('온라인');
+    }
+  });
+
+  test('온라인 서비스는 응답시간(ms)을 표시한다', async ({ page }) => {
+    await mockApi(page, 'GET', '/system/status', allOnlineStatus);
+    await page.goto('/system');
+
+    // 응답시간 형식 검증 (숫자ms 형태)
+    const latencies = page.getByTestId('service-status-latency');
+    await expect(latencies).toHaveCount(4);
+    const texts = await latencies.allTextContents();
+    for (const text of texts) {
+      expect(text).toMatch(/^\d+ms$/);
+    }
+  });
+
+  test('일부 서비스 오프라인일 때 오프라인 배지가 표시된다', async ({ page }) => {
+    const partialOffline = {
+      ...allOnlineStatus,
+      storage: { online: false, latency_ms: -1 },
+    };
+    await mockApi(page, 'GET', '/system/status', partialOffline);
+    await page.goto('/system');
+
+    // 오프라인 배지는 1개
+    const offlineBadges = page.getByTestId('service-status-badge').filter({ hasText: '오프라인' });
+    await expect(offlineBadges).toHaveCount(1);
+  });
+
+  test('오프라인 서비스는 응답시간 대신 대시(—)를 표시한다', async ({ page }) => {
+    const partialOffline = {
+      ...allOnlineStatus,
+      dns: { online: false, latency_ms: -1 },
+    };
+    await mockApi(page, 'GET', '/system/status', partialOffline);
+    await page.goto('/system');
+
+    const latencies = page.getByTestId('service-status-latency');
+    const texts = await latencies.allTextContents();
+    // 최소 1개는 대시
+    expect(texts.some(t => t === '—')).toBe(true);
+  });
+
+  test('서비스 장애 시 오프라인 배너가 표시된다', async ({ page }) => {
+    const offlineStatus = {
+      ...allOnlineStatus,
+      storage: { online: false, latency_ms: -1 },
+    };
+    await mockApi(page, 'GET', '/system/status', offlineStatus);
+    await page.goto('/system');
+
+    await expect(page.getByTestId('service-offline-banner')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText('일부 서비스가 오프라인입니다.')).toBeVisible();
+  });
+
+  test('모든 서비스 온라인일 때 장애 배너가 없다', async ({ page }) => {
+    await mockApi(page, 'GET', '/system/status', allOnlineStatus);
+    await page.goto('/system');
+
+    // 배너가 없는 경우 — 렌더링되지 않아야 함
+    await expect(page.getByTestId('service-offline-banner')).not.toBeVisible();
+  });
+});

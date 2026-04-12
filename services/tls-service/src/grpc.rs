@@ -93,3 +93,97 @@ impl TlsService for TlsGrpc {
         Ok(Response::new(HealthResponse { online: true, latency_ms: 0 }))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use tempfile::TempDir;
+    use tonic::Request;
+
+    use cdn_proto::tls::{CertRequest, Empty, SyncDomainsRequest, HealthRequest, TlsDomain};
+    use crate::tls::TlsManager;
+
+    /// 테스트용 TlsGrpc 인스턴스 생성 (임시 디렉터리에 CA 생성)
+    fn make_grpc() -> (TlsGrpc, TempDir) {
+        let dir = TempDir::new().unwrap();
+        let tls_manager = TlsManager::load_or_create(dir.path()).expect("TlsManager 초기화 실패");
+        (TlsGrpc { tls_manager }, dir)
+    }
+
+    #[tokio::test]
+    async fn get_or_issue_cert_는_유효한_pem을_반환한다() {
+        let (grpc, _dir) = make_grpc();
+        let res = grpc
+            .get_or_issue_cert(Request::new(CertRequest {
+                domain: "test.example.com".to_string(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(res.found);
+        assert!(res.cert_pem.contains("BEGIN CERTIFICATE"));
+        assert!(res.key_pem.contains("BEGIN"));
+    }
+
+    #[tokio::test]
+    async fn get_ca_cert_는_ca_pem을_반환한다() {
+        let (grpc, _dir) = make_grpc();
+        let res = grpc
+            .get_ca_cert(Request::new(Empty {}))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(res.cert_pem.contains("BEGIN CERTIFICATE"));
+    }
+
+    #[tokio::test]
+    async fn list_certificates_는_발급된_인증서_목록을_반환한다() {
+        let (grpc, _dir) = make_grpc();
+        // 인증서 발급
+        grpc.get_or_issue_cert(Request::new(CertRequest {
+            domain: "listtest.example.com".to_string(),
+        }))
+        .await
+        .unwrap();
+
+        let res = grpc
+            .list_certificates(Request::new(Empty {}))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(res.certs.iter().any(|c| c.domain == "listtest.example.com"));
+    }
+
+    #[tokio::test]
+    async fn sync_domains_는_도메인별_인증서를_사전_발급한다() {
+        let (grpc, _dir) = make_grpc();
+        let res = grpc
+            .sync_domains(Request::new(SyncDomainsRequest {
+                domains: vec![
+                    TlsDomain { host: "a.example.com".to_string(), origin: "https://a.example.com".to_string() },
+                    TlsDomain { host: "b.example.com".to_string(), origin: "https://b.example.com".to_string() },
+                ],
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(res.success);
+    }
+
+    #[tokio::test]
+    async fn health_는_online_true를_반환한다() {
+        let (grpc, _dir) = make_grpc();
+        let res = grpc
+            .health(Request::new(HealthRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(res.online);
+    }
+}

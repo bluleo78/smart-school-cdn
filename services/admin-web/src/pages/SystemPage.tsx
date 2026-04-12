@@ -82,7 +82,7 @@ export function SystemPage() {
 
       {/* 서비스 장애 배너 */}
       {anyOffline && (
-        <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-destructive">
+        <div data-testid="service-offline-banner" className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-destructive">
           <p className="font-semibold">일부 서비스가 오프라인입니다.</p>
           <p className="mt-1 text-sm">서비스 상태를 확인하세요.</p>
         </div>

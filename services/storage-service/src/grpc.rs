@@ -134,3 +134,172 @@ impl StorageService for StorageGrpc {
         }))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use tempfile::TempDir;
+    use tonic::Request;
+
+    use cdn_proto::storage::{
+        GetRequest, PutRequest, PurgeRequest, StatsRequest, PopularRequest, HealthRequest,
+        PurgeAll, purge_request::Target,
+    };
+    use crate::cache::CacheLayer;
+
+    /// 테스트용 StorageGrpc 인스턴스 생성
+    fn make_grpc() -> (StorageGrpc, TempDir) {
+        let dir = TempDir::new().unwrap();
+        let cache = Arc::new(CacheLayer::new(
+            dir.path().to_path_buf(),
+            100 * 1024 * 1024, // 100 MiB
+        ));
+        (StorageGrpc { cache }, dir)
+    }
+
+    #[tokio::test]
+    async fn get_miss_시_hit_false를_반환한다() {
+        let (grpc, _dir) = make_grpc();
+        let res = grpc
+            .get(Request::new(GetRequest { key: "missing_key".to_string() }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(!res.hit);
+        assert!(res.body.is_empty());
+    }
+
+    #[tokio::test]
+    async fn put_후_get_hit_시_body를_반환한다() {
+        let (grpc, _dir) = make_grpc();
+        // 캐시에 저장
+        grpc.put(Request::new(PutRequest {
+            key:          "k1".to_string(),
+            url:          "https://example.com/file.mp4".to_string(),
+            domain:       "example.com".to_string(),
+            content_type: "video/mp4".to_string(),
+            body:         b"hello".to_vec(),
+            ttl_secs:     0,
+        }))
+        .await
+        .unwrap();
+
+        // 조회
+        let res = grpc
+            .get(Request::new(GetRequest { key: "k1".to_string() }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(res.hit);
+        assert_eq!(res.body, b"hello");
+        assert_eq!(res.content_type, "video/mp4");
+    }
+
+    #[tokio::test]
+    async fn purge_url_후_get은_miss를_반환한다() {
+        let (grpc, _dir) = make_grpc();
+        grpc.put(Request::new(PutRequest {
+            key: "k2".to_string(),
+            url: "https://example.com/img.png".to_string(),
+            domain: "example.com".to_string(),
+            content_type: "image/png".to_string(),
+            body: b"img".to_vec(),
+            ttl_secs: 0,
+        }))
+        .await
+        .unwrap();
+
+        grpc.purge(Request::new(PurgeRequest {
+            target: Some(Target::Url("https://example.com/img.png".to_string())),
+        }))
+        .await
+        .unwrap();
+
+        let res = grpc
+            .get(Request::new(GetRequest { key: "k2".to_string() }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(!res.hit);
+    }
+
+    #[tokio::test]
+    async fn purge_all_후_entry_count는_0이다() {
+        let (grpc, _dir) = make_grpc();
+        // 항목 2개 저장
+        for i in 0..2u8 {
+            grpc.put(Request::new(PutRequest {
+                key:          format!("k{i}"),
+                url:          format!("https://example.com/{i}"),
+                domain:       "example.com".to_string(),
+                content_type: "text/plain".to_string(),
+                body:         vec![i],
+                ttl_secs:     0,
+            }))
+            .await
+            .unwrap();
+        }
+
+        let purge_res = grpc
+            .purge(Request::new(PurgeRequest {
+                target: Some(Target::All(PurgeAll {})),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(purge_res.purged_files >= 1);
+        assert_eq!(grpc.cache.entry_count().await, 0);
+    }
+
+    #[tokio::test]
+    async fn stats_는_올바른_총_용량을_반환한다() {
+        let (grpc, _dir) = make_grpc();
+        let res = grpc
+            .stats(Request::new(StatsRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(res.total_bytes, 100 * 1024 * 1024);
+        assert_eq!(res.used_bytes, 0);
+    }
+
+    #[tokio::test]
+    async fn popular_limit_반영하여_최대_n건_반환한다() {
+        let (grpc, _dir) = make_grpc();
+        // 3개 저장 후 limit 2로 조회
+        for i in 0..3u8 {
+            grpc.put(Request::new(PutRequest {
+                key: format!("p{i}"), url: format!("https://ex.com/{i}"),
+                domain: "ex.com".to_string(), content_type: "text/plain".to_string(),
+                body: vec![i], ttl_secs: 0,
+            }))
+            .await
+            .unwrap();
+        }
+
+        let res = grpc
+            .popular(Request::new(PopularRequest { limit: 2 }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(res.entries.len() <= 2);
+    }
+
+    #[tokio::test]
+    async fn health_는_online_true를_반환한다() {
+        let (grpc, _dir) = make_grpc();
+        let res = grpc
+            .health(Request::new(HealthRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(res.online);
+    }
+}
