@@ -52,8 +52,8 @@ build_and_push() {
     proxy)
       log "Building + pushing proxy..."
       docker buildx build --platform "$PLATFORM" --no-cache \
-        -t "$REGISTRY/proxy:latest" --push \
-        services/proxy/
+        -t "$REGISTRY/proxy:latest" \
+        -f services/proxy/Dockerfile --push .
       ;;
     admin-server)
       log "Building + pushing admin-server..."
