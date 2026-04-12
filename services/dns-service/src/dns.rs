@@ -237,4 +237,167 @@ mod tests {
             panic!("A 레코드가 아닙니다");
         }
     }
+
+    use tokio::sync::RwLock;
+
+    // ── A 쿼리 메시지 직렬화 헬퍼 ────────────────────────────────────
+    fn make_a_query(id: u16, name_str: &str) -> Vec<u8> {
+        use hickory_proto::op::{Message, MessageType, OpCode, Query};
+        use hickory_proto::rr::{Name, RecordType};
+        use hickory_proto::serialize::binary::BinEncodable;
+        use std::str::FromStr;
+
+        let mut msg = Message::new();
+        msg.set_id(id);
+        msg.set_message_type(MessageType::Query);
+        msg.set_op_code(OpCode::Query);
+        msg.set_recursion_desired(true);
+        let name = Name::from_str(name_str).unwrap();
+        let mut q = Query::new();
+        q.set_name(name);
+        q.set_query_type(RecordType::A);
+        msg.add_query(q);
+        let mut buf = Vec::new();
+        let mut encoder = BinEncoder::new(&mut buf);
+        msg.emit(&mut encoder).unwrap();
+        buf
+    }
+
+    // ── AAAA 쿼리 메시지 직렬화 헬퍼 ─────────────────────────────────
+    fn make_aaaa_query(id: u16, name_str: &str) -> Vec<u8> {
+        use hickory_proto::op::{Message, MessageType, OpCode, Query};
+        use hickory_proto::rr::{Name, RecordType};
+        use hickory_proto::serialize::binary::BinEncodable;
+        use std::str::FromStr;
+
+        let mut msg = Message::new();
+        msg.set_id(id);
+        msg.set_message_type(MessageType::Query);
+        msg.set_op_code(OpCode::Query);
+        msg.set_recursion_desired(true);
+        let name = Name::from_str(name_str).unwrap();
+        let mut q = Query::new();
+        q.set_name(name);
+        q.set_query_type(RecordType::AAAA);
+        msg.add_query(q);
+        let mut buf = Vec::new();
+        let mut encoder = BinEncoder::new(&mut buf);
+        msg.emit(&mut encoder).unwrap();
+        buf
+    }
+
+    /// handle_dns_query: 등록 도메인 A 쿼리 → CDN IP가 담긴 응답을 반환한다
+    #[tokio::test]
+    async fn handle_dns_query_등록_도메인은_cdn_ip를_반환한다() {
+        // 서버 소켓 (응답 수신용), 클라이언트 소켓 (응답 돌려받을 주소 역할)
+        let server_sock = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let client_sock = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let client_addr = client_sock.local_addr().unwrap();
+
+        let cdn_ip: Ipv4Addr = "10.0.0.1".parse().unwrap();
+        let upstream: SocketAddr = "127.0.0.1:1".parse().unwrap(); // 미사용
+
+        // 도메인 맵에 textbook.com 등록
+        let mut map_inner = HashMap::new();
+        map_inner.insert("textbook.com".to_string(), "https://textbook.com".to_string());
+        let domain_map: DomainMap = Arc::new(RwLock::new(map_inner));
+
+        let buf = make_a_query(7, "textbook.com.");
+
+        // handle_dns_query 직접 호출 — src=client_addr 로 응답 전송
+        handle_dns_query(&buf, client_addr, &server_sock, &domain_map, cdn_ip, upstream)
+            .await
+            .unwrap();
+
+        // 클라이언트 소켓에서 응답 수신
+        let mut resp = [0u8; 512];
+        let (len, _) = client_sock.recv_from(&mut resp).await.unwrap();
+
+        // 응답 파싱
+        let mut dec = BinDecoder::new(&resp[..len]);
+        let msg = Message::read(&mut dec).unwrap();
+
+        // A 레코드 1개, CDN IP와 일치해야 한다
+        assert_eq!(msg.answers().len(), 1);
+        if let RData::A(a) = msg.answers()[0].data() {
+            assert_eq!(a.0, cdn_ip);
+        } else {
+            panic!("A 레코드가 아닙니다");
+        }
+        assert_eq!(msg.header().id(), 7);
+    }
+
+    /// handle_dns_query: 미등록 도메인 → mock upstream으로 포워딩하고 응답을 돌려준다
+    #[tokio::test]
+    async fn handle_dns_query_미등록_도메인은_upstream에_포워딩된다() {
+        // mock upstream: 쿼리를 받으면 동일 바이트를 그대로 돌려주는 에코 서버
+        let upstream_sock = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let upstream_addr = upstream_sock.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            let mut buf = [0u8; 512];
+            if let Ok((len, src)) = upstream_sock.recv_from(&mut buf).await {
+                // 에코: 받은 바이트 그대로 돌려줌
+                let _ = upstream_sock.send_to(&buf[..len], src).await;
+            }
+        });
+
+        let server_sock = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let client_sock = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let client_addr = client_sock.local_addr().unwrap();
+
+        let cdn_ip: Ipv4Addr = "10.0.0.1".parse().unwrap();
+        // 빈 맵 — unknown.com 미등록
+        let domain_map: DomainMap = Arc::new(RwLock::new(HashMap::new()));
+
+        let buf = make_a_query(99, "unknown.com.");
+
+        handle_dns_query(&buf, client_addr, &server_sock, &domain_map, cdn_ip, upstream_addr)
+            .await
+            .unwrap();
+
+        // 클라이언트에서 응답 수신 (에코이므로 쿼리와 동일)
+        let mut resp = [0u8; 512];
+        client_sock
+            .recv_from(&mut resp)
+            .await
+            .unwrap();
+        // 응답이 도착했으면 포워딩 성공
+    }
+
+    /// handle_dns_query: non-A 쿼리(AAAA) → upstream으로 포워딩된다
+    #[tokio::test]
+    async fn handle_dns_query_non_a_쿼리는_upstream에_포워딩된다() {
+        // mock upstream 에코 서버
+        let upstream_sock = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let upstream_addr = upstream_sock.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            let mut buf = [0u8; 512];
+            if let Ok((len, src)) = upstream_sock.recv_from(&mut buf).await {
+                let _ = upstream_sock.send_to(&buf[..len], src).await;
+            }
+        });
+
+        let server_sock = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let client_sock = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let client_addr = client_sock.local_addr().unwrap();
+
+        let cdn_ip: Ipv4Addr = "10.0.0.1".parse().unwrap();
+        // textbook.com은 등록되어 있지만 AAAA 쿼리는 upstream으로 가야 한다
+        let mut map_inner = HashMap::new();
+        map_inner.insert("textbook.com".to_string(), "https://textbook.com".to_string());
+        let domain_map: DomainMap = Arc::new(RwLock::new(map_inner));
+
+        // AAAA 쿼리 생성
+        let buf = make_aaaa_query(55, "textbook.com.");
+
+        handle_dns_query(&buf, client_addr, &server_sock, &domain_map, cdn_ip, upstream_addr)
+            .await
+            .unwrap();
+
+        let mut resp = [0u8; 512];
+        client_sock.recv_from(&mut resp).await.unwrap();
+        // 에코 응답이 도착하면 포워딩 성공
+    }
 }

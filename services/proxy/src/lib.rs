@@ -606,6 +606,799 @@ async fn update_domains_handler(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::body::to_bytes;
+    use axum::http::{Request, StatusCode};
+    use tower::ServiceExt;
+
+    // ─── Mock gRPC 서버 ──────────────────────────────────────────────
+
+    use cdn_proto::storage::{
+        storage_service_server::{StorageService, StorageServiceServer},
+        GetRequest, GetResponse, PutRequest, PutResponse,
+        PurgeRequest, PurgeResponse, StatsRequest, StatsResponse,
+        PopularRequest, PopularResponse,
+        HealthRequest as StorageHealthRequest, HealthResponse as StorageHealthResponse,
+        DomainStat, PopularEntry,
+    };
+    use cdn_proto::tls::{
+        tls_service_server::{TlsService, TlsServiceServer},
+        CertRequest, CertResponse, CertInfo, CertListResponse,
+        CaCertResponse, SyncDomainsRequest, SyncDomainsResponse,
+        Empty,
+        HealthRequest as TlsHealthRequest, HealthResponse as TlsHealthResponse,
+    };
+    use std::sync::Mutex as StdMutex;
+
+    /// Mock Storage gRPC 서비스 — 인메모리 맵으로 get/put/purge/stats/popular 구현
+    #[derive(Default)]
+    struct MockStorage {
+        /// key → (body, content_type)
+        data: StdMutex<HashMap<String, (Vec<u8>, String)>>,
+    }
+
+    #[tonic::async_trait]
+    impl StorageService for MockStorage {
+        async fn get(
+            &self,
+            req: tonic::Request<GetRequest>,
+        ) -> Result<tonic::Response<GetResponse>, tonic::Status> {
+            let data = self.data.lock().unwrap();
+            let key = &req.into_inner().key;
+            match data.get(key) {
+                Some((body, ct)) => Ok(tonic::Response::new(GetResponse {
+                    hit: true,
+                    body: body.clone(),
+                    content_type: ct.clone(),
+                })),
+                None => Ok(tonic::Response::new(GetResponse {
+                    hit: false,
+                    body: vec![],
+                    content_type: String::new(),
+                })),
+            }
+        }
+
+        async fn put(
+            &self,
+            req: tonic::Request<PutRequest>,
+        ) -> Result<tonic::Response<PutResponse>, tonic::Status> {
+            let inner = req.into_inner();
+            self.data
+                .lock()
+                .unwrap()
+                .insert(inner.key, (inner.body, inner.content_type));
+            Ok(tonic::Response::new(PutResponse {}))
+        }
+
+        async fn purge(
+            &self,
+            _: tonic::Request<PurgeRequest>,
+        ) -> Result<tonic::Response<PurgeResponse>, tonic::Status> {
+            Ok(tonic::Response::new(PurgeResponse {
+                purged_files: 1,
+                freed_bytes: 100,
+            }))
+        }
+
+        async fn stats(
+            &self,
+            _: tonic::Request<StatsRequest>,
+        ) -> Result<tonic::Response<StatsResponse>, tonic::Status> {
+            Ok(tonic::Response::new(StatsResponse {
+                hit_rate: 0.0,
+                used_bytes: 1024,
+                total_bytes: 10240,
+                domain_stats: vec![DomainStat {
+                    domain: "test.com".into(),
+                    size_bytes: 512,
+                    file_count: 5,
+                    hit_rate: 0.0,
+                }],
+            }))
+        }
+
+        async fn popular(
+            &self,
+            _: tonic::Request<PopularRequest>,
+        ) -> Result<tonic::Response<PopularResponse>, tonic::Status> {
+            Ok(tonic::Response::new(PopularResponse {
+                entries: vec![PopularEntry {
+                    url: "https://test.com/img.jpg".into(),
+                    domain: "test.com".into(),
+                    size_bytes: 100,
+                    hit_count: 42,
+                }],
+            }))
+        }
+
+        async fn health(
+            &self,
+            _: tonic::Request<StorageHealthRequest>,
+        ) -> Result<tonic::Response<StorageHealthResponse>, tonic::Status> {
+            Ok(tonic::Response::new(StorageHealthResponse {
+                online: true,
+                latency_ms: 0,
+            }))
+        }
+    }
+
+    /// Mock TLS gRPC 서비스 — get_ca_cert는 빈 PEM을 반환하고, 인증서 목록 포함
+    #[derive(Default)]
+    struct MockTls;
+
+    /// 테스트용 자체 서명 CA PEM (rustls-pemfile 파싱 없이 get_ca_cert_pem()만 사용)
+    const MOCK_CA_PEM: &str = "mock-ca-pem";
+
+    #[tonic::async_trait]
+    impl TlsService for MockTls {
+        async fn get_ca_cert(
+            &self,
+            _: tonic::Request<Empty>,
+        ) -> Result<tonic::Response<CaCertResponse>, tonic::Status> {
+            Ok(tonic::Response::new(CaCertResponse {
+                cert_pem: MOCK_CA_PEM.to_string(),
+            }))
+        }
+
+        async fn get_or_issue_cert(
+            &self,
+            _: tonic::Request<CertRequest>,
+        ) -> Result<tonic::Response<CertResponse>, tonic::Status> {
+            Ok(tonic::Response::new(CertResponse {
+                found: false,
+                cert_pem: String::new(),
+                key_pem: String::new(),
+            }))
+        }
+
+        async fn list_certificates(
+            &self,
+            _: tonic::Request<Empty>,
+        ) -> Result<tonic::Response<CertListResponse>, tonic::Status> {
+            Ok(tonic::Response::new(CertListResponse {
+                certs: vec![CertInfo {
+                    domain: "example.com".into(),
+                    issued_at: "2026-01-01T00:00:00Z".into(),
+                    expires_at: "2027-01-01T00:00:00Z".into(),
+                    status: "active".into(),
+                }],
+            }))
+        }
+
+        async fn sync_domains(
+            &self,
+            _: tonic::Request<SyncDomainsRequest>,
+        ) -> Result<tonic::Response<SyncDomainsResponse>, tonic::Status> {
+            Ok(tonic::Response::new(SyncDomainsResponse { success: true }))
+        }
+
+        async fn health(
+            &self,
+            _: tonic::Request<TlsHealthRequest>,
+        ) -> Result<tonic::Response<TlsHealthResponse>, tonic::Status> {
+            Ok(tonic::Response::new(TlsHealthResponse {
+                online: true,
+                latency_ms: 0,
+            }))
+        }
+    }
+
+    /// 임시 TCP 리스너에서 인프로세스 gRPC 서버 시작 — 주소 문자열 반환
+    async fn start_mock_storage_server() -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let svc = StorageServiceServer::new(MockStorage::default());
+        tokio::spawn(async move {
+            tonic::transport::Server::builder()
+                .add_service(svc)
+                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
+                .await
+                .unwrap();
+        });
+        format!("http://127.0.0.1:{}", addr.port())
+    }
+
+    async fn start_mock_tls_server() -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let svc = TlsServiceServer::new(MockTls);
+        tokio::spawn(async move {
+            tonic::transport::Server::builder()
+                .add_service(svc)
+                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
+                .await
+                .unwrap();
+        });
+        format!("http://127.0.0.1:{}", addr.port())
+    }
+
+    /// 테스트용 AdminState 생성 — mock gRPC 서버에 연결
+    async fn make_test_admin_state() -> (
+        state::SharedState,
+        Arc<Mutex<clients::storage_client::StorageClient>>,
+        Arc<Mutex<clients::tls_client::TlsClient>>,
+        DomainMap,
+        clients::tls_client::CertCache,
+    ) {
+        let storage_url = start_mock_storage_server().await;
+        let tls_url = start_mock_tls_server().await;
+
+        // gRPC 서버 기동 대기 (짧은 재시도)
+        let storage = loop {
+            match clients::storage_client::StorageClient::connect(&storage_url).await {
+                Ok(c) => break c,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        };
+        let tls = loop {
+            match clients::tls_client::TlsClient::connect(&tls_url).await {
+                Ok(c) => break c,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        };
+
+        let cert_cache = tls.cert_cache.clone();
+        let shared = Arc::new(tokio::sync::RwLock::new(state::AppState::new()));
+        let domain_map: DomainMap = Arc::new(tokio::sync::RwLock::new(HashMap::new()));
+
+        (
+            shared,
+            Arc::new(Mutex::new(storage)),
+            Arc::new(Mutex::new(tls)),
+            domain_map,
+            cert_cache,
+        )
+    }
+
+    // ─── Admin 라우터 핸들러 테스트 ─────────────────────────────────────
+
+    /// /status → 200 OK, online=true
+    #[tokio::test]
+    async fn status_handler_현재_상태를_반환한다() {
+        let (shared, storage, tls, domain_map, cert_cache) = make_test_admin_state().await;
+        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache);
+
+        let resp = router
+            .oneshot(
+                Request::builder()
+                    .uri("/status")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = to_bytes(resp.into_body(), 1024).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["online"], true);
+    }
+
+    /// /requests → 200 OK, JSON 배열
+    #[tokio::test]
+    async fn requests_handler_요청_로그를_반환한다() {
+        let (shared, storage, tls, domain_map, cert_cache) = make_test_admin_state().await;
+        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache);
+
+        let resp = router
+            .oneshot(
+                Request::builder()
+                    .uri("/requests")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = to_bytes(resp.into_body(), 1024).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(json.is_array());
+    }
+
+    /// /cache/stats → 200 OK, hit_count 필드 포함
+    #[tokio::test]
+    async fn cache_stats_handler_통계를_반환한다() {
+        let (shared, storage, tls, domain_map, cert_cache) = make_test_admin_state().await;
+        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache);
+
+        let resp = router
+            .oneshot(
+                Request::builder()
+                    .uri("/cache/stats")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = to_bytes(resp.into_body(), 4096).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(json.get("hit_count").is_some());
+        assert!(json.get("miss_count").is_some());
+    }
+
+    /// /cache/popular → 200 OK, entries 배열
+    #[tokio::test]
+    async fn cache_popular_handler_인기_항목을_반환한다() {
+        let (shared, storage, tls, domain_map, cert_cache) = make_test_admin_state().await;
+        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache);
+
+        let resp = router
+            .oneshot(
+                Request::builder()
+                    .uri("/cache/popular")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = to_bytes(resp.into_body(), 4096).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(json.is_array());
+        // mock에서 1개 항목 반환
+        assert_eq!(json.as_array().unwrap().len(), 1);
+        assert_eq!(json[0]["domain"], "test.com");
+    }
+
+    /// DELETE /cache/purge?type=url — target 없으면 400
+    #[tokio::test]
+    async fn cache_purge_handler_target_없으면_400을_반환한다() {
+        let (shared, storage, tls, domain_map, cert_cache) = make_test_admin_state().await;
+        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache);
+
+        let resp = router
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/cache/purge")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(r#"{"type":"url"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    /// DELETE /cache/purge type=url, target 있음 → 200
+    #[tokio::test]
+    async fn cache_purge_handler_url_퍼지_성공() {
+        let (shared, storage, tls, domain_map, cert_cache) = make_test_admin_state().await;
+        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache);
+
+        let resp = router
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/cache/purge")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(
+                        r#"{"type":"url","target":"https://test.com/img.jpg"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = to_bytes(resp.into_body(), 1024).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(json.get("purged_count").is_some());
+    }
+
+    /// DELETE /cache/purge type=domain → 200
+    #[tokio::test]
+    async fn cache_purge_handler_domain_퍼지_성공() {
+        let (shared, storage, tls, domain_map, cert_cache) = make_test_admin_state().await;
+        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache);
+
+        let resp = router
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/cache/purge")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(
+                        r#"{"type":"domain","target":"test.com"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    /// DELETE /cache/purge type=all → 200
+    #[tokio::test]
+    async fn cache_purge_handler_all_퍼지_성공() {
+        let (shared, storage, tls, domain_map, cert_cache) = make_test_admin_state().await;
+        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache);
+
+        let resp = router
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/cache/purge")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(r#"{"type":"all"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    /// DELETE /cache/purge type=invalid → purged_count=0
+    #[tokio::test]
+    async fn cache_purge_handler_invalid_type_은_0을_반환한다() {
+        let (shared, storage, tls, domain_map, cert_cache) = make_test_admin_state().await;
+        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache);
+
+        let resp = router
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/cache/purge")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(r#"{"type":"bogus"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = to_bytes(resp.into_body(), 1024).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["purged_count"], 0);
+    }
+
+    /// /tls/ca → 200, content-type: application/x-pem-file
+    #[tokio::test]
+    async fn tls_ca_handler_ca_pem을_반환한다() {
+        let (shared, storage, tls, domain_map, cert_cache) = make_test_admin_state().await;
+        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache);
+
+        let resp = router
+            .oneshot(
+                Request::builder()
+                    .uri("/tls/ca")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get("content-type").unwrap(),
+            "application/x-pem-file"
+        );
+        let body = to_bytes(resp.into_body(), 4096).await.unwrap();
+        assert!(!body.is_empty());
+    }
+
+    /// /tls/certificates → 200, JSON 배열, domain 필드 포함
+    #[tokio::test]
+    async fn tls_certificates_handler_인증서_목록을_반환한다() {
+        let (shared, storage, tls, domain_map, cert_cache) = make_test_admin_state().await;
+        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache);
+
+        let resp = router
+            .oneshot(
+                Request::builder()
+                    .uri("/tls/certificates")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = to_bytes(resp.into_body(), 4096).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(json.is_array());
+        assert_eq!(json[0]["domain"], "example.com");
+    }
+
+    /// POST /domains → 200, 도메인 맵 갱신
+    #[tokio::test]
+    async fn update_domains_handler_도메인_맵을_갱신한다() {
+        let (shared, storage, tls, domain_map, cert_cache) = make_test_admin_state().await;
+        let domain_map_check = domain_map.clone();
+        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache);
+
+        let resp = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/domains")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(
+                        r#"{"domains":[{"host":"cdn.test.com","origin":"https://origin.test.com"}]}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        // 도메인 맵이 갱신되었는지 확인
+        let map = domain_map_check.read().await;
+        assert!(map.contains_key("cdn.test.com"));
+    }
+
+    // ─── pem_to_uuid 테스트 ─────────────────────────────────────────────
+
+    /// pem_to_uuid는 동일 입력에 대해 결정론적 출력을 반환한다
+    #[test]
+    fn pem_to_uuid_는_결정론적_출력을_반환한다() {
+        let u1 = pem_to_uuid("test");
+        let u2 = pem_to_uuid("test");
+        assert_eq!(u1, u2);
+        // 다른 입력은 다른 출력
+        assert_ne!(pem_to_uuid("a"), pem_to_uuid("b"));
+    }
+
+    // ─── proxy 라우터 핸들러 테스트 ────────────────────────────────────
+
+    /// 미등록 도메인 요청 → 404 Not Found
+    #[tokio::test]
+    async fn proxy_handler_미등록_도메인은_404를_반환한다() {
+        let storage_url = start_mock_storage_server().await;
+        let tls_url = start_mock_tls_server().await;
+
+        let storage = loop {
+            match clients::storage_client::StorageClient::connect(&storage_url).await {
+                Ok(c) => break c,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        };
+        let tls = loop {
+            match clients::tls_client::TlsClient::connect(&tls_url).await {
+                Ok(c) => break c,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        };
+        let cert_cache = tls.cert_cache.clone();
+        let domain_map: DomainMap = Arc::new(tokio::sync::RwLock::new(HashMap::new()));
+        let ps = ProxyState {
+            shared: Arc::new(tokio::sync::RwLock::new(state::AppState::new())),
+            http_client: reqwest::Client::new(),
+            storage: Arc::new(Mutex::new(storage)),
+            tls_client: Arc::new(Mutex::new(tls)),
+            domain_map,
+            cert_cache,
+        };
+
+        let router = build_proxy_router(ps);
+        let resp = router
+            .oneshot(
+                Request::builder()
+                    .uri("/some/path")
+                    .header("host", "unknown.example.com")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    /// Host 헤더 없는 요청 → 400 Bad Request
+    #[tokio::test]
+    async fn proxy_handler_host_헤더_없으면_400을_반환한다() {
+        let storage_url = start_mock_storage_server().await;
+        let tls_url = start_mock_tls_server().await;
+
+        let storage = loop {
+            match clients::storage_client::StorageClient::connect(&storage_url).await {
+                Ok(c) => break c,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        };
+        let tls = loop {
+            match clients::tls_client::TlsClient::connect(&tls_url).await {
+                Ok(c) => break c,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        };
+        let cert_cache = tls.cert_cache.clone();
+        let domain_map: DomainMap = Arc::new(tokio::sync::RwLock::new(HashMap::new()));
+        let ps = ProxyState {
+            shared: Arc::new(tokio::sync::RwLock::new(state::AppState::new())),
+            http_client: reqwest::Client::new(),
+            storage: Arc::new(Mutex::new(storage)),
+            tls_client: Arc::new(Mutex::new(tls)),
+            domain_map,
+            cert_cache,
+        };
+
+        let router = build_proxy_router(ps);
+        let resp = router
+            .oneshot(
+                Request::builder()
+                    .uri("/")
+                    // host 헤더 없음
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    /// /ca.crt 요청 → 200, application/x-pem-file
+    #[tokio::test]
+    async fn ca_cert_handler_pem_파일을_반환한다() {
+        let storage_url = start_mock_storage_server().await;
+        let tls_url = start_mock_tls_server().await;
+
+        let storage = loop {
+            match clients::storage_client::StorageClient::connect(&storage_url).await {
+                Ok(c) => break c,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        };
+        let tls = loop {
+            match clients::tls_client::TlsClient::connect(&tls_url).await {
+                Ok(c) => break c,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        };
+        let cert_cache = tls.cert_cache.clone();
+        let ps = ProxyState {
+            shared: Arc::new(tokio::sync::RwLock::new(state::AppState::new())),
+            http_client: reqwest::Client::new(),
+            storage: Arc::new(Mutex::new(storage)),
+            tls_client: Arc::new(Mutex::new(tls)),
+            domain_map: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+            cert_cache,
+        };
+
+        let router = build_proxy_router(ps);
+        let resp = router
+            .oneshot(
+                Request::builder()
+                    .uri("/ca.crt")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get("content-type").unwrap(),
+            "application/x-pem-file"
+        );
+    }
+
+    /// /ca.mobileconfig → 200, application/x-apple-aspen-config
+    #[tokio::test]
+    async fn ca_mobileconfig_handler_mobileconfig를_반환한다() {
+        let storage_url = start_mock_storage_server().await;
+        let tls_url = start_mock_tls_server().await;
+
+        let storage = loop {
+            match clients::storage_client::StorageClient::connect(&storage_url).await {
+                Ok(c) => break c,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        };
+        let tls = loop {
+            match clients::tls_client::TlsClient::connect(&tls_url).await {
+                Ok(c) => break c,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        };
+        let cert_cache = tls.cert_cache.clone();
+        let ps = ProxyState {
+            shared: Arc::new(tokio::sync::RwLock::new(state::AppState::new())),
+            http_client: reqwest::Client::new(),
+            storage: Arc::new(Mutex::new(storage)),
+            tls_client: Arc::new(Mutex::new(tls)),
+            domain_map: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+            cert_cache,
+        };
+
+        let router = build_proxy_router(ps);
+        let resp = router
+            .oneshot(
+                Request::builder()
+                    .uri("/ca.mobileconfig")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get("content-type").unwrap(),
+            "application/x-apple-aspen-config"
+        );
+    }
+
+    /// proxy_handler: 등록 도메인 + 캐시 HIT → X-Cache-Status: HIT
+    #[tokio::test]
+    async fn proxy_handler_캐시_hit_시_hit_헤더를_반환한다() {
+        let storage_url = start_mock_storage_server().await;
+        let tls_url = start_mock_tls_server().await;
+
+        let storage_client = loop {
+            match clients::storage_client::StorageClient::connect(&storage_url).await {
+                Ok(c) => break c,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        };
+        let tls = loop {
+            match clients::tls_client::TlsClient::connect(&tls_url).await {
+                Ok(c) => break c,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        };
+        let cert_cache = tls.cert_cache.clone();
+
+        // 캐시 키를 미리 계산하여 mock storage에 직접 삽입
+        let cache_key = compute_cache_key("GET", "cached.test.com", "/img.jpg", "");
+        {
+            // storage gRPC put 직접 호출 대신 내부 인메모리 삽입은 불가하므로
+            // StorageClient::put()을 통해 넣는다
+            let mut sc = storage_client.clone();
+            sc.put(
+                &cache_key,
+                "https://cached.test.com/img.jpg",
+                "cached.test.com",
+                Some("image/jpeg".to_string()),
+                bytes::Bytes::from("fake-image-data"),
+                None,
+            )
+            .await;
+        }
+
+        let mut domain_map_inner = HashMap::new();
+        domain_map_inner.insert(
+            "cached.test.com".to_string(),
+            "https://origin.test.com".to_string(),
+        );
+        let domain_map: DomainMap = Arc::new(tokio::sync::RwLock::new(domain_map_inner));
+
+        let ps = ProxyState {
+            shared: Arc::new(tokio::sync::RwLock::new(state::AppState::new())),
+            http_client: reqwest::Client::new(),
+            storage: Arc::new(Mutex::new(storage_client)),
+            tls_client: Arc::new(Mutex::new(tls)),
+            domain_map,
+            cert_cache,
+        };
+
+        let router = build_proxy_router(ps);
+        let resp = router
+            .oneshot(
+                Request::builder()
+                    .uri("/img.jpg")
+                    .header("host", "cached.test.com")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get("x-cache-status").unwrap(),
+            "HIT"
+        );
+    }
 
     // ── compute_cache_key ────────────────────────────────────────
 
