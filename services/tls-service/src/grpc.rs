@@ -16,7 +16,7 @@ use crate::tls::TlsManager;
 
 /// gRPC 핸들러 — TlsManager Arc를 공유한다
 pub struct TlsGrpc {
-    pub tls_manager: Arc<TlsManager>,
+    pub(crate) tls_manager: Arc<TlsManager>,
 }
 
 #[tonic::async_trait]
@@ -32,11 +32,10 @@ impl TlsService for TlsGrpc {
                 cert_pem: cached.cert_pem.clone(),
                 key_pem:  cached.key_pem.clone(),
             })),
-            None => Ok(Response::new(CertResponse {
-                found:    false,
-                cert_pem: String::new(),
-                key_pem:  String::new(),
-            })),
+            None => {
+                tracing::error!("도메인 {} 인증서 발급 실패", domain);
+                Err(Status::internal(format!("인증서 발급 실패: {domain}")))
+            }
         }
     }
 
@@ -69,10 +68,22 @@ impl TlsService for TlsGrpc {
     async fn sync_domains(
         &self, req: Request<SyncDomainsRequest>,
     ) -> Result<Response<SyncDomainsResponse>, Status> {
-        for d in req.into_inner().domains {
-            let _ = self.tls_manager.get_or_issue(&d.host);
+        let domains = req.into_inner().domains;
+        let mut failed = 0u32;
+        for d in &domains {
+            match self.tls_manager.get_or_issue(&d.host) {
+                Some(_) => {},
+                None => {
+                    tracing::warn!("sync_domains: {} 인증서 발급 실패", d.host);
+                    failed += 1;
+                }
+            }
         }
-        Ok(Response::new(SyncDomainsResponse { success: true }))
+        let success = failed == 0;
+        if !success {
+            tracing::error!("sync_domains: {}개 도메인 인증서 발급 실패 (총 {}개)", failed, domains.len());
+        }
+        Ok(Response::new(SyncDomainsResponse { success }))
     }
 
     /// 헬스체크
