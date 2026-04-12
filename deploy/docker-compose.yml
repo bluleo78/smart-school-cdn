@@ -13,23 +13,74 @@ name: smart-school-cdn-prod
 #     admin-data/          (Admin SQLite DB — 자동 생성)
 
 services:
+  storage-service:
+    image: ghcr.io/bluleo78/smart-school-cdn/storage-service:latest
+    restart: unless-stopped
+    volumes:
+      - ./cache-data:/app/cache
+    environment:
+      - CACHE_DIR=/app/cache
+      - CACHE_MAX_SIZE_GB=${CACHE_MAX_SIZE_GB:-20}
+      - RUST_LOG=info
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - cdn-net
+
+  tls-service:
+    image: ghcr.io/bluleo78/smart-school-cdn/tls-service:latest
+    restart: unless-stopped
+    volumes:
+      - ./certs-data:/app/certs
+    environment:
+      - CERTS_DIR=/app/certs
+      - RUST_LOG=info
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - cdn-net
+
+  dns-service:
+    image: ghcr.io/bluleo78/smart-school-cdn/dns-service:latest
+    restart: unless-stopped
+    ports:
+      - "53:53/udp"    # DNS 쿼리
+    environment:
+      - CDN_IP=${CDN_IP}                          # 등록 도메인에 반환할 CDN 서버 IP
+      - DNS_UPSTREAM=${DNS_UPSTREAM:-8.8.8.8}     # 미등록 도메인 포워딩 대상
+      - RUST_LOG=info
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - cdn-net
+
   proxy:
     image: ghcr.io/bluleo78/smart-school-cdn/proxy:latest
     restart: unless-stopped
     ports:
       - "8080:8080"   # HTTP 프록시 + CA 다운로드
       - "443:443"     # HTTPS 프록시
-      - "53:53/udp"   # DNS 서버
-    volumes:
-      - ./cache-data:/app/cache
-      - ./certs-data:/app/certs
     environment:
-      - CACHE_DIR=/app/cache
-      - CACHE_MAX_SIZE_GB=${CACHE_MAX_SIZE_GB:-20}
-      - CERTS_DIR=/app/certs
-      - CDN_IP=${CDN_IP}                          # 등록 도메인에 반환할 CDN 서버 IP
-      - DNS_UPSTREAM=${DNS_UPSTREAM:-8.8.8.8}     # 미등록 도메인 포워딩 대상
+      - STORAGE_GRPC_URL=http://storage-service:50051
+      - TLS_GRPC_URL=http://tls-service:50052
       - RUST_LOG=info
+    depends_on:
+      storage-service:
+        condition: service_healthy
+      tls-service:
+        condition: service_healthy
     networks:
       - cdn-net
     healthcheck:
@@ -51,8 +102,17 @@ services:
       - PROXY_ADMIN_URL=http://proxy:8081
       - PROXY_HTTP_URL=http://proxy:8080
       - PROXY_HTTPS_URL=https://proxy:443
+      - STORAGE_GRPC_URL=http://storage-service:50051
+      - TLS_GRPC_URL=http://tls-service:50052
+      - DNS_GRPC_URL=http://dns-service:50053
     depends_on:
       proxy:
+        condition: service_healthy
+      storage-service:
+        condition: service_healthy
+      tls-service:
+        condition: service_healthy
+      dns-service:
         condition: service_healthy
     networks:
       - cdn-net

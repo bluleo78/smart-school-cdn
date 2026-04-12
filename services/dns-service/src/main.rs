@@ -1,3 +1,5 @@
+/// dns-service 진입점
+/// - DNS UDP 서버(:53), gRPC 서버(:50053), HTTP 헬스체크(:8082)를 병행 기동한다
 mod dns;
 mod grpc;
 
@@ -6,12 +8,16 @@ use std::{
     net::{Ipv4Addr, SocketAddr},
     sync::Arc,
 };
+use axum::{Router, routing::get};
 use tokio::sync::RwLock;
 use tonic::transport::Server;
 use tracing_subscriber::EnvFilter;
 
 use cdn_proto::dns::dns_service_server::DnsServiceServer;
 use grpc::{DnsGrpc, DomainMap};
+
+/// Docker healthcheck 및 로드밸런서용 헬스 엔드포인트
+async fn health() -> &'static str { "ok" }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -51,6 +57,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         dns::run_dns_server(dns_map, cdn_ip, dns_upstream).await;
     });
 
+    // HTTP 헬스체크 서버 — Docker healthcheck용 (:8082)
+    let health_router = Router::new().route("/health", get(health));
+    let health_listener = tokio::net::TcpListener::bind("0.0.0.0:8082").await?;
+    let health_server = tokio::spawn(async move {
+        axum::serve(health_listener, health_router).await
+    });
+
     tokio::select! {
         res = dns_handle => {
             tracing::error!("DNS UDP 서버 종료: {:?}", res);
@@ -58,6 +71,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         res = Server::builder().add_service(svc).serve(addr) => {
             res?;
+        }
+        res = health_server => {
+            tracing::error!("HTTP health 서버 종료: {:?}", res);
         }
         _ = tokio::signal::ctrl_c() => {
             tracing::info!("종료 신호 수신");

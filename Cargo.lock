@@ -383,6 +383,7 @@ dependencies = [
 name = "dns-service"
 version = "0.1.0"
 dependencies = [
+ "axum 0.8.8",
  "cdn-proto",
  "hickory-proto",
  "prost",
@@ -1740,6 +1741,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 name = "storage-service"
 version = "0.1.0"
 dependencies = [
+ "axum 0.8.8",
  "bytes",
  "cdn-proto",
  "chrono",
@@ -1881,6 +1883,7 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 name = "tls-service"
 version = "0.1.0"
 dependencies = [
+ "axum 0.8.8",
  "cdn-proto",
  "chrono",
  "prost",

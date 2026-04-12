@@ -240,29 +240,29 @@
 > Dashboard에서 각 서비스 상태를 개별 모니터링.
 
 ### 6-1. Storage Service 분리
-- [ ] `proto/storage.proto` (Get, Put, Delete, Purge, Stats)
-- [ ] Proxy 내부 캐시 → Storage Service (tonic gRPC)로 추출
-- [ ] Proxy → Storage gRPC 통신
+- [x] `proto/storage.proto` (Get, Put, Delete, Purge, Stats)
+- [x] Proxy 내부 캐시 → Storage Service (tonic gRPC)로 추출
+- [x] Proxy → Storage gRPC 통신
 
 ### 6-2. TLS Service 분리
-- [ ] `proto/tls.proto` (CreateCA, IssueCert, GetCert, GetCACert)
-- [ ] Proxy 내부 인증서 → TLS Service로 추출
+- [x] `proto/tls.proto` (CreateCA, IssueCert, GetCert, GetCACert)
+- [x] Proxy 내부 인증서 → TLS Service로 추출
 
 ### 6-3. DNS Service 분리
-- [ ] `proto/dns.proto` (AddDomain, RemoveDomain, ListDomains)
-- [ ] DNS → 독립 서비스, 도메인 목록 gRPC 동적 관리
+- [x] `proto/dns.proto` (AddDomain, RemoveDomain, ListDomains)
+- [x] DNS → 독립 서비스, 도메인 목록 gRPC 동적 관리
 
 ### 6-4. Docker Compose
-- [ ] `docker-compose.yml` 서비스 구성 + gRPC 네트워크
+- [x] `docker-compose.yml` 서비스 구성 + gRPC 네트워크
 
 ### 6-5. Admin API — 서비스 헬스체크
-- [ ] `GET /api/system/status` — 각 서비스(Proxy, Storage, DNS, TLS) 개별 상태
-- [ ] Admin Server → 각 서비스 gRPC 헬스체크 호출
+- [x] `GET /api/system/status` — 각 서비스(Proxy, Storage, DNS, TLS) 개별 상태
+- [x] Admin Server → 각 서비스 gRPC 헬스체크 호출
 
 ### 6-6. Dashboard — 시스템 페이지 (v3)
-- [ ] 서비스별 상태 카드 (Proxy, Storage, DNS, TLS — 각각 온라인/오프라인 배지)
-- [ ] 서비스 응답시간 표시
-- [ ] 서비스 장애 시 알림 배너
+- [x] 서비스별 상태 카드 (Proxy, Storage, DNS, TLS — 각각 온라인/오프라인 배지)
+- [x] 서비스 응답시간 표시
+- [x] 서비스 장애 시 알림 배너
 
 ### 검증
 > **Phase 5의 전체 E2E가 동일하게 통과** (기능 변화 없음)

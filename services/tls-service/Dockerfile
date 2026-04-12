@@ -7,7 +7,7 @@ WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY crates/ ./crates/
 COPY services/ ./services/
-RUN cargo build --release --package proxy
+RUN cargo build --release --package tls-service
 
 # === Stage 2: Runtime ===
 FROM debian:bookworm-slim
@@ -15,6 +15,7 @@ FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-COPY --from=build /app/target/release/proxy ./proxy
-EXPOSE 8080 8081
-CMD ["./proxy"]
+COPY --from=build /app/target/release/tls-service ./tls-service
+# 50052: gRPC, 8081: HTTP 헬스체크
+EXPOSE 50052 8081
+CMD ["./tls-service"]

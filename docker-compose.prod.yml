@@ -1,11 +1,71 @@
 # 로컬 통합 테스트용 Docker Compose (이미지 빌드 포함)
 # prod와 포트 충돌 없도록 dev 전용 포트 사용:
-#   proxy  → 8082 (HTTP), 4443 (HTTPS)
-#   admin-web → 7778
+#   proxy      → 8082 (HTTP), 4443 (HTTPS)
+#   dns-service → 5353/udp
+#   admin-web  → 7778
 # 사용법: pnpm docker:build && pnpm docker:up
 name: smart-school-cdn-local
 
 services:
+  storage-service:
+    build:
+      context: .
+      dockerfile: services/storage-service/Dockerfile
+    restart: unless-stopped
+    volumes:
+      - cache_data:/app/cache
+    environment:
+      - CACHE_DIR=/app/cache
+      - CACHE_MAX_SIZE_GB=${CACHE_MAX_SIZE_GB:-5}
+      - RUST_LOG=info
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - cdn-local
+
+  tls-service:
+    build:
+      context: .
+      dockerfile: services/tls-service/Dockerfile
+    restart: unless-stopped
+    volumes:
+      - certs_data:/app/certs
+    environment:
+      - CERTS_DIR=/app/certs
+      - RUST_LOG=info
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - cdn-local
+
+  dns-service:
+    build:
+      context: .
+      dockerfile: services/dns-service/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "5353:53/udp"    # DNS 쿼리 (로컬 테스트 전용)
+    environment:
+      - CDN_IP=${CDN_IP:-127.0.0.1}
+      - DNS_UPSTREAM=${DNS_UPSTREAM:-8.8.8.8}
+      - RUST_LOG=info
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - cdn-local
+
   proxy:
     build:
       context: .
@@ -14,17 +74,15 @@ services:
     ports:
       - "8082:8080"   # HTTP 프록시 (로컬 테스트 전용)
       - "4443:443"    # HTTPS 프록시 (로컬 테스트 전용)
-      - "5353:53/udp" # DNS 서버 (로컬 테스트 전용 — prod 53과 충돌 방지)
-    volumes:
-      - cache_data:/app/cache
-      - certs_data:/app/certs
     environment:
-      - CACHE_DIR=/app/cache
-      - CACHE_MAX_SIZE_GB=${CACHE_MAX_SIZE_GB:-5}
-      - CERTS_DIR=/app/certs
-      - CDN_IP=${CDN_IP:-127.0.0.1}              # 로컬 테스트용 기본값
-      - DNS_UPSTREAM=${DNS_UPSTREAM:-8.8.8.8}
+      - STORAGE_GRPC_URL=http://storage-service:50051
+      - TLS_GRPC_URL=http://tls-service:50052
       - RUST_LOG=info
+    depends_on:
+      storage-service:
+        condition: service_healthy
+      tls-service:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8081/status"]
       interval: 30s
@@ -48,8 +106,17 @@ services:
       - PROXY_ADMIN_URL=http://proxy:8081
       - PROXY_HTTP_URL=http://proxy:8080
       - PROXY_HTTPS_URL=https://proxy:443
+      - STORAGE_GRPC_URL=http://storage-service:50051
+      - TLS_GRPC_URL=http://tls-service:50052
+      - DNS_GRPC_URL=http://dns-service:50053
     depends_on:
       proxy:
+        condition: service_healthy
+      storage-service:
+        condition: service_healthy
+      tls-service:
+        condition: service_healthy
+      dns-service:
         condition: service_healthy
     networks:
       - cdn-local

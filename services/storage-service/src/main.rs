@@ -1,16 +1,21 @@
 /// storage-service 진입점
 /// - gRPC StorageService 서버를 0.0.0.0:50051에서 기동
+/// - HTTP 헬스체크 서버를 0.0.0.0:8080에서 기동 (Docker healthcheck용)
 /// - 환경변수 CACHE_DIR, CACHE_MAX_SIZE_GB로 캐시 설정
 
 mod cache;
 mod grpc;
 
 use std::{path::PathBuf, sync::Arc};
+use axum::{Router, routing::get};
 use tonic::transport::Server;
 use tracing_subscriber::EnvFilter;
 
 use cdn_proto::storage::storage_service_server::StorageServiceServer;
 use grpc::StorageGrpc;
+
+/// Docker healthcheck 및 로드밸런서용 헬스 엔드포인트
+async fn health() -> &'static str { "ok" }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -38,8 +43,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .max_decoding_message_size(64 * 1024 * 1024)
         .max_encoding_message_size(64 * 1024 * 1024);
 
-    let addr = "0.0.0.0:50051".parse()?;
-    tracing::info!("storage-service 시작 — gRPC :50051");
-    Server::builder().add_service(svc).serve(addr).await?;
+    let grpc_addr = "0.0.0.0:50051".parse()?;
+    tracing::info!("storage-service 시작 — gRPC :50051, HTTP health :8080");
+
+    // HTTP 헬스체크 서버 — gRPC와 병행 실행
+    let health_router = Router::new().route("/health", get(health));
+    let health_listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await?;
+    let health_server = tokio::spawn(async move {
+        axum::serve(health_listener, health_router).await
+    });
+
+    tokio::select! {
+        res = Server::builder().add_service(svc).serve(grpc_addr) => {
+            res?;
+        }
+        res = health_server => {
+            tracing::error!("HTTP health 서버 종료: {:?}", res);
+            std::process::exit(1);
+        }
+    }
+
     Ok(())
 }
