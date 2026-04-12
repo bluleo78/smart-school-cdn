@@ -27,11 +27,13 @@ message PutRequest {
 }
 message PutResponse {}
 
+message PurgeAll {}
+
 message PurgeRequest {
   oneof target {
-    string url    = 1;
-    string domain = 2;
-    bool   all    = 3;
+    string  url    = 1;
+    string  domain = 2;
+    PurgeAll all   = 3;
   }
 }
 message PurgeResponse {
