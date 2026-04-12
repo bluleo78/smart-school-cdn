@@ -1,0 +1,36 @@
+syntax = "proto3";
+package cdn.tls;
+
+service TlsService {
+  rpc GetOrIssueCert(CertRequest)      returns (CertResponse);
+  rpc GetCACert(Empty)                 returns (CACertResponse);
+  rpc ListCertificates(Empty)          returns (CertListResponse);
+  rpc SyncDomains(SyncDomainsRequest)  returns (SyncDomainsResponse);
+  rpc Health(HealthRequest)            returns (HealthResponse);
+}
+
+message Empty {}
+
+message CertRequest  { string domain = 1; }
+message CertResponse {
+  bool   found    = 1;
+  string cert_pem = 2;
+  string key_pem  = 3;
+}
+
+message CACertResponse { string cert_pem = 1; }
+
+message CertListResponse { repeated CertInfo certs = 1; }
+message CertInfo {
+  string domain     = 1;
+  string issued_at  = 2;
+  string expires_at = 3;
+  string status     = 4;
+}
+
+message SyncDomainsRequest { repeated TlsDomain domains = 1; }
+message TlsDomain { string host = 1; string origin = 2; }
+message SyncDomainsResponse { bool success = 1; }
+
+message HealthRequest {}
+message HealthResponse { bool online = 1; int64 latency_ms = 2; }

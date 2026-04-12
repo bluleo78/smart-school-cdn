@@ -1,0 +1,14 @@
+syntax = "proto3";
+package cdn.dns;
+
+service DnsService {
+  rpc SyncDomains(SyncDomainsRequest) returns (SyncDomainsResponse);
+  rpc Health(HealthRequest)           returns (HealthResponse);
+}
+
+message SyncDomainsRequest { repeated DnsDomain domains = 1; }
+message DnsDomain { string host = 1; string origin = 2; }
+message SyncDomainsResponse { bool success = 1; }
+
+message HealthRequest {}
+message HealthResponse { bool online = 1; int64 latency_ms = 2; }
