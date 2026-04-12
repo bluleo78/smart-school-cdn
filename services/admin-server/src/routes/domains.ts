@@ -42,7 +42,8 @@ export async function domainRoutes(
 
   /** 도메인 삭제 */
   app.delete<{ Params: { host: string } }>('/api/domains/:host', async (request, reply) => {
-    const { host } = request.params;
+    // URL 인코딩된 호스트 디코딩 (*.textbook.com → %2A.textbook.com으로 전달됨)
+    const host = decodeURIComponent(request.params.host);
     const deleted = domainRepo.delete(host);
     if (deleted === 0) {
       return reply.status(404).send({ error: '도메인을 찾을 수 없습니다.' });

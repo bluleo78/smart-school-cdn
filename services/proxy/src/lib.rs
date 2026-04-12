@@ -98,10 +98,16 @@ async fn proxy_handler(
     };
 
     // domain_map에서 호스트:포트 → 호스트 추출 후 원본 서버 URL 조회
+    // 정확한 매칭 실패 시 와일드카드(*.parent.com) 폴백 적용
     let origin = {
         let map = ps.domain_map.read().await;
         let domain = host.split(':').next().unwrap_or(&host);
-        map.get(domain).cloned()
+        map.get(domain).cloned().or_else(|| {
+            domain.find('.').and_then(|pos| {
+                let wildcard = format!("*.{}", &domain[pos + 1..]);
+                map.get(&wildcard).cloned()
+            })
+        })
     };
     let origin = match origin {
         Some(o) => o,
