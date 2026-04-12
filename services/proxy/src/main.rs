@@ -15,7 +15,6 @@ use axum_server::tls_rustls::RustlsConfig;
 use std::collections::HashMap;
 
 use proxy::cache::CacheLayer;
-use proxy::config::ProxyConfig;
 use proxy::dns::run_dns_server;
 use proxy::state::{AppState, SharedState};
 use proxy::tls::TlsManager;
@@ -52,16 +51,10 @@ async fn main() {
         .init();
 
     let shared_state: SharedState = Arc::new(RwLock::new(AppState::new()));
-    let proxy_config = Arc::new(ProxyConfig::default_config());
     let http_client = reqwest::Client::new();
 
-    // 도메인 맵 초기화 — Admin Server가 시작 시 push로 갱신한다
-    let domain_map: DomainMap = Arc::new(RwLock::new({
-        let mut m = HashMap::new();
-        // 개발/테스트용 기본값: Admin Server push 전까지 사용
-        m.insert("httpbin.org".to_string(), "https://httpbin.org".to_string());
-        m
-    }));
+    // 도메인 맵 초기화 — Admin Server 시작 시 POST /domains push로 채워진다
+    let domain_map: DomainMap = Arc::new(RwLock::new(HashMap::new()));
 
     // 캐시 레이어 생성 — 기본 20GB, 캐시 디렉토리 ./cache/
     let cache_dir = PathBuf::from(
@@ -107,7 +100,6 @@ async fn main() {
 
     let ps = ProxyState {
         shared: shared_state.clone(),
-        config: proxy_config,
         http_client,
         cache: cache.clone(),
         tls_manager: tls_manager.clone(),

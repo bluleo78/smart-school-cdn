@@ -8,7 +8,6 @@ use std::sync::Arc;
 use axum::routing::get;
 use axum::Router;
 use proxy::cache::CacheLayer;
-use proxy::config::ProxyConfig;
 use proxy::state::{AppState, SharedState};
 use proxy::tls::TlsManager;
 use proxy::{DomainMap, build_admin_router, build_proxy_router, ProxyState};
@@ -25,7 +24,7 @@ pub struct TestEnv {
 
 /// 테스트 환경 부트스트랩
 /// 1. mock 원본 서버를 임의 포트에 바인드 (GET /hello → "Hello from origin")
-/// 2. proxy_config에 "test.local" → mock origin URL 매핑 등록
+/// 2. domain_map에 "test.local" → mock origin URL 매핑 등록
 /// 3. proxy 라우터 / admin 라우터를 각각 임의 포트에 바인드
 pub async fn setup_env() -> TestEnv {
     // 1. mock 원본 서버
@@ -36,30 +35,24 @@ pub async fn setup_env() -> TestEnv {
         axum::serve(origin_listener, origin_router).await.unwrap();
     });
 
-    // 2. proxy 설정 — "test.local"을 mock origin으로 라우팅
+    // 2. 공유 상태 + HTTP 클라이언트 + CacheLayer + TlsManager
     let mock_origin_url = format!("http://127.0.0.1:{origin_port}");
-    let mut domains = HashMap::new();
-    domains.insert("test.local".to_string(), mock_origin_url.clone());
-    let proxy_config = Arc::new(ProxyConfig::with_domains(domains));
-
-    // 3. 공유 상태 + HTTP 클라이언트 + CacheLayer + TlsManager
     let shared_state: SharedState = Arc::new(RwLock::new(AppState::new()));
     let http_client = reqwest::Client::new();
     let cache = Arc::new(CacheLayer::new(std::path::PathBuf::from("/tmp/test-cache"), 64 * 1024 * 1024));
     let tls_tmp = tempfile::tempdir().unwrap();
     let tls_manager = TlsManager::load_or_create(tls_tmp.path()).unwrap();
 
-    // domain_map — proxy_handler가 domain_map을 사용하므로 test.local을 주입한다
+    // domain_map — test.local → mock origin 매핑 주입
     let domain_map: DomainMap = Arc::new(RwLock::new({
         let mut m = HashMap::new();
         m.insert("test.local".to_string(), mock_origin_url.clone());
         m
     }));
 
-    // 4. 프록시 라우터 → 임의 포트 바인드
+    // 3. 프록시 라우터 → 임의 포트 바인드
     let ps = ProxyState {
         shared: shared_state.clone(),
-        config: proxy_config,
         http_client,
         cache: cache.clone(),
         tls_manager: tls_manager.clone(),

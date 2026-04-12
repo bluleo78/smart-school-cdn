@@ -11,7 +11,6 @@ use tokio::net::TcpListener;
 use tokio::sync::RwLock;
 
 use proxy::cache::CacheLayer;
-use proxy::config::ProxyConfig;
 use proxy::state::{AppState, SharedState};
 use proxy::tls::TlsManager;
 use proxy::{DomainMap, build_admin_router, build_proxy_router, ProxyState};
@@ -39,12 +38,6 @@ async fn start_test_proxy(
     });
 
     // 프록시 설정 — test.local → mock 원본
-    let mut domains = HashMap::new();
-    domains.insert(
-        "test.local".to_string(),
-        format!("http://{}", origin_addr),
-    );
-    let config = Arc::new(ProxyConfig::with_domains(domains));
     let state: SharedState = Arc::new(RwLock::new(AppState::new()));
     let client = Client::new();
     let tmp = tempfile::tempdir().unwrap();
@@ -67,7 +60,6 @@ async fn start_test_proxy(
 
     let ps = ProxyState {
         shared: state.clone(),
-        config,
         http_client: client,
         cache: cache.clone(),
         tls_manager: tls_manager.clone(),

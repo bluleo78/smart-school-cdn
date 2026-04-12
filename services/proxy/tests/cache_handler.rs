@@ -10,7 +10,6 @@ use tempfile::TempDir;
 use tokio::net::TcpListener;
 
 use proxy::cache::CacheLayer;
-use proxy::config::ProxyConfig;
 use proxy::state::{AppState, SharedState};
 use proxy::tls::TlsManager;
 use proxy::{DomainMap, build_admin_router, build_proxy_router, ProxyState};
@@ -37,8 +36,6 @@ async fn setup_cache_env() -> CacheTestEnv {
     });
 
     // 프록시 설정
-    let domains: HashMap<String, String> = HashMap::new();
-    let config = Arc::new(ProxyConfig::with_domains(domains));
     let state: SharedState = Arc::new(RwLock::new(AppState::new()));
     let client = Client::new();
 
@@ -55,7 +52,6 @@ async fn setup_cache_env() -> CacheTestEnv {
     let proxy_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let ps = ProxyState {
         shared: state.clone(),
-        config,
         http_client: client,
         cache: cache.clone(),
         tls_manager: tls_manager.clone(),

@@ -19,7 +19,6 @@ use axum::response::{IntoResponse, Json, Response};
 use axum::routing::{delete, get};
 use axum::Router;
 use cache::{CacheDirective, CacheLayer, compute_cache_key, parse_cache_control};
-use config::ProxyConfig;
 use state::{RequestLog, SharedState};
 use crate::tls::TlsManager;
 
@@ -30,7 +29,6 @@ pub type DomainMap = Arc<RwLock<HashMap<String, String>>>;
 #[derive(Clone)]
 pub struct ProxyState {
     pub shared: SharedState,
-    pub config: Arc<ProxyConfig>,
     pub http_client: reqwest::Client,
     pub cache: Arc<CacheLayer>,
     pub tls_manager: Arc<TlsManager>,
