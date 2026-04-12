@@ -33,7 +33,7 @@
 │                                                             │
 │  [관리자] ──→ [Admin Service]                                │
 │               (Node.js/Fastify + React)                     │
-│               HTTP:3000                                     │
+│               HTTP:4001                                     │
 └─────────────────────────────────────────────────────────────┘
                           │
                      [외부 인터넷]
@@ -106,7 +106,7 @@
 
 - **역할**: 관리 API + Dashboard 서빙 + 비즈니스 로직
 - **기술**: Fastify + TypeScript + better-sqlite3
-- **포트**: 3000 (API + 정적 파일)
+- **포트**: 4001 (API), 7777 (Admin Web nginx — 프로덕션)
 - **DB**: SQLite (도메인 설정, 사용자, 감사 로그, 통계 이력)
 - **핵심 기능**:
   - **REST API**:
@@ -288,19 +288,15 @@ smart-home-cdn/
 │   │   ├── Cargo.toml
 │   │   ├── Dockerfile
 │   │   └── src/
-│   ├── storage/                        # Rust - Storage Service
+│   ├── storage-service/                # Rust - Storage Service (gRPC :50051)
 │   │   ├── Cargo.toml
 │   │   ├── Dockerfile
 │   │   └── src/
-│   ├── optimizer/                      # Rust - Optimizer Service
+│   ├── tls-service/                    # Rust - TLS Service (gRPC :50052)
 │   │   ├── Cargo.toml
 │   │   ├── Dockerfile
 │   │   └── src/
-│   ├── dns/                            # Rust - DNS Service
-│   │   ├── Cargo.toml
-│   │   ├── Dockerfile
-│   │   └── src/
-│   ├── tls/                            # Rust - TLS Service
+│   ├── dns-service/                    # Rust - DNS Service (gRPC :50053, UDP :53)
 │   │   ├── Cargo.toml
 │   │   ├── Dockerfile
 │   │   └── src/
@@ -416,10 +412,9 @@ admin-web:    pnpm dev → Vite dev server (4173)
                          vite.config.ts에서 /api/* → localhost:4001 프록시
 admin-server: pnpm dev → Fastify (4001)
 
-# 프로덕션 (단일 서버)
-admin-server: 3000 포트
-  ├── /api/*  → Fastify 라우트
-  └── /*      → admin-web 빌드 결과물 (dist/) 정적 서빙
+# 프로덕션 (분리 서버)
+admin-server: 4001 포트 (Fastify API)
+admin-web:    7777 포트 (nginx — /api/* → admin-server:4001 리버스 프록시)
 ```
 
 ---
@@ -431,15 +426,15 @@ admin-server: 3000 포트
 | 서비스 | 포트 | 용도 | 비고 |
 |--------|------|------|------|
 | Proxy | **443** | iPad HTTPS 요청 수신 | |
-| DNS | **53** (UDP/TCP) | DNS 쿼리 수신 | |
+| DNS | **53** (UDP/TCP) | DNS 쿼리 수신 (프로덕션 5353→53) | |
 | Admin (프로덕션) | **7777** | Dashboard (Nginx, `WEB_PORT` 환경변수로 변경 가능) | |
 | Admin Server (개발) | **4001** | Fastify API dev | smart-fire-hub 3001 회피 |
 | Admin Web (개발) | **4173** | Vite dev server | smart-fire-hub 5173 회피 |
-| Storage gRPC | **50051** | 내부 통신 | |
-| DNS gRPC | **50052** | 내부 통신 | |
-| Optimizer gRPC | **50053** | 내부 통신 | |
-| TLS gRPC | **50054** | 내부 통신 | |
-| Proxy gRPC | **50055** | 내부 통신 (상태/통계) | |
+| Storage gRPC | **50051** | 내부 통신 | HTTP health :8080 |
+| TLS gRPC | **50052** | 내부 통신 | HTTP health :8081 |
+| DNS gRPC | **50053** | 내부 통신 | HTTP health :8082 |
+| Optimizer gRPC | **50054** | 내부 통신 (미구현) | |
+| Proxy gRPC | **50055** | 내부 통신 (미구현) | |
 
 ### smart-fire-hub 포트 (참고, 충돌 방지용)
 

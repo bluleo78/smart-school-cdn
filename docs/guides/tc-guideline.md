@@ -42,6 +42,9 @@ E2E 테스트 (End-to-End)
 | 모듈 | 단위 | 통합 | E2E | 목표 라인 커버리지 |
 |------|------|------|-----|-------------------|
 | `services/proxy` (Rust) | ✅ 필수 | ✅ 필수 | — | **≥ 80%** |
+| `services/storage-service` (Rust) | ✅ 필수 | 선택 | — | **≥ 70%** |
+| `services/tls-service` (Rust) | ✅ 필수 | 선택 | — | **≥ 70%** |
+| `services/dns-service` (Rust) | ✅ 필수 | 선택 | — | **≥ 70%** |
 | `services/admin-server` | ✅ 필수 | 선택 | — | **≥ 70%** |
 | `services/admin-web` | — | — | ✅ 필수 | **주요 플로우 100%** |
 
@@ -231,6 +234,24 @@ test.describe('캐시 관리 페이지 — URL 퍼지', () => {
 | `lib.rs` (프록시) | — | MISS→HIT 캐시 흐름, no-store BYPASS, 원본 502, Admin API(stats/popular/purge) |
 | `config.rs` | get_origin 도메인 매핑, 미등록 도메인 None | — |
 
+### services/storage-service (Rust)
+
+| 모듈 | 단위 TC 필수 항목 |
+|------|------------------|
+| `grpc.rs` | get miss, put 후 get hit, purge_url, purge_all, stats 총용량, popular limit, health |
+
+### services/tls-service (Rust)
+
+| 모듈 | 단위 TC 필수 항목 |
+|------|------------------|
+| `grpc.rs` | get_or_issue_cert 신규 발급, get_ca_cert, list_certificates, sync_domains, health |
+
+### services/dns-service (Rust)
+
+| 모듈 | 단위 TC 필수 항목 |
+|------|------------------|
+| `grpc.rs` | sync_domains 맵 갱신, sync 전체 교체, 빈 목록 처리, health |
+
 ### services/admin-server
 
 | 라우트 | 필수 TC |
@@ -258,6 +279,12 @@ test.describe('캐시 관리 페이지 — URL 퍼지', () => {
 | CachePage — 전체 퍼지 | ✅ | — | — | — | ✅ | — |
 | CachePage — 인기 콘텐츠 테이블 | ✅ | ✅ | — | — | — | — |
 | DomainsPage | 미구현 | 미구현 | 미구현 | 미구현 | 미구현 | 미구현 |
+| SystemPage — 서비스 상태 그리드 | ✅ | — | — | — | — | — |
+| SystemPage — 오프라인 배너 | ✅ | — | — | — | — | — |
+| SystemPage — 서버 업타임 | ✅ | — | ✅ | ✅ | — | — |
+| SystemPage — 캐시 디스크 사용량 | ✅ | — | ✅ | ✅ | — | — |
+| SystemPage — CA 인증서 | ✅ | — | — | — | ✅ | — |
+| SystemPage — 발급된 인증서 목록 | ✅ | ✅ | ✅ | ✅ | — | — |
 
 > **미구현** 셀은 해당 기능 구현 시 TC를 함께 추가한다.
 

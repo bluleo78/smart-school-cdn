@@ -8,6 +8,9 @@
 
 | 서비스 | 이미지 | 포트 | 설명 |
 |--------|--------|------|------|
+| storage-service | `ghcr.io/bluleo78/smart-school-cdn/storage-service:latest` | 50051 (gRPC), 8080 (health) | Rust 캐시 스토리지 |
+| tls-service | `ghcr.io/bluleo78/smart-school-cdn/tls-service:latest` | 50052 (gRPC), 8081 (health) | Rust TLS/인증서 관리 |
+| dns-service | `ghcr.io/bluleo78/smart-school-cdn/dns-service:latest` | 50053 (gRPC), 8082 (health), 5353:53/udp | Rust DNS 오버라이드 |
 | proxy | `ghcr.io/bluleo78/smart-school-cdn/proxy:latest` | 8080 (HTTP), 443 (HTTPS) | Rust 프록시 + TLS |
 | admin-server | `ghcr.io/bluleo78/smart-school-cdn/admin-server:latest` | 4001 (내부) | Fastify API |
 | admin-web | `ghcr.io/bluleo78/smart-school-cdn/admin-web:latest` | 7777 | React + nginx |
