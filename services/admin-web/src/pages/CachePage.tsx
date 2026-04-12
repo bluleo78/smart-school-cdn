@@ -1,34 +1,49 @@
-/// 캐시 관리 페이지 — 퍼지 UI + 인기 콘텐츠 테이블
-/// 퍼지: URL / 도메인 / 전체 탭 전환, 확인 Dialog, 완료 Toast
+/// 캐시 관리 페이지 — Card·AlertDialog·Input·Skeleton·Sonner·에러·반응형
 import { useState, useRef, useEffect } from 'react';
+import { toast } from 'sonner';
 import { useCacheStats } from '../hooks/useCacheStats';
 import { useCachePopular } from '../hooks/useCachePopular';
 import { usePurgeCache } from '../hooks/usePurgeCache';
 import { formatBytes } from '../lib/format';
+import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
+import { AlertDialog, AlertDialogContent, AlertDialogTitle } from '../components/ui/alert-dialog';
+import { Input } from '../components/ui/input';
+import { Button } from '../components/ui/button';
+import { Skeleton } from '../components/ui/skeleton';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 
 type PurgeTab = 'url' | 'domain' | 'all';
 
+const TAB_LABELS: Record<PurgeTab, string> = {
+  url: 'URL 퍼지',
+  domain: '도메인 퍼지',
+  all: '전체 퍼지',
+};
+
 export function CachePage() {
-  const { data: stats } = useCacheStats();
-  const { data: popular } = useCachePopular();
+  const { data: stats, isLoading: statsLoading, error: statsError } = useCacheStats();
+  const { data: popular, isLoading: popularLoading, error: popularError } = useCachePopular();
   const purge = usePurgeCache();
 
   const [activeTab, setActiveTab] = useState<PurgeTab>('url');
   const [urlInput, setUrlInput] = useState('');
   const [domainInput, setDomainInput] = useState('');
   const [showConfirm, setShowConfirm] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
+  // E2E 테스트용 상태 토스트 — data-testid="purge-toast" 유지
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // useEffect로 언마운트 시 타이머 정리
+  // 언마운트 시 타이머 정리
   useEffect(() => {
     return () => {
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     };
   }, []);
 
-  function handlePurgeClick() {
-    setShowConfirm(true);
+  function showToast(msg: string) {
+    setToastMsg(msg);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToastMsg(null), 4000);
   }
 
   async function handleConfirmPurge() {
@@ -41,14 +56,16 @@ export function CachePage() {
             ? { type: 'domain' as const, target: domainInput }
             : { type: 'all' as const };
       const result = await purge.mutateAsync(req);
-      setToast(`퍼지 완료 — ${result.purged_count}건 삭제, ${formatBytes(result.freed_bytes)} 해제`);
+      const msg = `퍼지 완료 — ${result.purged_count}건 삭제, ${formatBytes(result.freed_bytes)} 해제`;
+      toast.success(msg);
+      showToast(msg);
       setUrlInput('');
       setDomainInput('');
     } catch {
-      setToast('퍼지 실패: 서버에 연결할 수 없습니다.');
+      const msg = '퍼지 실패: 서버에 연결할 수 없습니다.';
+      toast.error(msg);
+      showToast(msg);
     }
-    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-    toastTimerRef.current = setTimeout(() => setToast(null), 4000);
   }
 
   const isPurgeDisabled =
@@ -57,180 +74,182 @@ export function CachePage() {
     (activeTab === 'domain' && !domainInput.trim());
 
   return (
-    <div>
-      <h2 className="text-2xl font-bold mb-4">캐시 관리</h2>
+    <div className="space-y-6">
+      <h2 className="text-2xl font-semibold tracking-tight">캐시 관리</h2>
 
-      {/* 토스트 알림 */}
-      {toast && (
+      {/* E2E 테스트용 상태 토스트 — sonner와 병행 */}
+      {toastMsg && (
         <div
           className="fixed bottom-4 right-4 bg-gray-800 text-white text-sm px-4 py-3 rounded-lg shadow-lg z-50"
           data-testid="purge-toast"
         >
-          {toast}
+          {toastMsg}
         </div>
       )}
 
-      {/* 확인 다이얼로그 */}
-      {showConfirm && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-40">
-          <div className="bg-white rounded-lg p-6 w-80 shadow-xl">
-            <h3 className="text-base font-semibold mb-2">퍼지 확인</h3>
-            <p className="text-sm text-gray-600 mb-4">
-              {activeTab === 'all'
-                ? '전체 캐시를 삭제합니다. 계속하시겠습니까?'
-                : activeTab === 'url'
-                  ? `"${urlInput}" 캐시를 삭제합니다.`
-                  : `"${domainInput}" 도메인 캐시를 모두 삭제합니다.`}
-            </p>
-            <div className="flex gap-2 justify-end">
-              <button
-                className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800"
-                onClick={() => setShowConfirm(false)}
-              >
-                취소
-              </button>
-              <button
-                className="px-4 py-2 text-sm bg-red-600 text-white rounded hover:bg-red-700"
-                onClick={handleConfirmPurge}
-                data-testid="confirm-purge-btn"
-              >
-                퍼지 실행
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 통계 카드 3열 */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
-        <div className="rounded-lg border border-gray-200 bg-white p-4">
-          <p className="text-xs text-gray-500 mb-1">총 캐시 항목</p>
-          <p className="text-xl font-bold">{(stats?.entry_count ?? 0).toLocaleString()}</p>
-        </div>
-        <div className="rounded-lg border border-gray-200 bg-white p-4">
-          <p className="text-xs text-gray-500 mb-1">사용량</p>
-          <p className="text-xl font-bold text-amber-600">
-            {formatBytes(stats?.total_size_bytes ?? 0)}
-          </p>
-        </div>
-        <div className="rounded-lg border border-gray-200 bg-white p-4">
-          <p className="text-xs text-gray-500 mb-1">히트율</p>
-          <p className="text-xl font-bold text-blue-600">
-            {(stats?.hit_rate ?? 0).toFixed(1)}%
-          </p>
-        </div>
+      {/* 통계 카드 — 모바일 1열, sm 이상 3열 */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <Card>
+          <CardHeader><CardTitle>총 캐시 항목</CardTitle></CardHeader>
+          <CardContent>
+            {statsLoading ? <Skeleton className="h-7 w-20" /> :
+             statsError ? <p className="text-sm text-destructive">오류</p> :
+             <p className="text-xl font-bold">{(stats?.entry_count ?? 0).toLocaleString()}</p>}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle>사용량</CardTitle></CardHeader>
+          <CardContent>
+            {statsLoading ? <Skeleton className="h-7 w-24" /> :
+             statsError ? <p className="text-sm text-destructive">오류</p> :
+             <p className="text-xl font-bold text-amber-600">{formatBytes(stats?.total_size_bytes ?? 0)}</p>}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle>히트율</CardTitle></CardHeader>
+          <CardContent>
+            {statsLoading ? <Skeleton className="h-7 w-16" /> :
+             statsError ? <p className="text-sm text-destructive">오류</p> :
+             <p className="text-xl font-bold text-primary">{(stats?.hit_rate ?? 0).toFixed(1)}%</p>}
+          </CardContent>
+        </Card>
       </div>
 
       {/* 퍼지 패널 */}
-      <div className="rounded-lg border border-gray-200 bg-white p-6 mb-6">
-        <h3 className="text-sm font-medium text-gray-700 mb-4">캐시 퍼지</h3>
-
-        {/* 탭 */}
-        <div className="flex border-b border-gray-200 mb-4">
-          {(['url', 'domain', 'all'] as PurgeTab[]).map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                activeTab === tab
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              {tab === 'url' ? 'URL 퍼지' : tab === 'domain' ? '도메인 퍼지' : '전체 퍼지'}
-            </button>
-          ))}
-        </div>
-
-        {activeTab === 'url' && (
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={urlInput}
-              onChange={(e) => setUrlInput(e.target.value)}
-              placeholder="https://cdn.textbook.com/images/cover.png"
-              className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              data-testid="url-input"
-            />
-            <button
-              onClick={handlePurgeClick}
-              disabled={isPurgeDisabled}
-              className="px-4 py-2 bg-red-600 text-white text-sm rounded hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
-              data-testid="purge-btn"
-            >
-              퍼지
-            </button>
+      <Card>
+        <CardHeader><CardTitle>캐시 퍼지</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          {/* 탭 */}
+          <div className="flex border-b border-border">
+            {(['url', 'domain', 'all'] as PurgeTab[]).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                  activeTab === tab
+                    ? 'border-primary text-foreground'
+                    : 'border-transparent text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {TAB_LABELS[tab]}
+              </button>
+            ))}
           </div>
-        )}
 
-        {activeTab === 'domain' && (
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={domainInput}
-              onChange={(e) => setDomainInput(e.target.value)}
-              placeholder="cdn.textbook.com"
-              className="flex-1 border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              data-testid="domain-input"
-            />
-            <button
-              onClick={handlePurgeClick}
-              disabled={isPurgeDisabled}
-              className="px-4 py-2 bg-red-600 text-white text-sm rounded hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
-              data-testid="purge-btn"
-            >
-              퍼지
-            </button>
-          </div>
-        )}
+          {activeTab === 'url' && (
+            <div className="flex gap-2">
+              <Input
+                value={urlInput}
+                onChange={(e) => setUrlInput(e.target.value)}
+                placeholder="https://cdn.textbook.com/images/cover.png"
+                data-testid="url-input"
+              />
+              <Button
+                variant="destructive"
+                onClick={() => setShowConfirm(true)}
+                disabled={isPurgeDisabled}
+                data-testid="purge-btn"
+              >
+                퍼지
+              </Button>
+            </div>
+          )}
 
-        {activeTab === 'all' && (
-          <div>
-            <p className="text-sm text-gray-500 mb-3">
-              모든 캐시 항목({(stats?.entry_count ?? 0).toLocaleString()}건)을 삭제합니다.
-            </p>
-            <button
-              onClick={handlePurgeClick}
-              disabled={purge.isPending}
-              className="px-4 py-2 bg-red-600 text-white text-sm rounded hover:bg-red-700 disabled:opacity-50"
-              data-testid="purge-btn"
-            >
-              전체 퍼지
-            </button>
-          </div>
-        )}
-      </div>
+          {activeTab === 'domain' && (
+            <div className="flex gap-2">
+              <Input
+                value={domainInput}
+                onChange={(e) => setDomainInput(e.target.value)}
+                placeholder="cdn.textbook.com"
+                data-testid="domain-input"
+              />
+              <Button
+                variant="destructive"
+                onClick={() => setShowConfirm(true)}
+                disabled={isPurgeDisabled}
+                data-testid="purge-btn"
+              >
+                퍼지
+              </Button>
+            </div>
+          )}
 
-      {/* 인기 콘텐츠 테이블 */}
-      <div className="rounded-lg border border-gray-200 bg-white p-6">
-        <h3 className="text-sm font-medium text-gray-500 mb-3">인기 콘텐츠</h3>
-        {!popular || popular.length === 0 ? (
-          <p className="text-sm text-gray-400">캐시된 콘텐츠가 없습니다</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-100 text-left text-gray-500">
-                  <th className="pb-2 pr-4 font-medium">URL</th>
-                  <th className="pb-2 pr-4 font-medium">크기</th>
-                  <th className="pb-2 pr-4 font-medium">히트 수</th>
-                  <th className="pb-2 font-medium">도메인</th>
-                </tr>
-              </thead>
-              <tbody>
+          {activeTab === 'all' && (
+            <div>
+              <p className="text-sm text-muted-foreground mb-3">
+                모든 캐시 항목({(stats?.entry_count ?? 0).toLocaleString()}건)을 삭제합니다.
+              </p>
+              <Button
+                variant="destructive"
+                onClick={() => setShowConfirm(true)}
+                disabled={purge.isPending}
+                data-testid="purge-btn"
+              >
+                전체 퍼지
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* 인기 콘텐츠 */}
+      <Card>
+        <CardHeader><CardTitle>인기 콘텐츠</CardTitle></CardHeader>
+        <CardContent>
+          {popularLoading ? (
+            <div className="space-y-2">
+              {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}
+            </div>
+          ) : popularError ? (
+            <p className="text-sm text-destructive">인기 콘텐츠를 불러오지 못했습니다.</p>
+          ) : !popular || popular.length === 0 ? (
+            <p className="text-sm text-muted-foreground">캐시된 콘텐츠가 없습니다</p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>URL</TableHead>
+                  <TableHead>크기</TableHead>
+                  <TableHead>히트 수</TableHead>
+                  <TableHead>도메인</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {popular.map((item) => (
-                  <tr key={item.url} className="border-b border-gray-50">
-                    <td className="py-2 pr-4 font-mono text-gray-800 max-w-xs truncate">{item.url}</td>
-                    <td className="py-2 pr-4 text-gray-600">{formatBytes(item.size_bytes)}</td>
-                    <td className="py-2 pr-4 font-semibold">{item.hit_count.toLocaleString()}</td>
-                    <td className="py-2 text-gray-500">{item.domain}</td>
-                  </tr>
+                  <TableRow key={item.url}>
+                    <TableCell className="font-mono max-w-xs truncate">{item.url}</TableCell>
+                    <TableCell className="text-muted-foreground">{formatBytes(item.size_bytes)}</TableCell>
+                    <TableCell className="font-semibold">{item.hit_count.toLocaleString()}</TableCell>
+                    <TableCell className="text-muted-foreground">{item.domain}</TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* 퍼지 확인 AlertDialog */}
+      <AlertDialog open={showConfirm} onClose={() => setShowConfirm(false)}>
+        <AlertDialogContent className="max-w-sm">
+          <AlertDialogTitle>퍼지 확인</AlertDialogTitle>
+          <p className="text-sm text-muted-foreground">
+            {activeTab === 'all'
+              ? '전체 캐시를 삭제합니다. 계속하시겠습니까?'
+              : activeTab === 'url'
+                ? `"${urlInput}" 캐시를 삭제합니다.`
+                : `"${domainInput}" 도메인 캐시를 모두 삭제합니다.`}
+          </p>
+          <div className="flex gap-2 justify-end pt-2">
+            <Button variant="ghost" onClick={() => setShowConfirm(false)}>
+              취소
+            </Button>
+            <Button variant="destructive" onClick={handleConfirmPurge} data-testid="confirm-purge-btn">
+              퍼지 실행
+            </Button>
           </div>
-        )}
-      </div>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
