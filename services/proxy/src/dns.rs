@@ -185,4 +185,56 @@ mod tests {
         let map = make_map(&[("*.textbook.com", "https://textbook.com")]);
         assert!(!is_domain_registered(&map, "cdn.otherdomain.com"));
     }
+
+    /// 다단계 서브도메인(a.b.textbook.com)은 *.textbook.com에 매칭되지 않는다.
+    /// 현재 구현은 첫 번째 레이블만 제거하므로 *.b.textbook.com만 확인한다.
+    #[test]
+    fn 다단계_서브도메인은_첫번째_레이블_기준_와일드카드만_매칭한다() {
+        let map = make_map(&[("*.textbook.com", "https://textbook.com")]);
+        // a.b.textbook.com → 첫 레이블 제거 → *.b.textbook.com → 미등록 → false
+        assert!(!is_domain_registered(&map, "a.b.textbook.com"));
+        // *.b.textbook.com을 직접 등록하면 매칭됨
+        let map2 = make_map(&[("*.b.textbook.com", "https://textbook.com")]);
+        assert!(is_domain_registered(&map2, "a.b.textbook.com"));
+    }
+
+    /// 점(.)이 없는 단일 레이블 호스트(localhost)는 false를 반환한다.
+    #[test]
+    fn 단일_레이블_호스트는_false를_반환한다() {
+        let map = make_map(&[]);
+        assert!(!is_domain_registered(&map, "localhost"));
+    }
+
+    /// build_a_response: TTL=300, A 레코드 IP, 응답 ID가 쿼리 ID와 일치한다.
+    #[test]
+    fn build_a_response_는_ttl_300_과_올바른_ip를_반환한다() {
+        use hickory_proto::op::{Message, Query};
+        use hickory_proto::rr::RecordType;
+        use std::str::FromStr;
+
+        let mut query = Message::new();
+        query.set_id(42);
+        let name = hickory_proto::rr::Name::from_str("textbook.com.").unwrap();
+        let mut q = Query::new();
+        q.set_name(name.clone());
+        q.set_query_type(RecordType::A);
+        query.add_query(q);
+
+        let ip: Ipv4Addr = "1.2.3.4".parse().unwrap();
+        let response = build_a_response(&query, name, ip).unwrap();
+
+        // 응답 ID는 쿼리 ID와 동일해야 한다
+        assert_eq!(response.header().id(), 42);
+        // RA 플래그가 설정되어야 한다
+        assert!(response.header().recursion_available());
+        // A 레코드가 1개 있어야 한다
+        assert_eq!(response.answers().len(), 1);
+        let answer = &response.answers()[0];
+        assert_eq!(answer.ttl(), 300);
+        if let hickory_proto::rr::RData::A(a) = answer.data() {
+            assert_eq!(a.0, ip);
+        } else {
+            panic!("A 레코드가 아닙니다");
+        }
+    }
 }

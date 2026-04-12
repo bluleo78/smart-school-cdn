@@ -18,6 +18,8 @@ pub struct TestEnv {
     pub proxy_addr: String,
     pub admin_addr: String,
     pub mock_origin_host: String,
+    /// mock 원본 서버의 기본 URL — 와일드카드 도메인 등록 등에 사용
+    pub mock_origin_url: String,
     /// TlsManager 임시 디렉터리 — 테스트 종료 전까지 삭제되지 않아야 한다.
     _tls_tmp: tempfile::TempDir,
 }
@@ -77,6 +79,7 @@ pub async fn setup_env() -> TestEnv {
         proxy_addr: format!("http://127.0.0.1:{proxy_port}"),
         admin_addr: format!("http://127.0.0.1:{admin_port}"),
         mock_origin_host: "test.local".to_string(),
+        mock_origin_url,
         _tls_tmp: tls_tmp,
     }
 }

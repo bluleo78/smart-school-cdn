@@ -13,6 +13,31 @@ function createDomains() {
   ];
 }
 
+test.describe('도메인 관리 — 로딩 및 에러 상태', () => {
+  test('도메인 목록 로딩 중에는 로딩 메시지가 표시된다', async ({ page }) => {
+    await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
+    await mockApi(page, 'GET', '/proxy/requests', []);
+    // 500ms 지연으로 로딩 상태 재현
+    await mockApi(page, 'GET', '/domains', createDomains(), { delay: 500 });
+
+    await page.goto('/domains');
+
+    await expect(page.getByText('로딩 중…')).toBeVisible();
+    // 로딩 완료 후 테이블이 나타나야 한다
+    await expect(page.getByTestId('domains-table')).toBeVisible();
+  });
+
+  test('도메인 목록 조회 실패 시 에러 메시지가 표시된다', async ({ page }) => {
+    await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
+    await mockApi(page, 'GET', '/proxy/requests', []);
+    await mockApi(page, 'GET', '/domains', { error: 'Internal Server Error' }, { status: 500 });
+
+    await page.goto('/domains');
+
+    await expect(page.getByText('도메인 목록을 불러오지 못했습니다.')).toBeVisible();
+  });
+});
+
 test.describe('도메인 관리 — 도메인 목록', () => {
   test('등록된 도메인이 테이블에 표시된다', async ({ page }) => {
     await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
@@ -83,6 +108,40 @@ test.describe('도메인 관리 — 도메인 추가', () => {
     await page.getByTestId('add-domain-submit').click();
 
     await expect(page.getByTestId('add-domain-error')).toBeVisible();
+  });
+
+  test('host 입력 없이 제출 시 오류가 표시된다', async ({ page }) => {
+    await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
+    await mockApi(page, 'GET', '/proxy/requests', []);
+    await mockApi(page, 'GET', '/domains', []);
+
+    await page.goto('/domains');
+
+    await page.getByTestId('add-domain-button').click();
+    // host 비워두고 origin만 입력
+    await page.getByTestId('add-domain-origin').fill('https://newdomain.com');
+    await page.getByTestId('add-domain-submit').click();
+
+    await expect(page.getByTestId('add-domain-error')).toBeVisible();
+    // 실패 시 다이얼로그는 닫히지 않아야 한다
+    await expect(page.getByTestId('add-domain-dialog')).toBeVisible();
+  });
+
+  test('API 오류 시 에러 메시지가 표시되고 다이얼로그가 유지된다', async ({ page }) => {
+    await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
+    await mockApi(page, 'GET', '/proxy/requests', []);
+    await mockApi(page, 'GET', '/domains', []);
+    await mockApi(page, 'POST', '/domains', { error: 'Server Error' }, { status: 500 });
+
+    await page.goto('/domains');
+
+    await page.getByTestId('add-domain-button').click();
+    await page.getByTestId('add-domain-host').fill('newdomain.com');
+    await page.getByTestId('add-domain-origin').fill('https://newdomain.com');
+    await page.getByTestId('add-domain-submit').click();
+
+    await expect(page.getByTestId('add-domain-error')).toContainText('도메인 추가에 실패했습니다.');
+    await expect(page.getByTestId('add-domain-dialog')).toBeVisible();
   });
 });
 
@@ -172,6 +231,25 @@ test.describe('도메인 관리 — 도메인 삭제', () => {
 
     await expect(page.getByTestId('delete-domain-dialog')).toBeVisible();
     await expect(page.getByTestId('delete-domain-dialog').getByText('textbook.com')).toBeVisible();
+  });
+
+  test('삭제 취소 시 다이얼로그가 닫히고 사이드 패널은 유지된다', async ({ page }) => {
+    await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
+    await mockApi(page, 'GET', '/proxy/requests', []);
+    await mockApi(page, 'GET', '/domains', createDomains());
+
+    await page.goto('/domains');
+
+    await page.getByTestId('domain-row-textbook.com').click();
+    await page.getByTestId('panel-delete-button').click();
+    await expect(page.getByTestId('delete-domain-dialog')).toBeVisible();
+
+    // 취소 버튼 클릭
+    await page.getByTestId('delete-domain-dialog').getByText('취소').click();
+
+    await expect(page.getByTestId('delete-domain-dialog')).not.toBeVisible();
+    // 사이드 패널은 그대로 열려 있어야 한다
+    await expect(page.getByTestId('domain-side-panel')).toBeVisible();
   });
 
   test('삭제 확인 시 사이드 패널이 닫힌다', async ({ page }) => {

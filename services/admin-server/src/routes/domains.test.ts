@@ -67,6 +67,64 @@ describe('POST /api/domains', () => {
     });
     expect(res.statusCode).toBe(400);
   });
+
+  it('origin 없으면 400 반환한다', async () => {
+    const repo = makeRepo();
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/domains',
+      payload: { host: 'textbook.com' },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('동일 host POST 시 origin이 갱신된다 (upsert)', async () => {
+    const repo = makeRepo();
+    repo.upsert('textbook.com', 'https://old.textbook.com');
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/domains',
+      payload: { host: 'textbook.com', origin: 'https://new.textbook.com' },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(repo.findByHost('textbook.com')?.origin).toBe('https://new.textbook.com');
+  });
+
+  it('도메인 추가 시 syncToProxy가 올바른 payload로 호출된다', async () => {
+    const axiosMod = await import('axios');
+    const postSpy = vi.mocked(axiosMod.default.post);
+    postSpy.mockClear();
+
+    const repo = makeRepo();
+    const app = buildApp(repo);
+    await app.inject({
+      method: 'POST',
+      url: '/api/domains',
+      payload: { host: 'textbook.com', origin: 'https://textbook.com' },
+    });
+
+    expect(postSpy).toHaveBeenCalledWith(
+      expect.stringContaining('/domains'),
+      { domains: [{ host: 'textbook.com', origin: 'https://textbook.com' }] },
+      expect.any(Object),
+    );
+  });
+
+  it('syncToProxy 실패해도 클라이언트에는 201을 반환한다', async () => {
+    const axiosMod = await import('axios');
+    vi.mocked(axiosMod.default.post).mockRejectedValueOnce(new Error('Network error'));
+
+    const repo = makeRepo();
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/domains',
+      payload: { host: 'textbook.com', origin: 'https://textbook.com' },
+    });
+    expect(res.statusCode).toBe(201);
+  });
 });
 
 describe('DELETE /api/domains/:host', () => {
@@ -84,5 +142,15 @@ describe('DELETE /api/domains/:host', () => {
     const app = buildApp(repo);
     const res = await app.inject({ method: 'DELETE', url: '/api/domains/notexist.com' });
     expect(res.statusCode).toBe(404);
+  });
+
+  it('와일드카드 도메인 URL 인코딩(%2A) 삭제 시 204 반환한다', async () => {
+    const repo = makeRepo();
+    repo.upsert('*.textbook.com', 'https://textbook.com');
+    const app = buildApp(repo);
+    // *.textbook.com → URL 인코딩 → %2A.textbook.com
+    const res = await app.inject({ method: 'DELETE', url: '/api/domains/%2A.textbook.com' });
+    expect(res.statusCode).toBe(204);
+    expect(repo.findByHost('*.textbook.com')).toBeUndefined();
   });
 });
