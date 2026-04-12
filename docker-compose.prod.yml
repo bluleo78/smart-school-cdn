@@ -1,22 +1,25 @@
-# 운영 환경 Docker Compose
-# 사용법: docker compose -f docker-compose.prod.yml up -d
+# 로컬 통합 테스트용 Docker Compose (이미지 빌드 포함)
+# prod와 포트 충돌 없도록 dev 전용 포트 사용:
+#   proxy  → 8082 (HTTP), 4443 (HTTPS)
+#   admin-web → 7778
+# 사용법: pnpm docker:build && pnpm docker:up
+name: smart-school-cdn-local
+
 services:
   proxy:
     build:
-      context: services/proxy
-      dockerfile: Dockerfile
-    restart: always
-    # 포트 8081 (관리 API)은 내부 네트워크 전용 — admin-server에서만 접근
-    # 외부 노출 불필요
+      context: .
+      dockerfile: services/proxy/Dockerfile
+    restart: unless-stopped
     ports:
-      - "8080:8080"   # HTTP 프록시 + CA 다운로드
-      - "443:443"     # HTTPS 프록시
+      - "8082:8080"   # HTTP 프록시 (로컬 테스트 전용)
+      - "4443:443"    # HTTPS 프록시 (로컬 테스트 전용)
     volumes:
       - cache_data:/app/cache
       - certs_data:/app/certs
     environment:
       - CACHE_DIR=/app/cache
-      - CACHE_MAX_SIZE_GB=${CACHE_MAX_SIZE_GB:-20}
+      - CACHE_MAX_SIZE_GB=${CACHE_MAX_SIZE_GB:-5}
       - CERTS_DIR=/app/certs
       - RUST_LOG=info
     healthcheck:
@@ -25,27 +28,48 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+    networks:
+      - cdn-local
 
   admin-server:
     build:
-      context: services/admin-server
-      dockerfile: Dockerfile
-    restart: always
-    ports:
-      - "${WEB_PORT:-7777}:3000"
+      context: .
+      dockerfile: services/admin-server/Dockerfile
+    restart: unless-stopped
     volumes:
       - admin_data:/app/data
     environment:
       - NODE_ENV=production
-      - PORT=3000
+      - PORT=4001
       - DB_PATH=/app/data/admin.db
       - PROXY_ADMIN_URL=http://proxy:8081
       - PROXY_HTTP_URL=http://proxy:8080
+      - PROXY_HTTPS_URL=https://proxy:443
     depends_on:
       proxy:
         condition: service_healthy
+    networks:
+      - cdn-local
+
+  admin-web:
+    build:
+      context: .
+      dockerfile: services/admin-web/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "7778:80"   # Admin UI (로컬 테스트 전용)
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - admin-server
+    networks:
+      - cdn-local
 
 volumes:
   cache_data:
   certs_data:
   admin_data:
+
+networks:
+  cdn-local:
+    driver: bridge
