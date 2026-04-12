@@ -1,5 +1,5 @@
 /// 도메인 관리 API 라우트
-/// Admin Server가 도메인의 소유자 — 변경 시 Proxy admin API(8081)에 전체 목록 push
+/// Admin Server가 도메인의 소유자 — 변경 시 Proxy admin API(8081) + tls/dns gRPC 서비스에 전체 목록 push
 import type { FastifyInstance } from 'fastify';
 import axios from 'axios';
 import type { DomainRepository } from '../db/domain-repo.js';
@@ -38,6 +38,12 @@ export async function domainRoutes(
       }
       domainRepo.upsert(host, origin);
       await syncToProxy(domainRepo);
+      // gRPC fan-out: tls-service + dns-service 도메인 동기화
+      const domainsAfterAdd = domainRepo.findAll().map(d => ({ host: d.host, origin: d.origin }));
+      await Promise.allSettled([
+        app.tlsClient.syncDomains(domainsAfterAdd),
+        app.dnsClient.syncDomains(domainsAfterAdd),
+      ]);
       return reply.status(201).send(domainRepo.findByHost(host));
     },
   );
@@ -51,6 +57,12 @@ export async function domainRoutes(
       return reply.status(404).send({ error: '도메인을 찾을 수 없습니다.' });
     }
     await syncToProxy(domainRepo);
+    // gRPC fan-out: tls-service + dns-service 도메인 동기화
+    const domainsAfterDelete = domainRepo.findAll().map(d => ({ host: d.host, origin: d.origin }));
+    await Promise.allSettled([
+      app.tlsClient.syncDomains(domainsAfterDelete),
+      app.dnsClient.syncDomains(domainsAfterDelete),
+    ]);
     return reply.status(204).send();
   });
 }

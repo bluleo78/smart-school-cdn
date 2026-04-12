@@ -1,17 +1,13 @@
 /// 캐시 관리 API 라우트
-/// Proxy Service 관리 API(8081)를 폴링/전달하여 Dashboard에 통계를 제공한다.
+/// storage-service gRPC(50051)를 통해 캐시 통계/인기 콘텐츠/퍼지를 제공한다.
 import type { FastifyInstance } from 'fastify';
-import axios from 'axios';
-
-const PROXY_ADMIN_URL = process.env.PROXY_ADMIN_URL || 'http://localhost:8081';
-const TIMEOUT_MS = 3000;
 
 export async function cacheRoutes(app: FastifyInstance) {
-  /** 캐시 통계 — 히트율, 총 용량, 도메인별 통계, 히트율 히스토리 */
+  /** 캐시 통계 — 히트율, 총 용량, 도메인별 통계 */
   app.get('/api/cache/stats', async () => {
     try {
-      const res = await axios.get(`${PROXY_ADMIN_URL}/cache/stats`, { timeout: TIMEOUT_MS });
-      return res.data;
+      const res = await app.storageClient.stats();
+      return res;
     } catch {
       return {
         hit_count: 0,
@@ -28,10 +24,11 @@ export async function cacheRoutes(app: FastifyInstance) {
   });
 
   /** 인기 콘텐츠 목록 — hit_count 내림차순 상위 20개 */
-  app.get('/api/cache/popular', async () => {
+  app.get<{ Querystring: { limit?: string } }>('/api/cache/popular', async (request) => {
     try {
-      const res = await axios.get(`${PROXY_ADMIN_URL}/cache/popular`, { timeout: TIMEOUT_MS });
-      return res.data;
+      const limit = Number(request.query.limit ?? 20);
+      const res = await app.storageClient.popular(limit);
+      return res.entries ?? [];
     } catch {
       return [];
     }
@@ -49,13 +46,17 @@ export async function cacheRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: `type이 "${type}"이면 target은 필수입니다.` });
     }
     try {
-      const res = await axios.delete(`${PROXY_ADMIN_URL}/cache/purge`, {
-        data: { type, target },
-        timeout: TIMEOUT_MS,
-      });
-      return res.data;
+      let res;
+      if (type === 'url') {
+        res = await app.storageClient.purgeUrl(target!);
+      } else if (type === 'domain') {
+        res = await app.storageClient.purgeDomain(target!);
+      } else {
+        res = await app.storageClient.purgeAll();
+      }
+      return res;
     } catch {
-      return reply.status(502).send({ error: 'Proxy 서버에 연결할 수 없습니다.' });
+      return reply.status(502).send({ error: 'storage-service에 연결할 수 없습니다.' });
     }
   });
 }
