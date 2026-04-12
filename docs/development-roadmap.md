@@ -190,39 +190,39 @@
 > 목표: 전 페이지에 일관된 디자인 시스템 적용. Tailwind v4 @theme 토큰, 공통 UI 컴포넌트 라이브러리, UX 결함 수정.
 
 ### 5.5-1. 디자인 토큰 + 공통 유틸리티
-- [ ] `index.css` — Tailwind v4 `@theme` 블록으로 시맨틱 CSS 변수 정의
-- [ ] `lib/utils.ts` — `cn()` 유틸리티 (clsx + tailwind-merge)
-- [ ] `lib/format.ts` — `formatUptime()` 공유 유틸리티 (중복 제거)
-- [ ] `sonner` 설치 — 통합 토스트 알림
+- [x] `index.css` — Tailwind v4 `@theme` 블록으로 시맨틱 CSS 변수 정의
+- [x] `lib/utils.ts` — `cn()` 유틸리티 (clsx + tailwind-merge)
+- [x] `lib/format.ts` — `formatUptime()` 공유 유틸리티 (중복 제거)
+- [x] `sonner` 설치 — 통합 토스트 알림
 
 ### 5.5-2. UI 컴포넌트 라이브러리
-- [ ] `Card`, `CardHeader`, `CardContent`, `CardTitle` — 시맨틱 토큰 적용
-- [ ] `Dialog` — ESC 키 + 배경 클릭으로 닫기
-- [ ] `AlertDialog` — 삭제 확인 전용
-- [ ] `Input`, `Table`, `Skeleton` — 시맨틱 토큰 적용
+- [x] `Card`, `CardHeader`, `CardContent`, `CardTitle` — 시맨틱 토큰 적용
+- [x] `Dialog` — ESC 키 + 배경 클릭으로 닫기
+- [x] `AlertDialog` — 삭제 확인 전용
+- [x] `Input`, `Table`, `Skeleton` — 시맨틱 토큰 적용
 
 ### 5.5-3. App 셸 + AppLayout
-- [ ] `App.tsx` — `<Toaster />` 마운트 + 404 폴백 라우트
-- [ ] `AppLayout.tsx` — 시맨틱 토큰으로 전면 교체
+- [x] `App.tsx` — `<Toaster />` 마운트 + 404 폴백 라우트
+- [x] `AppLayout.tsx` — 시맨틱 토큰으로 전면 교체
 
 ### 5.5-4. DashboardPage + 카드 컴포넌트
-- [ ] `ProxyStatusCard`, `CacheHitRateCard`, `BandwidthCard`, `StorageUsageCard` — 에러 상태 표시 + 시맨틱 토큰
-- [ ] `DashboardPage` — 반응형 그리드 + 공통 컴포넌트 적용
+- [x] `ProxyStatusCard`, `CacheHitRateCard`, `BandwidthCard`, `StorageUsageCard` — 에러 상태 표시 + 시맨틱 토큰
+- [x] `DashboardPage` — 반응형 그리드 + 공통 컴포넌트 적용
 
 ### 5.5-5. SystemPage 마이그레이션
-- [ ] 시맨틱 토큰 전면 적용, `formatUptime` 공유 유틸 사용
+- [x] 시맨틱 토큰 전면 적용, `formatUptime` 공유 유틸 사용
 
 ### 5.5-6. CachePage 마이그레이션
-- [ ] 시맨틱 토큰 + 공통 컴포넌트 적용, 퍼지 성공 토스트
+- [x] 시맨틱 토큰 + 공통 컴포넌트 적용, 퍼지 성공 토스트
 
 ### 5.5-7. DomainsPage 마이그레이션 + UX 개선
-- [ ] 추가/삭제 성공 토스트, API 에러 표시
-- [ ] 사이드 패널 `AlertDialog` 기반 삭제 확인
-- [ ] 시맨틱 토큰 전면 적용
+- [x] 추가/삭제 성공 토스트, API 에러 표시
+- [x] 사이드 패널 `AlertDialog` 기반 삭제 확인
+- [x] 시맨틱 토큰 전면 적용
 
 ### 5.5-8. 차트/테이블 컴포넌트 + 최종 검증
-- [ ] `CacheHitRateChart`, `RequestLogTable` 시맨틱 토큰 적용
-- [ ] E2E 전체 통과 확인
+- [x] `CacheHitRateChart`, `RequestLogTable` 시맨틱 토큰 적용
+- [x] E2E 전체 통과 확인
 
 ### 검증
 > 브라우저에서 전 페이지 일관된 디자인 확인
