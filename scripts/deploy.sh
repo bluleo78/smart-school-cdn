@@ -13,6 +13,8 @@ set -euo pipefail
 #   1. docker buildx로 멀티플랫폼 이미지 빌드 + GHCR push
 #   2. ~/prod/smart-school-cdn 에서 docker compose pull + up
 
+export DOCKER_CONTEXT=orbstack
+
 REGISTRY="ghcr.io/bluleo78/smart-school-cdn"
 PROD_DIR="$HOME/prod/smart-school-cdn"
 PLATFORM="linux/amd64,linux/arm64"
