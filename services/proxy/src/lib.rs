@@ -3,6 +3,7 @@ pub mod cache;
 pub mod tls;
 pub mod config;
 pub mod state;
+pub mod dns;
 
 use std::collections::HashMap;
 use std::sync::Arc;

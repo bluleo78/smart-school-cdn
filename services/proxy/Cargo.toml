@@ -29,6 +29,7 @@ tokio-rustls = "0.26"
 axum-server = { version = "0.7", features = ["tls-rustls"] }
 rustls-pemfile = "2"
 time = { version = "0.3", features = ["std"] }
+hickory-proto = { version = "0.25", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 tempfile = "3"

@@ -16,6 +16,7 @@ use std::collections::HashMap;
 
 use proxy::cache::CacheLayer;
 use proxy::config::ProxyConfig;
+use proxy::dns::run_dns_server;
 use proxy::state::{AppState, SharedState};
 use proxy::tls::TlsManager;
 use proxy::{DomainMap, build_admin_router, build_proxy_router, ProxyState};
@@ -92,6 +93,18 @@ async fn main() {
         }
     });
 
+    // DNS 서버 환경변수
+    let cdn_ip: std::net::Ipv4Addr = std::env::var("CDN_IP")
+        .unwrap_or_else(|_| "127.0.0.1".to_string())
+        .parse()
+        .expect("CDN_IP 환경변수가 유효한 IPv4 주소가 아닙니다");
+    let dns_upstream: std::net::SocketAddr = {
+        let s = std::env::var("DNS_UPSTREAM").unwrap_or_else(|_| "8.8.8.8".to_string());
+        // 포트 없으면 53 붙임
+        if s.contains(':') { s.parse().expect("DNS_UPSTREAM 형식 오류") }
+        else { format!("{s}:53").parse().unwrap() }
+    };
+
     let ps = ProxyState {
         shared: shared_state.clone(),
         config: proxy_config,
@@ -132,10 +145,16 @@ async fn main() {
         axum::serve(listener, admin_router).await.unwrap();
     });
 
+    let dns_server = tokio::spawn({
+        let domain_map = domain_map.clone();
+        async move { run_dns_server(domain_map, cdn_ip, dns_upstream).await }
+    });
+
     tokio::select! {
         _ = proxy_server => tracing::error!("HTTP 프록시 서버 종료"),
         _ = https_server => tracing::error!("HTTPS 프록시 서버 종료"),
         _ = admin_server => tracing::error!("Admin API 서버 종료"),
+        _ = dns_server   => tracing::error!("DNS 서버 종료"),
         _ = tokio::signal::ctrl_c() => tracing::info!("종료 신호 수신"),
     }
 }
