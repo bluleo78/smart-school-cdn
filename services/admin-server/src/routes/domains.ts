@@ -40,10 +40,16 @@ export async function domainRoutes(
       await syncToProxy(domainRepo);
       // gRPC fan-out: tls-service + dns-service 도메인 동기화
       const domainsAfterAdd = domainRepo.findAll().map(d => ({ host: d.host, origin: d.origin }));
-      await Promise.allSettled([
+      const addResults = await Promise.allSettled([
         app.tlsClient.syncDomains(domainsAfterAdd),
         app.dnsClient.syncDomains(domainsAfterAdd),
       ]);
+      for (const [i, result] of addResults.entries()) {
+        if (result.status === 'rejected') {
+          const svc = i === 0 ? 'tls-service' : 'dns-service';
+          app.log.warn({ err: result.reason }, `${svc} 도메인 동기화 실패`);
+        }
+      }
       return reply.status(201).send(domainRepo.findByHost(host));
     },
   );
@@ -59,10 +65,16 @@ export async function domainRoutes(
     await syncToProxy(domainRepo);
     // gRPC fan-out: tls-service + dns-service 도메인 동기화
     const domainsAfterDelete = domainRepo.findAll().map(d => ({ host: d.host, origin: d.origin }));
-    await Promise.allSettled([
+    const deleteResults = await Promise.allSettled([
       app.tlsClient.syncDomains(domainsAfterDelete),
       app.dnsClient.syncDomains(domainsAfterDelete),
     ]);
+    for (const [i, result] of deleteResults.entries()) {
+      if (result.status === 'rejected') {
+        const svc = i === 0 ? 'tls-service' : 'dns-service';
+        app.log.warn({ err: result.reason }, `${svc} 도메인 동기화 실패`);
+      }
+    }
     return reply.status(204).send();
   });
 }
