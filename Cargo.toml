@@ -3,7 +3,7 @@ resolver = "2"
 members = [
   "services/proxy",
   "services/storage-service",
-  # "services/tls-service",   # Task 3: 미구현
+  "services/tls-service",
   # "services/dns-service",   # Task 4: 미구현
   "crates/cdn-proto",
 ]
