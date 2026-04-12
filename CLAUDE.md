@@ -25,33 +25,14 @@ pnpm ship:proxy          # Proxy만 재배포
 pnpm ship:admin          # Admin Server + Admin Web만 재배포
 ```
 
-**흐름:** `docker buildx` 멀티플랫폼 빌드 → `ghcr.io/bluleo78/smart-school-cdn` push → `~/prod/smart-school-cdn` 에서 pull + up
-
-**이미지 (3개):**
-- `ghcr.io/bluleo78/smart-school-cdn/proxy:latest`
-- `ghcr.io/bluleo78/smart-school-cdn/admin-server:latest`
-- `ghcr.io/bluleo78/smart-school-cdn/admin-web:latest`
-
-**운영 설정 변경:** `~/prod/smart-school-cdn/` 파일 직접 수정 후 `docker compose up -d`
-- `docker-compose.yml` — 컨테이너 구성 (레퍼런스: `deploy/docker-compose.yml`)
-- `nginx.conf` — Admin Web 리버스 프록시 (레퍼런스: `deploy/nginx.conf`)
-- `.env` — 환경 변수
-
-**최초 prod 세팅:**
-```bash
-mkdir -p ~/prod/smart-school-cdn
-cp deploy/docker-compose.yml ~/prod/smart-school-cdn/docker-compose.yml
-cp deploy/nginx.conf ~/prod/smart-school-cdn/nginx.conf
-cp .env.example ~/prod/smart-school-cdn/.env
-# .env 편집 후
-pnpm ship
-```
+자세한 내용은 **[운영 배포 가이드](docs/guides/deploy-guide.md)** 참조.
 
 ## Key Files
 
 - 아키텍처: `docs/architecture.md`
 - 개발 로드맵: `docs/development-roadmap.md`
 - 사용자 가이드: `docs/guides/user-guide.md`
+- **운영 배포 가이드**: `docs/guides/deploy-guide.md`
 - 디자인 시스템: `docs/design-system/` (smart-fire-hub 참조)
 - E2E 테스트 가이드: `docs/guides/playwright-e2e-guide.md`
 - **TC 작성 가이드라인**: `docs/guides/tc-guideline.md` — **기능 구현 시 반드시 참조**
