@@ -1,4 +1,6 @@
-// 최적화 API 클라이언트 함수
+// 최적화 API 클라이언트 — Admin Server의 optimizer 엔드포인트를 호출한다.
+import axios from 'axios';
+
 export interface OptimizerProfile {
   domain: string;
   quality: number;
@@ -14,26 +16,19 @@ export interface DomainStats {
 }
 
 export async function fetchOptimizerProfiles(): Promise<{ profiles: OptimizerProfile[] }> {
-  const res = await fetch('/api/optimizer/profiles');
-  if (!res.ok) throw new Error('Failed to fetch profiles');
-  return res.json();
+  const res = await axios.get<{ profiles: OptimizerProfile[] }>('/api/optimizer/profiles');
+  return res.data;
 }
 
 export async function updateOptimizerProfile(profile: OptimizerProfile): Promise<void> {
-  const res = await fetch(`/api/optimizer/profiles/${encodeURIComponent(profile.domain)}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      quality: profile.quality,
-      max_width: profile.max_width,
-      enabled: profile.enabled,
-    }),
+  await axios.put(`/api/optimizer/profiles/${encodeURIComponent(profile.domain)}`, {
+    quality: profile.quality,
+    max_width: profile.max_width,
+    enabled: profile.enabled,
   });
-  if (!res.ok) throw new Error('Failed to update profile');
 }
 
 export async function fetchOptimizationStats(): Promise<{ stats: DomainStats[] }> {
-  const res = await fetch('/api/stats/optimization');
-  if (!res.ok) throw new Error('Failed to fetch optimization stats');
-  return res.json();
+  const res = await axios.get<{ stats: DomainStats[] }>('/api/stats/optimization');
+  return res.data;
 }

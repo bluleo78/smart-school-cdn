@@ -16,5 +16,8 @@ export function useUpdateOptimizerProfile() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['optimizer', 'profiles'] });
     },
+    onError: (err) => {
+      console.error('프로파일 업데이트 실패', err);
+    },
   });
 }

@@ -132,7 +132,7 @@ export function OptimizerPage() {
                 <Slider
                   min={1} max={100} step={1}
                   value={[editTarget.quality]}
-                  onValueChange={([v]) => setEditTarget({ ...editTarget, quality: v })}
+                  onValueChange={(vals: number[]) => setEditTarget({ ...editTarget, quality: vals[0] })}
                   data-testid="quality-slider"
                 />
               </div>
