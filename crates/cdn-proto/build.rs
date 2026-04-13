@@ -2,6 +2,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=proto/storage.proto");
     println!("cargo:rerun-if-changed=proto/tls.proto");
     println!("cargo:rerun-if-changed=proto/dns.proto");
+    println!("cargo:rerun-if-changed=proto/optimizer.proto");
     tonic_build::configure()
         .build_server(true)
         .build_client(true)
@@ -10,6 +11,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "proto/storage.proto",
                 "proto/tls.proto",
                 "proto/dns.proto",
+                "proto/optimizer.proto",
             ],
             &["proto"],
         )?;

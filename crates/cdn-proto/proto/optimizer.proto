@@ -1,0 +1,43 @@
+syntax = "proto3";
+package cdn.optimizer;
+
+service OptimizerService {
+  rpc Optimize(OptimizeRequest)      returns (OptimizeResponse);
+  rpc GetProfiles(Empty)             returns (GetProfilesResponse);
+  rpc SetProfile(SetProfileRequest)  returns (Empty);
+  rpc GetStats(Empty)                returns (GetStatsResponse);
+  rpc Health(Empty)                  returns (HealthResponse);
+}
+
+message OptimizeRequest {
+  bytes  data         = 1;
+  string content_type = 2;
+  string domain       = 3;
+}
+message OptimizeResponse {
+  bytes  data           = 1;
+  string content_type   = 2;
+  int64  original_size  = 3;
+  int64  optimized_size = 4;
+}
+
+message Profile {
+  string domain    = 1;
+  uint32 quality   = 2;
+  uint32 max_width = 3;
+  bool   enabled   = 4;
+}
+message GetProfilesResponse { repeated Profile profiles = 1; }
+
+message SetProfileRequest { Profile profile = 1; }
+
+message DomainStats {
+  string domain          = 1;
+  int64  original_bytes  = 2;
+  int64  optimized_bytes = 3;
+  int64  count           = 4;
+}
+message GetStatsResponse { repeated DomainStats stats = 1; }
+
+message HealthResponse { bool online = 1; int64 latency_ms = 2; }
+message Empty {}
