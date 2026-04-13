@@ -5,6 +5,7 @@ members = [
   "services/storage-service",
   "services/tls-service",
   "services/dns-service",
+  "services/optimizer-service",
   "crates/cdn-proto",
 ]
 
