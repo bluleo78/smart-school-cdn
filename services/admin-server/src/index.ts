@@ -1,6 +1,7 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import Database from 'better-sqlite3';
+import axios from 'axios';
 import { proxyRoutes } from './routes/proxy.js';
 import { cacheRoutes } from './routes/cache.js';
 import { tlsRoutes } from './routes/tls.js';
@@ -69,15 +70,22 @@ const port = Number(process.env.PORT) || 4001;
 try {
   await app.listen({ port, host: '0.0.0.0' });
   app.log.info(`Admin Server listening on port ${port}`);
-  // Proxy가 준비될 때까지 재시도 — dev 환경에서 Proxy 컴파일 완료 전에 sync 실패하는 레이스 컨디션 방지
-  (async () => {
-    for (let i = 0; i < 10; i++) {
-      if (await syncToProxy(domainRepo)) return;
-      await new Promise((r) => setTimeout(r, 3000));
+  // Proxy 연결 상태 모니터링 — 5초마다 상태 확인, offline→online 전환 시 즉시 sync
+  // proxy 재시작 시 in-memory domain_map·cert_cache 자동 복구
+  let proxyWasOnline = false;
+  setInterval(async () => {
+    let isOnline = false;
+    try {
+      await axios.get(`${proxyAdminUrl}/status`, { timeout: 2000 });
+      isOnline = true;
+    } catch { /* offline */ }
+
+    if (isOnline && !proxyWasOnline) {
+      app.log.info('proxy 온라인 전환 감지 — 도메인 sync 시작');
+      await syncToProxy(domainRepo);
     }
-  })();
-  // 30초마다 주기적 sync — proxy 재시작 시 도메인 맵·인증서 캐시 자동 복구
-  setInterval(() => syncToProxy(domainRepo), 30_000);
+    proxyWasOnline = isOnline;
+  }, 5_000);
 } catch (err) {
   app.log.error(err);
   process.exit(1);
