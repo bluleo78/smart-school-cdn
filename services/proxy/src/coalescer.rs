@@ -4,8 +4,9 @@ use bytes::Bytes;
 use axum::http::StatusCode;
 use tokio::sync::broadcast;
 
-/// broadcast 채널 용량 — 동시 구독자가 이 수를 초과 시 Lagged 에러 방지
-const COALESCE_CHANNEL_CAPACITY: usize = 16;
+/// broadcast 채널 용량 — 동시 구독자가 이 수를 초과하면 Lagged 에러 발생
+/// CDN 캐시 미스 버스트 시나리오를 고려하여 256으로 설정
+const COALESCE_CHANNEL_CAPACITY: usize = 256;
 
 /// origin fetch 결과 — (body, content_type, status)
 pub type CoalescedResponse = Arc<(Bytes, Option<String>, StatusCode)>;
@@ -52,6 +53,10 @@ impl Coalescer {
             // 구독자: 첫 번째 요청 완료 대기
             match rx.recv().await {
                 Ok(result) => result,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    tracing::warn!(key=%key, skipped=%n, "coalescer broadcast lagged — 502 반환");
+                    Err(())
+                }
                 Err(_) => Err(()), // sender drop (panic 등) → 에러 전파
             }
         } else {

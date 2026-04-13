@@ -427,12 +427,6 @@ async fn proxy_handler(
     let status = origin_response.status();
     let response_headers = origin_response.headers().clone();
 
-    let cache_directive = {
-        let cc = response_headers.get("cache-control").and_then(|v| v.to_str().ok());
-        let pragma = response_headers.get("pragma").and_then(|v| v.to_str().ok());
-        parse_cache_control(cc, pragma)
-    };
-
     let response_body = match origin_response.bytes().await {
         Ok(b) => b,
         Err(err) => {
