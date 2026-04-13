@@ -256,6 +256,7 @@ async fn proxy_handler(
         let origin_url_c    = origin_url.clone();
         let ps_c            = ps.clone();
         let method_c        = method.clone();
+        let state_c2        = state.clone();
 
         let coalesced = ps.coalescer.get_or_fetch(key_for_coalescer, move || async move {
             // 헤더 필터링 후 원본 요청 빌드
@@ -330,6 +331,8 @@ async fn proxy_handler(
                 (resp_body, content_type)
             };
 
+            // 첫 번째 요청자만 miss 카운터 증가 (구독자는 record_request만)
+            state_c2.write().await.record_cache_miss();
             Ok(Arc::new((serve_bytes, serve_ct, status)))
         }).await;
 
@@ -339,7 +342,6 @@ async fn proxy_handler(
                 let (body, ct, status) = resp.as_ref();
                 {
                     let mut app_state = state.write().await;
-                    app_state.record_cache_miss();
                     app_state.record_request(RequestLog {
                         method: method.to_string(),
                         host: host.clone(),
