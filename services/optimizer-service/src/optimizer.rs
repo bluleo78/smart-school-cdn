@@ -62,7 +62,7 @@ impl OptimizerDb {
 
     /// 도메인 프로파일 조회 — 없으면 기본값 반환
     pub fn get_profile(&self, domain: &str) -> Profile {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         conn.query_row(
             "SELECT quality, max_width, enabled FROM profiles WHERE domain = ?1",
             params![domain],
@@ -76,7 +76,7 @@ impl OptimizerDb {
 
     /// 도메인 프로파일 저장 (INSERT OR REPLACE)
     pub fn set_profile(&self, domain: &str, quality: u32, max_width: u32, enabled: bool) -> Result<(), Box<dyn std::error::Error>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         conn.execute(
             "INSERT OR REPLACE INTO profiles (domain, quality, max_width, enabled) VALUES (?1, ?2, ?3, ?4)",
             params![domain, quality, max_width, enabled as i32],
@@ -86,7 +86,7 @@ impl OptimizerDb {
 
     /// 모든 프로파일 목록 반환
     pub fn get_all_profiles(&self) -> Result<Vec<(String, Profile)>, Box<dyn std::error::Error>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         let mut stmt = conn.prepare(
             "SELECT domain, quality, max_width, enabled FROM profiles ORDER BY domain"
         )?;
@@ -105,7 +105,7 @@ impl OptimizerDb {
 
     /// 모든 도메인 통계 반환
     pub fn get_all_stats(&self) -> Result<Vec<DomainStat>, Box<dyn std::error::Error>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         let mut stmt = conn.prepare(
             "SELECT domain, original_bytes, optimized_bytes, count FROM optimization_stats ORDER BY domain"
         )?;
@@ -122,8 +122,8 @@ impl OptimizerDb {
 
     /// 통계 누적 업데이트
     fn update_stats(&self, domain: &str, original_size: i64, optimized_size: i64) {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        let result = conn.execute(
             "INSERT INTO optimization_stats (domain, original_bytes, optimized_bytes, count)
              VALUES (?1, ?2, ?3, 1)
              ON CONFLICT(domain) DO UPDATE SET
@@ -132,7 +132,10 @@ impl OptimizerDb {
                count           = count + 1,
                updated_at      = datetime('now')",
             params![domain, original_size, optimized_size],
-        ).ok();
+        );
+        if let Err(e) = result {
+            tracing::warn!("통계 업데이트 실패: {}", e);
+        }
     }
 
     /// 콘텐츠 최적화

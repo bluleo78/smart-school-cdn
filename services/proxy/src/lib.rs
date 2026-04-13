@@ -30,7 +30,7 @@ pub struct ProxyState {
     pub http_client: reqwest::Client,
     pub storage:     Arc<Mutex<StorageClient>>,
     pub tls_client:  Arc<Mutex<TlsClient>>,
-    pub optimizer:   Arc<Mutex<OptimizerClient>>,   // optimizer gRPC 클라이언트
+    pub optimizer:   Option<Arc<Mutex<OptimizerClient>>>,   // optimizer gRPC 클라이언트 (없으면 최적화 비활성화)
     pub domain_map:  DomainMap,
     pub cert_cache:  CertCache,
 }
@@ -297,6 +297,8 @@ async fn proxy_handler(
     let elapsed_ms = start.elapsed().as_millis() as u64;
 
     // ── 캐시 저장 또는 BYPASS (storage gRPC) ─────────────────────
+    // 최적화 결과를 응답 빌드에서도 사용하기 위해 외부 변수로 선언
+    let mut optimized_result: Option<(Vec<u8>, Option<String>)> = None;
     let cache_status_str = if let Some(ref key) = cache_key {
         match &cache_directive {
             CacheDirective::Cacheable(maybe_ttl) if status.is_success() => {
@@ -310,17 +312,24 @@ async fn proxy_handler(
 
                 // 이미지 콘텐츠: optimizer gRPC로 WebP 변환 시도
                 let (store_body, store_ct) = if should_optimize(content_type.as_deref()) {
-                    let ct = content_type.clone().unwrap_or_default();
-                    let opt_result = ps.optimizer.lock().await
-                        .optimize(response_body.clone(), ct, &domain)
-                        .await;
-                    match opt_result {
-                        Some((opt_bytes, opt_ct)) => (opt_bytes, Some(opt_ct)),
-                        None => (response_body.clone(), content_type.clone()),
+                    if let Some(ref opt) = ps.optimizer {
+                        let ct = content_type.clone().unwrap_or_default();
+                        let opt_result = opt.lock().await
+                            .optimize(response_body.clone(), ct, &domain)
+                            .await;
+                        match opt_result {
+                            Some((opt_bytes, opt_ct)) => (opt_bytes, Some(opt_ct)),
+                            None => (response_body.clone(), content_type.clone()),
+                        }
+                    } else {
+                        (response_body.clone(), content_type.clone())
                     }
                 } else {
                     (response_body.clone(), content_type.clone())
                 };
+
+                // 첫 번째 요청자에게도 최적화된 본문을 제공하기 위해 저장
+                optimized_result = Some((store_body.to_vec(), store_ct.clone()));
 
                 ps.storage.lock().await
                     .put(key, &full_url, &host, store_ct, store_body, Some(ttl))
@@ -358,14 +367,33 @@ async fn proxy_handler(
     );
 
     // ── 응답 빌드 ─────────────────────────────────────────────────
+    // MISS 분기에서 최적화된 본문이 있으면 첫 번째 요청자에게도 제공
+    let (serve_body, serve_ct_override) = match optimized_result {
+        Some((body, ct)) => (bytes::Bytes::from(body), ct),
+        None => (response_body.clone(), None),
+    };
+
     let mut response = Response::builder().status(status);
     for (key, value) in response_headers.iter() {
-        response = response.header(key, value);
+        // content-type은 최적화 결과로 덮어쓸 수 있으므로 별도 처리
+        if key.as_str().to_lowercase() != "content-type" {
+            response = response.header(key, value);
+        }
+    }
+    // 최적화된 content-type 우선, 없으면 원본 헤더에서 가져옴
+    let final_ct = serve_ct_override.or_else(|| {
+        response_headers
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string())
+    });
+    if let Some(ct) = final_ct {
+        response = response.header("Content-Type", ct);
     }
     response
         .header("X-Cache-Status", cache_status_str)
         .header("X-Served-By", HeaderValue::from_static("smart-school-cdn"))
-        .body(Body::from(response_body))
+        .body(Body::from(serve_body))
         .unwrap()
 }
 
@@ -1279,7 +1307,7 @@ mod tests {
             http_client: reqwest::Client::new(),
             storage: Arc::new(Mutex::new(storage)),
             tls_client: Arc::new(Mutex::new(tls)),
-            optimizer: Arc::new(Mutex::new(optimizer)),
+            optimizer: Some(Arc::new(Mutex::new(optimizer))),
             domain_map,
             cert_cache,
         };
@@ -1331,7 +1359,7 @@ mod tests {
             http_client: reqwest::Client::new(),
             storage: Arc::new(Mutex::new(storage)),
             tls_client: Arc::new(Mutex::new(tls)),
-            optimizer: Arc::new(Mutex::new(optimizer)),
+            optimizer: Some(Arc::new(Mutex::new(optimizer))),
             domain_map,
             cert_cache,
         };
@@ -1382,7 +1410,7 @@ mod tests {
             http_client: reqwest::Client::new(),
             storage: Arc::new(Mutex::new(storage)),
             tls_client: Arc::new(Mutex::new(tls)),
-            optimizer: Arc::new(Mutex::new(optimizer)),
+            optimizer: Some(Arc::new(Mutex::new(optimizer))),
             domain_map: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
             cert_cache,
         };
@@ -1436,7 +1464,7 @@ mod tests {
             http_client: reqwest::Client::new(),
             storage: Arc::new(Mutex::new(storage)),
             tls_client: Arc::new(Mutex::new(tls)),
-            optimizer: Arc::new(Mutex::new(optimizer)),
+            optimizer: Some(Arc::new(Mutex::new(optimizer))),
             domain_map: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
             cert_cache,
         };
@@ -1515,7 +1543,7 @@ mod tests {
             http_client: reqwest::Client::new(),
             storage: Arc::new(Mutex::new(storage_client)),
             tls_client: Arc::new(Mutex::new(tls)),
-            optimizer: Arc::new(Mutex::new(optimizer)),
+            optimizer: Some(Arc::new(Mutex::new(optimizer))),
             domain_map,
             cert_cache,
         };

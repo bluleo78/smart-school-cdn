@@ -58,12 +58,19 @@ async fn main() {
 
     let optimizer_url = std::env::var("OPTIMIZER_GRPC_URL")
         .unwrap_or_else(|_| "http://optimizer-service:50054".to_string());
-    let optimizer = OptimizerClient::connect(&optimizer_url).await
-        .expect("optimizer-service gRPC 연결 실패");
+    let optimizer = match OptimizerClient::connect(&optimizer_url).await {
+        Ok(client) => {
+            tracing::info!("optimizer-service 연결 성공: {}", optimizer_url);
+            Some(Arc::new(Mutex::new(client)))
+        }
+        Err(e) => {
+            tracing::warn!("optimizer-service 연결 실패 (최적화 비활성화): {}", e);
+            None
+        }
+    };
 
     let storage = Arc::new(Mutex::new(storage));
     let tls_client = Arc::new(Mutex::new(tls_client));
-    let optimizer = Arc::new(Mutex::new(optimizer));
 
     // 매분 히트율 스냅샷 기록 배경 태스크
     let state_for_snapshot = shared_state.clone();
