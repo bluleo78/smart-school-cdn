@@ -26,10 +26,12 @@ const app = Fastify({ logger: true });
 await app.register(cors);
 
 // gRPC 클라이언트 생성 — 환경변수로 각 서비스 주소 주입 가능
-const storageClient = createStorageClient(process.env.STORAGE_GRPC_URL ?? 'localhost:50051');
-const tlsClient = createTlsClient(process.env.TLS_GRPC_URL ?? 'localhost:50052');
-const dnsClient = createDnsClient(process.env.DNS_GRPC_URL ?? 'localhost:50053');
-const optimizerClient = createOptimizerClient(process.env.OPTIMIZER_GRPC_URL ?? 'localhost:50054');
+// @grpc/grpc-js는 'host:port' 형식 필요 — 'http://' 프리픽스 제거
+const grpcAddr = (url: string) => url.replace(/^https?:\/\//, '');
+const storageClient = createStorageClient(grpcAddr(process.env.STORAGE_GRPC_URL ?? 'localhost:50051'));
+const tlsClient = createTlsClient(grpcAddr(process.env.TLS_GRPC_URL ?? 'localhost:50052'));
+const dnsClient = createDnsClient(grpcAddr(process.env.DNS_GRPC_URL ?? 'localhost:50053'));
+const optimizerClient = createOptimizerClient(grpcAddr(process.env.OPTIMIZER_GRPC_URL ?? 'localhost:50054'));
 const proxyAdminUrl = process.env.PROXY_ADMIN_URL ?? 'http://localhost:8081';
 
 // Fastify 인스턴스에 gRPC 클라이언트 데코레이터 등록
