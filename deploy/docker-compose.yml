@@ -13,6 +13,23 @@ name: smart-school-cdn-prod
 #     admin-data/          (Admin SQLite DB — 자동 생성)
 
 services:
+  optimizer-service:
+    image: ghcr.io/bluleo78/smart-school-cdn/optimizer-service:latest
+    restart: unless-stopped
+    volumes:
+      - ./optimizer-data:/app/data
+    environment:
+      - OPTIMIZER_DB_PATH=/app/data/optimizer.db
+      - RUST_LOG=info
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - cdn-net
+
   storage-service:
     image: ghcr.io/bluleo78/smart-school-cdn/storage-service:latest
     restart: unless-stopped
@@ -75,8 +92,11 @@ services:
     environment:
       - STORAGE_GRPC_URL=http://storage-service:50051
       - TLS_GRPC_URL=http://tls-service:50052
+      - OPTIMIZER_GRPC_URL=http://optimizer-service:50054
       - RUST_LOG=info
     depends_on:
+      optimizer-service:
+        condition: service_healthy
       storage-service:
         condition: service_healthy
       tls-service:
