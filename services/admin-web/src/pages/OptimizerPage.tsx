@@ -156,7 +156,7 @@ export function OptimizerPage() {
             </div>
           )}
           <div className="flex justify-end gap-2 pt-2">
-            <Button variant="outline" onClick={() => setEditTarget(null)}>취소</Button>
+            <Button variant="outline" data-testid="profile-cancel-btn" onClick={() => setEditTarget(null)}>취소</Button>
             <Button
               onClick={handleSave}
               disabled={updateProfile.isPending}

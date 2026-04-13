@@ -90,4 +90,24 @@ test.describe('최적화 페이지 — 편집 Dialog', () => {
     expect(putRequest.method()).toBe('PUT');
     await expect(page.getByTestId('profile-edit-dialog')).not.toBeVisible();
   });
+
+  test('취소 버튼은 PUT 호출 없이 Dialog를 닫는다', async ({ page }) => {
+    await setupMocks(page);
+    await page.goto('/optimizer');
+
+    // PUT 요청 추적
+    const putRequests: string[] = [];
+    page.on('request', req => {
+      if (req.method() === 'PUT') putRequests.push(req.url());
+    });
+
+    await page.getByTestId('profile-row-textbook.co.kr').getByTestId('profile-edit-btn').click();
+    await expect(page.getByTestId('profile-edit-dialog')).toBeVisible();
+
+    // 취소 버튼 클릭
+    await page.getByTestId('profile-cancel-btn').click();
+
+    await expect(page.getByTestId('profile-edit-dialog')).not.toBeVisible();
+    expect(putRequests).toHaveLength(0);
+  });
 });
