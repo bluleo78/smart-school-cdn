@@ -1397,6 +1397,7 @@ mod tests {
             optimizer: Some(Arc::new(Mutex::new(optimizer))),
             domain_map,
             cert_cache,
+            coalescer: Arc::new(coalescer::Coalescer::new()),
         };
 
         let router = build_proxy_router(ps);
@@ -1449,6 +1450,7 @@ mod tests {
             optimizer: Some(Arc::new(Mutex::new(optimizer))),
             domain_map,
             cert_cache,
+            coalescer: Arc::new(coalescer::Coalescer::new()),
         };
 
         let router = build_proxy_router(ps);
@@ -1500,6 +1502,7 @@ mod tests {
             optimizer: Some(Arc::new(Mutex::new(optimizer))),
             domain_map: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
             cert_cache,
+            coalescer: Arc::new(coalescer::Coalescer::new()),
         };
 
         let router = build_proxy_router(ps);
@@ -1554,6 +1557,7 @@ mod tests {
             optimizer: Some(Arc::new(Mutex::new(optimizer))),
             domain_map: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
             cert_cache,
+            coalescer: Arc::new(coalescer::Coalescer::new()),
         };
 
         let router = build_proxy_router(ps);
@@ -1633,6 +1637,7 @@ mod tests {
             optimizer: Some(Arc::new(Mutex::new(optimizer))),
             domain_map,
             cert_cache,
+            coalescer: Arc::new(coalescer::Coalescer::new()),
         };
 
         let router = build_proxy_router(ps);
@@ -1784,6 +1789,7 @@ mod tests {
             optimizer,
             domain_map,
             cert_cache,
+            coalescer: Arc::new(coalescer::Coalescer::new()),
         };
         let router = build_proxy_router(ps.clone());
         (ps, router)

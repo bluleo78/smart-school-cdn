@@ -11,6 +11,7 @@ use proxy::{DomainMap, build_admin_router, build_proxy_router, ProxyState};
 use proxy::clients::optimizer_client::OptimizerClient;
 use proxy::clients::storage_client::StorageClient;
 use proxy::clients::tls_client::{TlsClient, CertCache};
+use proxy::coalescer::Coalescer;
 use proxy::state::{AppState, SharedState};
 
 /// rustls SNI 핸들러 — 로컬 cert_cache에서 CertifiedKey 조회 (sync)
@@ -90,6 +91,7 @@ async fn main() {
         optimizer: optimizer.clone(),              // optimizer gRPC 클라이언트
         domain_map: domain_map.clone(),
         cert_cache: cert_cache.clone(),
+        coalescer: Arc::new(Coalescer::new()),
     };
 
     let proxy_router = build_proxy_router(ps);
