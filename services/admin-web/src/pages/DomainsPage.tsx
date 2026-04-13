@@ -20,6 +20,7 @@ import { Input } from '../components/ui/input';
 import { Dialog, DialogContent, DialogTitle } from '../components/ui/dialog';
 import { AlertDialog, AlertDialogContent, AlertDialogTitle } from '../components/ui/alert-dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
+import { Card, CardContent } from '../components/ui/card';
 import { Skeleton } from '../components/ui/skeleton';
 
 // ─── 추가 다이얼로그 ─────────────────────────────────────────────
@@ -283,59 +284,61 @@ export function DomainsPage() {
       </div>
 
       {/* 본문: 테이블 + 사이드 패널 */}
-      <div className="flex flex-1 overflow-hidden border-t border-border">
-        {/* 테이블 */}
-        <div className="flex-1 overflow-auto">
-          {isLoading && (
-            <div className="p-6 space-y-3">
-              {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}
-            </div>
-          )}
-          {error && (
-            <p className="p-6 text-sm text-destructive">도메인 목록을 불러오지 못했습니다.</p>
-          )}
-          {!isLoading && !error && domains.length === 0 && (
-            <div className="p-6 text-center" data-testid="domains-empty">
-              <p className="text-sm text-muted-foreground">등록된 도메인이 없습니다.</p>
-              <p className="text-xs text-muted-foreground mt-1">
-                + 도메인 추가 버튼으로 첫 번째 도메인을 등록하세요.
-              </p>
-            </div>
-          )}
-          {domains.length > 0 && (
-            <Table data-testid="domains-table">
-              <TableHeader>
-                <TableRow>
-                  <TableHead>도메인</TableHead>
-                  <TableHead>원본 URL</TableHead>
-                  <TableHead>등록일</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {domains.map((domain) => (
-                  <TableRow
-                    key={domain.host}
-                    onClick={() =>
-                      setSelectedHost(selectedHost === domain.host ? null : domain.host)
-                    }
-                    className={`cursor-pointer hover:bg-muted/30 ${
-                      selectedHost === domain.host ? 'bg-accent' : ''
-                    }`}
-                    data-testid={`domain-row-${domain.host}`}
-                  >
-                    <TableCell className="font-mono font-medium">{domain.host}</TableCell>
-                    <TableCell className="text-muted-foreground truncate max-w-xs">
-                      {domain.origin}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground text-xs">
-                      {new Date(domain.created_at * 1000).toLocaleDateString('ko-KR')}
-                    </TableCell>
+      <div className="flex flex-1 overflow-hidden p-6 pt-4 gap-4">
+        {/* 테이블 Card */}
+        <Card className="flex-1 overflow-auto">
+          <CardContent className="p-0">
+            {isLoading && (
+              <div className="p-6 space-y-3">
+                {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}
+              </div>
+            )}
+            {error && (
+              <p className="p-6 text-sm text-destructive">도메인 목록을 불러오지 못했습니다.</p>
+            )}
+            {!isLoading && !error && domains.length === 0 && (
+              <div className="p-6 text-center" data-testid="domains-empty">
+                <p className="text-sm text-muted-foreground">등록된 도메인이 없습니다.</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  + 도메인 추가 버튼으로 첫 번째 도메인을 등록하세요.
+                </p>
+              </div>
+            )}
+            {domains.length > 0 && (
+              <Table data-testid="domains-table">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>도메인</TableHead>
+                    <TableHead>원본 URL</TableHead>
+                    <TableHead>등록일</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </div>
+                </TableHeader>
+                <TableBody>
+                  {domains.map((domain) => (
+                    <TableRow
+                      key={domain.host}
+                      onClick={() =>
+                        setSelectedHost(selectedHost === domain.host ? null : domain.host)
+                      }
+                      className={`cursor-pointer hover:bg-muted/30 ${
+                        selectedHost === domain.host ? 'bg-accent' : ''
+                      }`}
+                      data-testid={`domain-row-${domain.host}`}
+                    >
+                      <TableCell className="font-mono font-medium">{domain.host}</TableCell>
+                      <TableCell className="text-muted-foreground truncate max-w-xs">
+                        {domain.origin}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground text-xs">
+                        {new Date(domain.created_at * 1000).toLocaleDateString('ko-KR')}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
 
         {/* 사이드 패널 */}
         {selectedDomain && (
