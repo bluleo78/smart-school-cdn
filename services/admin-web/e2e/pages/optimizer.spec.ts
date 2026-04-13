@@ -35,10 +35,9 @@ test.describe('최적화 페이지 — 기본 렌더링', () => {
     await page.goto('/optimizer');
 
     // textbook.co.kr 행: 활성 배지
-    const rows = page.getByTestId('profiles-table').locator('tbody tr');
-    await expect(rows.nth(0).getByTestId('profile-enabled-badge')).toContainText('활성');
+    await expect(page.getByTestId('profile-row-textbook.co.kr').getByTestId('profile-enabled-badge')).toContainText('활성');
     // static.edunet.net 행: 비활성 배지
-    await expect(rows.nth(1).getByTestId('profile-enabled-badge')).toContainText('비활성');
+    await expect(page.getByTestId('profile-row-static.edunet.net').getByTestId('profile-enabled-badge')).toContainText('비활성');
   });
 });
 
@@ -47,9 +46,8 @@ test.describe('최적화 페이지 — 편집 Dialog', () => {
     await setupMocks(page);
     await page.goto('/optimizer');
 
-    // 첫 번째 행(textbook.co.kr) 편집 버튼 클릭
-    const rows = page.getByTestId('profiles-table').locator('tbody tr');
-    await rows.nth(0).getByTestId('profile-edit-btn').click();
+    // textbook.co.kr 행 편집 버튼 클릭
+    await page.getByTestId('profile-row-textbook.co.kr').getByTestId('profile-edit-btn').click();
 
     const dialog = page.getByTestId('profile-edit-dialog');
     await expect(dialog).toBeVisible();
@@ -67,8 +65,7 @@ test.describe('최적화 페이지 — 편집 Dialog', () => {
     await mockApi(page, 'PUT', '/optimizer/profiles/textbook.co.kr', null, { status: 204 });
     await page.goto('/optimizer');
 
-    const rows = page.getByTestId('profiles-table').locator('tbody tr');
-    await rows.nth(0).getByTestId('profile-edit-btn').click();
+    await page.getByTestId('profile-row-textbook.co.kr').getByTestId('profile-edit-btn').click();
     await expect(page.getByTestId('profile-edit-dialog')).toBeVisible();
 
     // PUT 요청 전송 확인 + Dialog 닫힘 검증

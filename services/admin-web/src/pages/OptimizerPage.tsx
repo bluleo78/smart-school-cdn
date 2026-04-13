@@ -94,7 +94,7 @@ export function OptimizerPage() {
               </tr>
             )}
             {profiles.map((p) => (
-              <tr key={p.domain} className="border-b last:border-0">
+              <tr key={p.domain} className="border-b last:border-0" data-testid={`profile-row-${p.domain}`}>
                 <td className="px-4 py-3 font-mono">{p.domain}</td>
                 <td className="px-4 py-3">{p.quality}</td>
                 <td className="px-4 py-3">{p.max_width === 0 ? '제한 없음' : `${p.max_width}px`}</td>
