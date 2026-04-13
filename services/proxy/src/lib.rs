@@ -16,6 +16,7 @@ use axum::response::{IntoResponse, Json, Response};
 use axum::routing::{delete, get};
 use axum::Router;
 use state::{RequestLog, SharedState};
+use clients::optimizer_client::OptimizerClient;
 use clients::storage_client::StorageClient;
 use clients::tls_client::{TlsClient, CertCache};
 
@@ -29,6 +30,7 @@ pub struct ProxyState {
     pub http_client: reqwest::Client,
     pub storage:     Arc<Mutex<StorageClient>>,
     pub tls_client:  Arc<Mutex<TlsClient>>,
+    pub optimizer:   Arc<Mutex<OptimizerClient>>,   // optimizer gRPC 클라이언트
     pub domain_map:  DomainMap,
     pub cert_cache:  CertCache,
 }
@@ -627,6 +629,12 @@ mod tests {
         Empty,
         HealthRequest as TlsHealthRequest, HealthResponse as TlsHealthResponse,
     };
+    use cdn_proto::optimizer::{
+        optimizer_service_server::{OptimizerService, OptimizerServiceServer},
+        OptimizeRequest, OptimizeResponse,
+        GetProfilesResponse, SetProfileRequest, GetStatsResponse,
+        Empty as OptimizerEmpty, HealthResponse as OptimizerHealthResponse,
+    };
     use std::sync::Mutex as StdMutex;
 
     /// Mock Storage gRPC 서비스 — 인메모리 맵으로 get/put/purge/stats/popular 구현
@@ -802,6 +810,73 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let svc = TlsServiceServer::new(MockTls);
+        tokio::spawn(async move {
+            tonic::transport::Server::builder()
+                .add_service(svc)
+                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
+                .await
+                .unwrap();
+        });
+        format!("http://127.0.0.1:{}", addr.port())
+    }
+
+    /// Mock Optimizer gRPC 서비스 — 원본 데이터를 그대로 반환 (pass-through)
+    #[derive(Default)]
+    struct MockOptimizer;
+
+    #[tonic::async_trait]
+    impl OptimizerService for MockOptimizer {
+        async fn optimize(
+            &self,
+            req: tonic::Request<OptimizeRequest>,
+        ) -> Result<tonic::Response<OptimizeResponse>, tonic::Status> {
+            let inner = req.into_inner();
+            let size = inner.data.len() as i64;
+            // 테스트에서는 원본 그대로 반환 — 기존 테스트 동작에 영향 없음
+            Ok(tonic::Response::new(OptimizeResponse {
+                data: inner.data,
+                content_type: inner.content_type,
+                original_size: size,
+                optimized_size: size,
+            }))
+        }
+
+        async fn get_profiles(
+            &self,
+            _: tonic::Request<OptimizerEmpty>,
+        ) -> Result<tonic::Response<GetProfilesResponse>, tonic::Status> {
+            Ok(tonic::Response::new(GetProfilesResponse { profiles: vec![] }))
+        }
+
+        async fn set_profile(
+            &self,
+            _: tonic::Request<SetProfileRequest>,
+        ) -> Result<tonic::Response<OptimizerEmpty>, tonic::Status> {
+            Ok(tonic::Response::new(OptimizerEmpty {}))
+        }
+
+        async fn get_stats(
+            &self,
+            _: tonic::Request<OptimizerEmpty>,
+        ) -> Result<tonic::Response<GetStatsResponse>, tonic::Status> {
+            Ok(tonic::Response::new(GetStatsResponse { stats: vec![] }))
+        }
+
+        async fn health(
+            &self,
+            _: tonic::Request<OptimizerEmpty>,
+        ) -> Result<tonic::Response<OptimizerHealthResponse>, tonic::Status> {
+            Ok(tonic::Response::new(OptimizerHealthResponse {
+                online: true,
+                latency_ms: 0,
+            }))
+        }
+    }
+
+    async fn start_mock_optimizer_server() -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let svc = OptimizerServiceServer::new(MockOptimizer);
         tokio::spawn(async move {
             tonic::transport::Server::builder()
                 .add_service(svc)
@@ -1168,11 +1243,19 @@ mod tests {
         };
         let cert_cache = tls.cert_cache.clone();
         let domain_map: DomainMap = Arc::new(tokio::sync::RwLock::new(HashMap::new()));
+        let optimizer_url = start_mock_optimizer_server().await;
+        let optimizer = loop {
+            match clients::optimizer_client::OptimizerClient::connect(&optimizer_url).await {
+                Ok(c) => break c,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        };
         let ps = ProxyState {
             shared: Arc::new(tokio::sync::RwLock::new(state::AppState::new())),
             http_client: reqwest::Client::new(),
             storage: Arc::new(Mutex::new(storage)),
             tls_client: Arc::new(Mutex::new(tls)),
+            optimizer: Arc::new(Mutex::new(optimizer)),
             domain_map,
             cert_cache,
         };
@@ -1212,11 +1295,19 @@ mod tests {
         };
         let cert_cache = tls.cert_cache.clone();
         let domain_map: DomainMap = Arc::new(tokio::sync::RwLock::new(HashMap::new()));
+        let optimizer_url = start_mock_optimizer_server().await;
+        let optimizer = loop {
+            match clients::optimizer_client::OptimizerClient::connect(&optimizer_url).await {
+                Ok(c) => break c,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        };
         let ps = ProxyState {
             shared: Arc::new(tokio::sync::RwLock::new(state::AppState::new())),
             http_client: reqwest::Client::new(),
             storage: Arc::new(Mutex::new(storage)),
             tls_client: Arc::new(Mutex::new(tls)),
+            optimizer: Arc::new(Mutex::new(optimizer)),
             domain_map,
             cert_cache,
         };
@@ -1255,11 +1346,19 @@ mod tests {
             }
         };
         let cert_cache = tls.cert_cache.clone();
+        let optimizer_url = start_mock_optimizer_server().await;
+        let optimizer = loop {
+            match clients::optimizer_client::OptimizerClient::connect(&optimizer_url).await {
+                Ok(c) => break c,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        };
         let ps = ProxyState {
             shared: Arc::new(tokio::sync::RwLock::new(state::AppState::new())),
             http_client: reqwest::Client::new(),
             storage: Arc::new(Mutex::new(storage)),
             tls_client: Arc::new(Mutex::new(tls)),
+            optimizer: Arc::new(Mutex::new(optimizer)),
             domain_map: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
             cert_cache,
         };
@@ -1301,11 +1400,19 @@ mod tests {
             }
         };
         let cert_cache = tls.cert_cache.clone();
+        let optimizer_url = start_mock_optimizer_server().await;
+        let optimizer = loop {
+            match clients::optimizer_client::OptimizerClient::connect(&optimizer_url).await {
+                Ok(c) => break c,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        };
         let ps = ProxyState {
             shared: Arc::new(tokio::sync::RwLock::new(state::AppState::new())),
             http_client: reqwest::Client::new(),
             storage: Arc::new(Mutex::new(storage)),
             tls_client: Arc::new(Mutex::new(tls)),
+            optimizer: Arc::new(Mutex::new(optimizer)),
             domain_map: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
             cert_cache,
         };
@@ -1372,11 +1479,19 @@ mod tests {
         );
         let domain_map: DomainMap = Arc::new(tokio::sync::RwLock::new(domain_map_inner));
 
+        let optimizer_url = start_mock_optimizer_server().await;
+        let optimizer = loop {
+            match clients::optimizer_client::OptimizerClient::connect(&optimizer_url).await {
+                Ok(c) => break c,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        };
         let ps = ProxyState {
             shared: Arc::new(tokio::sync::RwLock::new(state::AppState::new())),
             http_client: reqwest::Client::new(),
             storage: Arc::new(Mutex::new(storage_client)),
             tls_client: Arc::new(Mutex::new(tls)),
+            optimizer: Arc::new(Mutex::new(optimizer)),
             domain_map,
             cert_cache,
         };

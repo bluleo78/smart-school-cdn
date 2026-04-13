@@ -8,6 +8,7 @@ use rustls::{ServerConfig, server::{ClientHello, ResolvesServerCert}, sign::Cert
 use axum_server::tls_rustls::RustlsConfig;
 
 use proxy::{DomainMap, build_admin_router, build_proxy_router, ProxyState};
+use proxy::clients::optimizer_client::OptimizerClient;
 use proxy::clients::storage_client::StorageClient;
 use proxy::clients::tls_client::{TlsClient, CertCache};
 use proxy::state::{AppState, SharedState};
@@ -55,8 +56,14 @@ async fn main() {
     let domain_map: DomainMap = Arc::new(RwLock::new(HashMap::new()));
     let cert_cache = tls_client.cert_cache.clone();
 
+    let optimizer_url = std::env::var("OPTIMIZER_GRPC_URL")
+        .unwrap_or_else(|_| "http://optimizer-service:50054".to_string());
+    let optimizer = OptimizerClient::connect(&optimizer_url).await
+        .expect("optimizer-service gRPC 연결 실패");
+
     let storage = Arc::new(Mutex::new(storage));
     let tls_client = Arc::new(Mutex::new(tls_client));
+    let optimizer = Arc::new(Mutex::new(optimizer));
 
     // 매분 히트율 스냅샷 기록 배경 태스크
     let state_for_snapshot = shared_state.clone();
@@ -73,6 +80,7 @@ async fn main() {
         http_client,
         storage: storage.clone(),
         tls_client: tls_client.clone(),
+        optimizer: optimizer.clone(),              // optimizer gRPC 클라이언트
         domain_map: domain_map.clone(),
         cert_cache: cert_cache.clone(),
     };
