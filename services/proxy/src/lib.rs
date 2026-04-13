@@ -1639,4 +1639,262 @@ mod tests {
         // content-type with charset
         assert!(should_optimize(Some("image/jpeg; charset=utf-8")));
     }
+
+    // ─── MISS 분기 테스트용 헬퍼 ────────────────────────────────────────
+
+    /// 테스트용 간단한 HTTP 원본 서버 기동 — 모든 경로에 fake JPEG 응답
+    async fn start_mock_origin_server(body: Vec<u8>, content_type: &'static str) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let app = axum::Router::new().fallback(move || {
+                let body = body.clone();
+                async move {
+                    axum::response::Response::builder()
+                        .status(200)
+                        .header("content-type", content_type)
+                        .body(axum::body::Body::from(body))
+                        .unwrap()
+                }
+            });
+            axum::serve(listener, app).await.unwrap();
+        });
+        format!("http://127.0.0.1:{}", addr.port())
+    }
+
+    /// MISS 분기 테스트 공통 ProxyState 빌드 헬퍼
+    async fn make_miss_proxy_state(
+        optimizer: Option<Arc<Mutex<clients::optimizer_client::OptimizerClient>>>,
+        origin_url: String,
+        host: &str,
+    ) -> (ProxyState, axum::Router) {
+        let storage_url = start_mock_storage_server().await;
+        let tls_url = start_mock_tls_server().await;
+
+        let storage = loop {
+            match clients::storage_client::StorageClient::connect(&storage_url).await {
+                Ok(c) => break c,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        };
+        let tls = loop {
+            match clients::tls_client::TlsClient::connect(&tls_url).await {
+                Ok(c) => break c,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        };
+        let cert_cache = tls.cert_cache.clone();
+
+        let mut domain_map_inner = HashMap::new();
+        domain_map_inner.insert(host.to_string(), origin_url);
+        let domain_map: DomainMap = Arc::new(tokio::sync::RwLock::new(domain_map_inner));
+
+        let ps = ProxyState {
+            shared: Arc::new(tokio::sync::RwLock::new(state::AppState::new())),
+            http_client: reqwest::Client::new(),
+            storage: Arc::new(Mutex::new(storage)),
+            tls_client: Arc::new(Mutex::new(tls)),
+            optimizer,
+            domain_map,
+            cert_cache,
+        };
+        let router = build_proxy_router(ps.clone());
+        (ps, router)
+    }
+
+    /// Mock Optimizer — 최적화 성공: OPTIMIZED_WEBP 바이트 + image/webp 반환
+    #[derive(Default)]
+    struct MockOptimizerSuccess;
+
+    #[tonic::async_trait]
+    impl OptimizerService for MockOptimizerSuccess {
+        async fn optimize(
+            &self,
+            req: tonic::Request<OptimizeRequest>,
+        ) -> Result<tonic::Response<OptimizeResponse>, tonic::Status> {
+            let inner = req.into_inner();
+            let original_size = inner.data.len() as i64;
+            let optimized = b"OPTIMIZED_WEBP".to_vec();
+            let optimized_size = optimized.len() as i64;
+            Ok(tonic::Response::new(OptimizeResponse {
+                data: optimized,
+                content_type: "image/webp".to_string(),
+                original_size,
+                optimized_size,
+            }))
+        }
+        async fn get_profiles(&self, _: tonic::Request<OptimizerEmpty>) -> Result<tonic::Response<GetProfilesResponse>, tonic::Status> {
+            Ok(tonic::Response::new(GetProfilesResponse { profiles: vec![] }))
+        }
+        async fn set_profile(&self, _: tonic::Request<SetProfileRequest>) -> Result<tonic::Response<OptimizerEmpty>, tonic::Status> {
+            Ok(tonic::Response::new(OptimizerEmpty {}))
+        }
+        async fn get_stats(&self, _: tonic::Request<OptimizerEmpty>) -> Result<tonic::Response<GetStatsResponse>, tonic::Status> {
+            Ok(tonic::Response::new(GetStatsResponse { stats: vec![] }))
+        }
+        async fn health(&self, _: tonic::Request<OptimizerEmpty>) -> Result<tonic::Response<OptimizerHealthResponse>, tonic::Status> {
+            Ok(tonic::Response::new(OptimizerHealthResponse { online: true, latency_ms: 0 }))
+        }
+    }
+
+    async fn start_mock_optimizer_success_server() -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let svc = OptimizerServiceServer::new(MockOptimizerSuccess);
+        tokio::spawn(async move {
+            tonic::transport::Server::builder()
+                .add_service(svc)
+                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
+                .await
+                .unwrap();
+        });
+        format!("http://127.0.0.1:{}", addr.port())
+    }
+
+    /// Mock Optimizer — gRPC 실패: Status::internal 반환
+    #[derive(Default)]
+    struct MockOptimizerFail;
+
+    #[tonic::async_trait]
+    impl OptimizerService for MockOptimizerFail {
+        async fn optimize(
+            &self,
+            _: tonic::Request<OptimizeRequest>,
+        ) -> Result<tonic::Response<OptimizeResponse>, tonic::Status> {
+            Err(tonic::Status::internal("optimizer internal error"))
+        }
+        async fn get_profiles(&self, _: tonic::Request<OptimizerEmpty>) -> Result<tonic::Response<GetProfilesResponse>, tonic::Status> {
+            Ok(tonic::Response::new(GetProfilesResponse { profiles: vec![] }))
+        }
+        async fn set_profile(&self, _: tonic::Request<SetProfileRequest>) -> Result<tonic::Response<OptimizerEmpty>, tonic::Status> {
+            Ok(tonic::Response::new(OptimizerEmpty {}))
+        }
+        async fn get_stats(&self, _: tonic::Request<OptimizerEmpty>) -> Result<tonic::Response<GetStatsResponse>, tonic::Status> {
+            Ok(tonic::Response::new(GetStatsResponse { stats: vec![] }))
+        }
+        async fn health(&self, _: tonic::Request<OptimizerEmpty>) -> Result<tonic::Response<OptimizerHealthResponse>, tonic::Status> {
+            Ok(tonic::Response::new(OptimizerHealthResponse { online: true, latency_ms: 0 }))
+        }
+    }
+
+    async fn start_mock_optimizer_fail_server() -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let svc = OptimizerServiceServer::new(MockOptimizerFail);
+        tokio::spawn(async move {
+            tonic::transport::Server::builder()
+                .add_service(svc)
+                .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
+                .await
+                .unwrap();
+        });
+        format!("http://127.0.0.1:{}", addr.port())
+    }
+
+    // ─── MISS 분기 테스트 A·B·C ─────────────────────────────────────────
+
+    /// Test A: MISS → optimizer 성공 → 최적화된 본문·content-type 응답
+    #[tokio::test]
+    async fn proxy_handler_miss_optimizer_성공시_최적화된_응답을_반환한다() {
+        let fake_jpeg = b"\xff\xd8\xff\xe0fake_jpeg_data".to_vec();
+        let origin_url = start_mock_origin_server(fake_jpeg, "image/jpeg").await;
+
+        let opt_url = start_mock_optimizer_success_server().await;
+        let optimizer = loop {
+            match clients::optimizer_client::OptimizerClient::connect(&opt_url).await {
+                Ok(c) => break c,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        };
+
+        let (_, router) = make_miss_proxy_state(
+            Some(Arc::new(Mutex::new(optimizer))),
+            origin_url,
+            "miss-opt-success.test.com",
+        ).await;
+
+        let resp = router
+            .oneshot(
+                Request::builder()
+                    .uri("/img.jpg")
+                    .header("host", "miss-opt-success.test.com")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        // optimizer가 반환한 content-type
+        assert_eq!(resp.headers().get("content-type").unwrap(), "image/webp");
+        let body = to_bytes(resp.into_body(), 4096).await.unwrap();
+        assert_eq!(body.as_ref(), b"OPTIMIZED_WEBP");
+    }
+
+    /// Test B: MISS → optimizer gRPC 실패 → 원본 본문·content-type으로 그레이스풀 디그레이드
+    #[tokio::test]
+    async fn proxy_handler_miss_optimizer_실패시_원본_응답으로_폴백한다() {
+        let fake_jpeg = b"\xff\xd8\xff\xe0fake_jpeg_data".to_vec();
+        let origin_url = start_mock_origin_server(fake_jpeg.clone(), "image/jpeg").await;
+
+        let opt_url = start_mock_optimizer_fail_server().await;
+        let optimizer = loop {
+            match clients::optimizer_client::OptimizerClient::connect(&opt_url).await {
+                Ok(c) => break c,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        };
+
+        let (_, router) = make_miss_proxy_state(
+            Some(Arc::new(Mutex::new(optimizer))),
+            origin_url,
+            "miss-opt-fail.test.com",
+        ).await;
+
+        let resp = router
+            .oneshot(
+                Request::builder()
+                    .uri("/img.jpg")
+                    .header("host", "miss-opt-fail.test.com")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // 500이 아닌 200, 원본 content-type
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.headers().get("content-type").unwrap(), "image/jpeg");
+        let body = to_bytes(resp.into_body(), 4096).await.unwrap();
+        assert_eq!(body.as_ref(), fake_jpeg.as_slice());
+    }
+
+    /// Test C: MISS → optimizer=None → 원본 본문 정상 반환 (패닉 없음)
+    #[tokio::test]
+    async fn proxy_handler_miss_optimizer_없으면_원본_응답을_반환한다() {
+        let fake_jpeg = b"\xff\xd8\xff\xe0fake_jpeg_data".to_vec();
+        let origin_url = start_mock_origin_server(fake_jpeg.clone(), "image/jpeg").await;
+
+        let (_, router) = make_miss_proxy_state(
+            None, // optimizer 없음
+            origin_url,
+            "miss-no-opt.test.com",
+        ).await;
+
+        let resp = router
+            .oneshot(
+                Request::builder()
+                    .uri("/img.jpg")
+                    .header("host", "miss-no-opt.test.com")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.headers().get("content-type").unwrap(), "image/jpeg");
+        let body = to_bytes(resp.into_body(), 4096).await.unwrap();
+        assert_eq!(body.as_ref(), fake_jpeg.as_slice());
+    }
 }

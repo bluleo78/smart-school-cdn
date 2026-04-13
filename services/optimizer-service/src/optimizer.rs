@@ -1,9 +1,7 @@
 /// Optimizer 핵심 로직
 /// - SQLite: 도메인별 프로파일 + 절감 통계
-/// - optimize(): 이미지 WebP 변환 + 텍스트 gzip 압축
-use flate2::{write::GzEncoder, Compression};
+/// - optimize(): 이미지 WebP 변환 (image/jpeg, image/png → image/webp)
 use rusqlite::{Connection, params};
-use std::io::Write;
 use std::sync::Mutex;
 
 /// 최적화 결과
@@ -141,8 +139,7 @@ impl OptimizerDb {
     /// 콘텐츠 최적화
     /// - image/png, image/jpeg → WebP 변환 (max_width 리사이즈 포함)
     /// - image/webp, image/avif → 바이패스
-    /// - text/*, application/javascript, application/json → gzip 압축
-    /// - 그 외 → 바이패스
+    /// - 그 외 → 바이패스 (proxy의 should_optimize()가 image/jpeg·image/png만 전달)
     pub fn optimize(&self, data: &[u8], content_type: &str, domain: &str) -> OptimizeResult {
         let original_size = data.len() as i64;
         let profile = self.get_profile(domain);
@@ -160,13 +157,6 @@ impl OptimizerDb {
         let (out_data, out_type) = match content_type {
             "image/png" | "image/jpeg" => {
                 self.convert_to_webp(data, &profile)
-                    .unwrap_or_else(|_| (data.to_vec(), content_type.to_string()))
-            }
-            "image/webp" | "image/avif" => (data.to_vec(), content_type.to_string()),
-            ct if ct.starts_with("text/")
-                || ct == "application/javascript"
-                || ct == "application/json" => {
-                self.gzip_compress(data)
                     .unwrap_or_else(|_| (data.to_vec(), content_type.to_string()))
             }
             _ => (data.to_vec(), content_type.to_string()),
@@ -198,12 +188,6 @@ impl OptimizerDb {
         Ok((buf, "image/webp".to_string()))
     }
 
-    /// 텍스트 → gzip 압축
-    fn gzip_compress(&self, data: &[u8]) -> Result<(Vec<u8>, String), Box<dyn std::error::Error>> {
-        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-        encoder.write_all(data)?;
-        Ok((encoder.finish()?, "application/gzip".to_string()))
-    }
 }
 
 #[cfg(test)]
@@ -281,17 +265,6 @@ mod tests {
         let result = db.optimize(&data, "image/webp", "unknown.com");
         assert_eq!(result.data, data);
         assert_eq!(result.content_type, "image/webp");
-    }
-
-    #[test]
-    fn 텍스트_입력은_gzip으로_압축된다() {
-        let (db, _dir) = make_db();
-        let text = b"hello world ".repeat(100);
-        let result = db.optimize(&text, "text/html", "unknown.com");
-        // gzip magic bytes: 1f 8b
-        assert_eq!(result.data[0], 0x1f);
-        assert_eq!(result.data[1], 0x8b);
-        assert!(result.optimized_size < result.original_size);
     }
 
     #[test]

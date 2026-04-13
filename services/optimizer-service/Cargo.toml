@@ -16,7 +16,6 @@ tracing.workspace      = true
 tracing-subscriber.workspace = true
 axum.workspace         = true
 image                  = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
-flate2                 = "1"
 rusqlite               = { version = "0.31", features = ["bundled"] }
 bytes                  = "1"
 
