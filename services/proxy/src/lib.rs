@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, RwLock};
 use bytes::Bytes;
-use coalescer::{Coalescer, CoalescedResponse};
+use coalescer::Coalescer;
 
 use sha2::{Digest, Sha256};
 use axum::body::Body;
