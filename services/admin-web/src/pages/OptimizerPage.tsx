@@ -10,15 +10,12 @@ import { Slider } from '../components/ui/slider';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Badge } from '../components/ui/badge';
+import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
+import { formatBytes } from '../lib/format';
 import { useOptimizerProfiles, useUpdateOptimizerProfile } from '../hooks/useOptimizerProfiles';
 import { useOptimizationStats } from '../hooks/useOptimizationStats';
 import type { OptimizerProfile } from '../api/optimizer';
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
 
 export function OptimizerPage() {
   const { data: profilesData, isLoading } = useOptimizerProfiles();
@@ -48,78 +45,90 @@ export function OptimizerPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">최적화</h1>
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">최적화</h1>
+        <p className="text-sm text-muted-foreground mt-1">도메인별 이미지 최적화 프로파일을 관리합니다.</p>
+      </div>
 
       {/* 절감 통계 카드 */}
-      <div className="grid grid-cols-3 gap-4" data-testid="optimization-stats-card">
-        <div className="rounded-lg border p-4">
-          <p className="text-sm text-muted-foreground">전체 절감률</p>
-          <p className="text-2xl font-bold" data-testid="savings-pct">{savingsPct}%</p>
-        </div>
-        <div className="rounded-lg border p-4">
-          <p className="text-sm text-muted-foreground">원본 총 용량</p>
-          <p className="text-2xl font-bold">{formatBytes(totalOriginal)}</p>
-        </div>
-        <div className="rounded-lg border p-4">
-          <p className="text-sm text-muted-foreground">최적화 후 용량</p>
-          <p className="text-2xl font-bold">{formatBytes(totalOptimized)}</p>
-        </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4" data-testid="optimization-stats-card">
+        <Card>
+          <CardHeader><CardTitle>전체 절감률</CardTitle></CardHeader>
+          <CardContent>
+            <p className="text-xl font-bold text-primary" data-testid="savings-pct">{savingsPct}%</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle>원본 총 용량</CardTitle></CardHeader>
+          <CardContent>
+            <p className="text-xl font-bold">{formatBytes(totalOriginal)}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader><CardTitle>압축 후 용량</CardTitle></CardHeader>
+          <CardContent>
+            <p className="text-xl font-bold text-amber-600">{formatBytes(totalOptimized)}</p>
+          </CardContent>
+        </Card>
       </div>
 
       {/* 프로파일 테이블 */}
-      <div className="rounded-lg border">
-        <table className="w-full text-sm" data-testid="profiles-table">
-          <thead className="border-b bg-muted/50">
-            <tr>
-              <th className="px-4 py-3 text-left">도메인</th>
-              <th className="px-4 py-3 text-left">품질</th>
-              <th className="px-4 py-3 text-left">최대 폭</th>
-              <th className="px-4 py-3 text-left">활성화</th>
-              <th className="px-4 py-3 text-left">편집</th>
-            </tr>
-          </thead>
-          <tbody>
-            {isLoading && (
-              <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
-                  로딩 중...
-                </td>
-              </tr>
-            )}
-            {!isLoading && profiles.length === 0 && (
-              <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground" data-testid="profiles-empty">
-                  등록된 프로파일이 없습니다.
-                </td>
-              </tr>
-            )}
-            {profiles.map((p) => (
-              <tr key={p.domain} className="border-b last:border-0" data-testid={`profile-row-${p.domain}`}>
-                <td className="px-4 py-3 font-mono">{p.domain}</td>
-                <td className="px-4 py-3">{p.quality}</td>
-                <td className="px-4 py-3">{p.max_width === 0 ? '제한 없음' : `${p.max_width}px`}</td>
-                <td className="px-4 py-3">
-                  <Badge
-                    variant={p.enabled ? 'default' : 'outline'}
-                    data-testid="profile-enabled-badge"
-                  >
-                    {p.enabled ? '활성' : '비활성'}
-                  </Badge>
-                </td>
-                <td className="px-4 py-3">
-                  <Button
-                    variant="outline"
-                    data-testid="profile-edit-btn"
-                    onClick={() => setEditTarget({ ...p })}
-                  >
-                    편집
-                  </Button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <Card>
+        <CardHeader><CardTitle>프로파일 목록</CardTitle></CardHeader>
+        <CardContent className="p-0">
+          <Table data-testid="profiles-table">
+            <TableHeader>
+              <TableRow>
+                <TableHead>도메인</TableHead>
+                <TableHead>품질</TableHead>
+                <TableHead>최대 폭</TableHead>
+                <TableHead>활성화</TableHead>
+                <TableHead>편집</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {isLoading && (
+                <TableRow>
+                  <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                    로딩 중...
+                  </TableCell>
+                </TableRow>
+              )}
+              {!isLoading && profiles.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={5} className="py-8 text-center text-muted-foreground" data-testid="profiles-empty">
+                    등록된 프로파일이 없습니다.
+                  </TableCell>
+                </TableRow>
+              )}
+              {profiles.map((p) => (
+                <TableRow key={p.domain} data-testid={`profile-row-${p.domain}`}>
+                  <TableCell className="font-mono">{p.domain}</TableCell>
+                  <TableCell>{p.quality}</TableCell>
+                  <TableCell>{p.max_width === 0 ? '제한 없음' : `${p.max_width}px`}</TableCell>
+                  <TableCell>
+                    <Badge
+                      variant={p.enabled ? 'default' : 'outline'}
+                      data-testid="profile-enabled-badge"
+                    >
+                      {p.enabled ? '활성' : '비활성'}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Button
+                      variant="outline"
+                      data-testid="profile-edit-btn"
+                      onClick={() => setEditTarget({ ...p })}
+                    >
+                      편집
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
 
       {/* 편집 Dialog */}
       <Dialog open={!!editTarget} onClose={() => setEditTarget(null)}>
