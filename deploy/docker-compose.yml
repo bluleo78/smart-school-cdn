@@ -125,6 +125,7 @@ services:
       - STORAGE_GRPC_URL=http://storage-service:50051
       - TLS_GRPC_URL=http://tls-service:50052
       - DNS_GRPC_URL=http://dns-service:50053
+      - OPTIMIZER_GRPC_URL=http://optimizer-service:50054
     depends_on:
       proxy:
         condition: service_healthy

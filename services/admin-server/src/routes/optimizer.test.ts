@@ -68,6 +68,26 @@ describe('PUT /api/optimizer/profiles/:domain', () => {
     });
     expect(res.statusCode).toBe(500);
   });
+
+  it('quality가 범위를 벗어나면 400을 반환한다', async () => {
+    const app = await createApp();
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/optimizer/profiles/example.com',
+      payload: { quality: 150, max_width: 0, enabled: true },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('필수 필드가 누락되면 400을 반환한다', async () => {
+    const app = await createApp();
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/optimizer/profiles/example.com',
+      payload: { quality: 75, max_width: 1280 },
+    });
+    expect(res.statusCode).toBe(400);
+  });
 });
 
 describe('GET /api/stats/optimization', () => {

@@ -41,6 +41,18 @@ test.describe('최적화 페이지 — 기본 렌더링', () => {
   });
 });
 
+test.describe('최적화 페이지 — 절감 통계 카드', () => {
+  test('절감 통계 카드 렌더링', async ({ page }) => {
+    await setupMocks(page);
+    await page.goto('/optimizer');
+
+    // savings-pct: (1 - 9_200_000/15_000_000)*100 ≈ 38.7%
+    const savingsEl = page.getByTestId('savings-pct');
+    await expect(savingsEl).toBeVisible();
+    await expect(savingsEl).toContainText('38');
+  });
+});
+
 test.describe('최적화 페이지 — 편집 Dialog', () => {
   test('편집 버튼 클릭 시 Dialog가 열리고 현재 값이 표시된다', async ({ page }) => {
     await setupMocks(page);

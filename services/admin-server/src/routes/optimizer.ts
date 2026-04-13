@@ -8,6 +8,18 @@ declare module 'fastify' {
   }
 }
 
+/** PUT /api/optimizer/profiles/:domain 요청 바디 스키마 */
+const profileBodySchema = {
+  type: 'object',
+  required: ['quality', 'max_width', 'enabled'],
+  properties: {
+    quality:   { type: 'integer', minimum: 1, maximum: 100 },
+    max_width: { type: 'integer', minimum: 0, maximum: 65535 },
+    enabled:   { type: 'boolean' },
+  },
+  additionalProperties: false,
+};
+
 export async function optimizerRoutes(app: FastifyInstance) {
   /** 도메인별 최적화 프로파일 목록 조회 */
   app.get('/api/optimizer/profiles', async (_req, reply) => {
@@ -23,7 +35,7 @@ export async function optimizerRoutes(app: FastifyInstance) {
   app.put<{
     Params: { domain: string };
     Body: { quality: number; max_width: number; enabled: boolean };
-  }>('/api/optimizer/profiles/:domain', async (req, reply) => {
+  }>('/api/optimizer/profiles/:domain', { schema: { body: profileBodySchema } }, async (req, reply) => {
     const { domain } = req.params;
     const { quality, max_width, enabled } = req.body;
     await app.optimizerClient.setProfile({ domain, quality, max_width, enabled });
