@@ -27,8 +27,8 @@ impl std::fmt::Debug for SniCertResolver {
 impl ResolvesServerCert for SniCertResolver {
     fn resolve(&self, client_hello: ClientHello) -> Option<Arc<CertifiedKey>> {
         let domain = client_hello.server_name()?;
-        // blocking_lock: SNI 핸들러는 sync 컨텍스트
-        self.cert_cache.blocking_lock().get(domain).cloned()
+        // std::sync::Mutex — SNI 핸들러는 sync 컨텍스트, tokio Mutex 사용 불가
+        self.cert_cache.lock().unwrap().get(domain).cloned()
     }
 }
 

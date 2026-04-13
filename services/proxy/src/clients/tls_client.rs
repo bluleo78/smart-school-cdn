@@ -1,8 +1,7 @@
 /// TLS gRPC 클라이언트 — tls-service:50052 통신
 /// SNI 핸들러는 sync 함수이므로 로컬 cert_cache에서 조회한다.
 /// 도메인 sync 시 prefetch_cert()로 미리 발급해 로컬 캐시에 저장한다.
-use std::{collections::HashMap, sync::Arc};
-use tokio::sync::Mutex;
+use std::{collections::HashMap, sync::{Arc, Mutex}};
 use rustls::sign::CertifiedKey;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls_pemfile::{certs, private_key};
@@ -50,7 +49,7 @@ impl TlsClient {
         };
         match pem_to_certified_key(&resp.cert_pem, &resp.key_pem) {
             Ok(ck) => {
-                self.cert_cache.lock().await.insert(domain.to_string(), Arc::new(ck));
+                self.cert_cache.lock().unwrap().insert(domain.to_string(), Arc::new(ck));
                 tracing::debug!("인증서 캐시 갱신: {}", domain);
             }
             Err(e) => tracing::warn!("CertifiedKey 변환 실패 {}: {}", domain, e),
