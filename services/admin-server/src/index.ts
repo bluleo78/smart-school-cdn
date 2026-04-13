@@ -76,6 +76,8 @@ try {
       await new Promise((r) => setTimeout(r, 3000));
     }
   })();
+  // 30초마다 주기적 sync — proxy 재시작 시 도메인 맵·인증서 캐시 자동 복구
+  setInterval(() => syncToProxy(domainRepo), 30_000);
 } catch (err) {
   app.log.error(err);
   process.exit(1);
