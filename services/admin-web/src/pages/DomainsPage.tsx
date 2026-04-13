@@ -270,8 +270,8 @@ export function DomainsPage() {
 
   return (
     <div className="flex flex-col h-full">
-      {/* 헤더 */}
-      <div className="flex items-center justify-between p-6 pb-4">
+      {/* 헤더 — AppLayout 이 p-6 을 이미 제공하므로 추가 수평 패딩 없음 */}
+      <div className="flex items-center justify-between pb-4">
         <div>
           <h2 className="text-2xl font-semibold tracking-tight">도메인 관리</h2>
           <p className="text-muted-foreground mt-1 text-sm">
@@ -284,7 +284,7 @@ export function DomainsPage() {
       </div>
 
       {/* 본문: 테이블 + 사이드 패널 */}
-      <div className="flex flex-1 overflow-hidden p-6 pt-4 gap-4">
+      <div className="flex flex-1 overflow-hidden gap-4">
         {/* 테이블 Card */}
         <Card className="flex-1 overflow-auto">
           <CardContent className="p-0">
