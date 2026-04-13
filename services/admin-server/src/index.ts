@@ -10,6 +10,8 @@ import { DomainRepository, DOMAIN_SCHEMA } from './db/domain-repo.js';
 import { createStorageClient } from './grpc/storage_client.js';
 import { createTlsClient } from './grpc/tls_client.js';
 import { createDnsClient } from './grpc/dns_client.js';
+import { createOptimizerClient } from './grpc/optimizer_client.js';
+import { optimizerRoutes } from './routes/optimizer.js';
 
 // SQLite DB 초기화 — 앱 기동 시 1회 실행
 const db = new Database(process.env.DB_PATH || './data/admin.db');
@@ -27,12 +29,14 @@ await app.register(cors);
 const storageClient = createStorageClient(process.env.STORAGE_GRPC_URL ?? 'localhost:50051');
 const tlsClient = createTlsClient(process.env.TLS_GRPC_URL ?? 'localhost:50052');
 const dnsClient = createDnsClient(process.env.DNS_GRPC_URL ?? 'localhost:50053');
+const optimizerClient = createOptimizerClient(process.env.OPTIMIZER_GRPC_URL ?? 'localhost:50054');
 const proxyAdminUrl = process.env.PROXY_ADMIN_URL ?? 'http://localhost:8081';
 
 // Fastify 인스턴스에 gRPC 클라이언트 데코레이터 등록
 app.decorate('storageClient', storageClient);
 app.decorate('tlsClient', tlsClient);
 app.decorate('dnsClient', dnsClient);
+app.decorate('optimizerClient', optimizerClient);
 app.decorate('proxyAdminUrl', proxyAdminUrl);
 
 /** 헬스체크 엔드포인트 */
@@ -54,6 +58,9 @@ await app.register(domainRoutes, { domainRepo });
 
 /** 시스템 헬스체크 API 라우트 등록 */
 await app.register(systemRoutes);
+
+/** 최적화 프로파일 + 절감 통계 API 라우트 등록 */
+await app.register(optimizerRoutes);
 
 const port = Number(process.env.PORT) || 4001;
 
