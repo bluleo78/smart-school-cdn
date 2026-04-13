@@ -103,27 +103,28 @@ test.describe('발급된 인증서 목록', () => {
 ///   장애 배너    ✅
 test.describe('서비스 상태 그리드', () => {
   const allOnlineStatus = {
-    proxy:   { online: true,  latency_ms: 12 },
-    storage: { online: true,  latency_ms: 3  },
-    tls:     { online: true,  latency_ms: 5  },
-    dns:     { online: true,  latency_ms: 2  },
+    proxy:     { online: true,  latency_ms: 12 },
+    storage:   { online: true,  latency_ms: 3  },
+    tls:       { online: true,  latency_ms: 5  },
+    dns:       { online: true,  latency_ms: 2  },
+    optimizer: { online: true,  latency_ms: 8  },
   };
 
-  test('4개 서비스 카드가 모두 렌더링된다', async ({ page }) => {
+  test('5개 서비스 카드가 모두 렌더링된다', async ({ page }) => {
     await mockApi(page, 'GET', '/system/status', allOnlineStatus);
     await page.goto('/system');
 
     const cards = page.getByTestId('service-status-card');
-    await expect(cards).toHaveCount(4);
+    await expect(cards).toHaveCount(5);
   });
 
-  test('모든 서비스 온라인일 때 온라인 배지가 4개 표시된다', async ({ page }) => {
+  test('모든 서비스 온라인일 때 온라인 배지가 5개 표시된다', async ({ page }) => {
     await mockApi(page, 'GET', '/system/status', allOnlineStatus);
     await page.goto('/system');
 
     // 온라인 배지 텍스트 확인
     const badges = page.getByTestId('service-status-badge');
-    await expect(badges).toHaveCount(4);
+    await expect(badges).toHaveCount(5);
     for (const badge of await badges.all()) {
       await expect(badge).toHaveText('온라인');
     }
@@ -135,7 +136,7 @@ test.describe('서비스 상태 그리드', () => {
 
     // 응답시간 형식 검증 (숫자ms 형태)
     const latencies = page.getByTestId('service-status-latency');
-    await expect(latencies).toHaveCount(4);
+    await expect(latencies).toHaveCount(5);
     const texts = await latencies.allTextContents();
     for (const text of texts) {
       expect(text).toMatch(/^\d+ms$/);

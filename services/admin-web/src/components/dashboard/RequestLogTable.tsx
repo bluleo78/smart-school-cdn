@@ -1,5 +1,6 @@
 /// 최근 프록시 요청 로그를 테이블로 보여주는 컴포넌트
 /// 5초 간격으로 API를 폴링하여 최신 로그를 표시한다.
+import { Activity } from 'lucide-react';
 import { useProxyRequests } from '../../hooks/useProxyRequests';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
@@ -54,7 +55,11 @@ export function RequestLogTable() {
       <Card>
         <CardHeader><CardTitle>최근 요청</CardTitle></CardHeader>
         <CardContent>
-          <p className="text-sm text-muted-foreground">요청 로그가 없습니다</p>
+          <div className="flex flex-col items-center gap-2 py-8 text-muted-foreground">
+            <Activity size={32} className="opacity-30" />
+            <p className="text-sm">요청 로그가 없습니다.</p>
+            <p className="text-xs">프록시로 요청이 들어오면 여기에 실시간 표시됩니다.</p>
+          </div>
         </CardContent>
       </Card>
     );

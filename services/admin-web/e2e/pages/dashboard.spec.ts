@@ -24,8 +24,8 @@ test.describe('대시보드 — 프록시 상태 카드', () => {
     // 업타임 "1시간 0분" 표시 확인
     await expect(page.getByText('1시간 0분')).toBeVisible();
 
-    // 총 요청 수 "42" 표시 확인 (exact: true 로 3,842 등 부분 매칭 방지)
-    await expect(page.getByText('42', { exact: true })).toBeVisible();
+    // 총 요청 수 표시 확인
+    await expect(page.getByText('총 요청 42건')).toBeVisible();
   });
 
   test('프록시 오프라인 시 빨간 배지가 표시된다', async ({ page }) => {

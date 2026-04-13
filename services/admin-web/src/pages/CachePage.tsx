@@ -1,5 +1,6 @@
 /// 캐시 관리 페이지 — Card·AlertDialog·Input·Skeleton·Sonner·에러·반응형
 import { useState, useRef, useEffect } from 'react';
+import { Database } from 'lucide-react';
 import { toast } from 'sonner';
 import { useCacheStats } from '../hooks/useCacheStats';
 import { useCachePopular } from '../hooks/useCachePopular';
@@ -75,7 +76,10 @@ export function CachePage() {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-semibold tracking-tight">캐시 관리</h2>
+      <div>
+        <h2 className="text-2xl font-semibold tracking-tight">캐시 관리</h2>
+        <p className="text-sm text-muted-foreground mt-1">캐시 통계 확인 및 퍼지를 실행합니다.</p>
+      </div>
 
       {/* E2E 테스트용 상태 토스트 — sonner와 병행 */}
       {toastMsg && (
@@ -102,7 +106,7 @@ export function CachePage() {
           <CardContent>
             {statsLoading ? <Skeleton className="h-7 w-24" /> :
              statsError ? <p className="text-sm text-destructive">오류</p> :
-             <p className="text-xl font-bold text-amber-600">{formatBytes(stats?.total_size_bytes ?? 0)}</p>}
+             <p className="text-xl font-bold">{formatBytes(stats?.total_size_bytes ?? 0)}</p>}
           </CardContent>
         </Card>
         <Card>
@@ -148,6 +152,7 @@ export function CachePage() {
                 variant="destructive"
                 onClick={() => setShowConfirm(true)}
                 disabled={isPurgeDisabled}
+                className="shrink-0"
                 data-testid="purge-btn"
               >
                 퍼지
@@ -167,6 +172,7 @@ export function CachePage() {
                 variant="destructive"
                 onClick={() => setShowConfirm(true)}
                 disabled={isPurgeDisabled}
+                className="shrink-0"
                 data-testid="purge-btn"
               >
                 퍼지
@@ -203,7 +209,11 @@ export function CachePage() {
           ) : popularError ? (
             <p className="text-sm text-destructive">인기 콘텐츠를 불러오지 못했습니다.</p>
           ) : !popular || popular.length === 0 ? (
-            <p className="text-sm text-muted-foreground">캐시된 콘텐츠가 없습니다</p>
+            <div className="flex flex-col items-center gap-2 py-8 text-muted-foreground">
+              <Database size={32} className="opacity-30" />
+              <p className="text-sm">캐시된 콘텐츠가 없습니다.</p>
+              <p className="text-xs">프록시를 통해 요청이 들어오면 여기에 표시됩니다.</p>
+            </div>
           ) : (
             <Table>
               <TableHeader>

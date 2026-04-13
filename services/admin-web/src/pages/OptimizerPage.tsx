@@ -1,5 +1,6 @@
 /// 최적화 설정 페이지 — 도메인별 프로파일 편집 + 절감 통계 카드
 import { useState } from 'react';
+import { Zap } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   Dialog, DialogContent, DialogTitle,
@@ -67,7 +68,7 @@ export function OptimizerPage() {
         <Card>
           <CardHeader><CardTitle>압축 후 용량</CardTitle></CardHeader>
           <CardContent>
-            <p className="text-xl font-bold text-amber-600">{formatBytes(totalOptimized)}</p>
+            <p className="text-xl font-bold">{formatBytes(totalOptimized)}</p>
           </CardContent>
         </Card>
       </div>
@@ -96,8 +97,12 @@ export function OptimizerPage() {
               )}
               {!isLoading && profiles.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={5} className="py-8 text-center text-muted-foreground" data-testid="profiles-empty">
-                    등록된 프로파일이 없습니다.
+                  <TableCell colSpan={5} data-testid="profiles-empty">
+                    <div className="flex flex-col items-center gap-2 py-8 text-muted-foreground">
+                      <Zap size={32} className="opacity-30" />
+                      <p className="text-sm">등록된 프로파일이 없습니다.</p>
+                      <p className="text-xs">도메인을 추가하면 자동으로 프로파일이 생성됩니다.</p>
+                    </div>
                   </TableCell>
                 </TableRow>
               )}

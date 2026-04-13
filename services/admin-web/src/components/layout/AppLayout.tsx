@@ -20,9 +20,14 @@ export function AppLayout() {
   return (
     <div className="flex h-screen bg-background text-foreground">
       {/* 사이드바 */}
-      <aside className="w-60 bg-card border-r border-border flex flex-col shrink-0">
+      <aside className="w-60 bg-muted/40 border-r border-border flex flex-col shrink-0">
         <div className="p-4 border-b border-border">
-          <h1 className="text-lg font-bold">Smart School CDN</h1>
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-md bg-primary flex items-center justify-center shrink-0">
+              <span className="text-primary-foreground text-xs font-bold">SC</span>
+            </div>
+            <h1 className="text-sm font-bold leading-tight">Smart School CDN</h1>
+          </div>
         </div>
         <nav className="flex-1 p-2 space-y-1">
           {navItems.map(({ to, icon: Icon, label }) => (

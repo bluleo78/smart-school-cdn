@@ -37,20 +37,14 @@ export function ProxyStatusCard() {
   return (
     <Card>
       <CardHeader><CardTitle>프록시 상태</CardTitle></CardHeader>
-      <CardContent className="space-y-4">
-        <Badge variant={isOnline ? 'outline' : 'destructive'}>
+      <CardContent>
+        <Badge variant={isOnline ? 'outline' : 'destructive'} className={isOnline ? 'border-green-500 text-green-700' : ''}>
           {isOnline ? '온라인' : '오프라인'}
         </Badge>
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <p className="text-xs text-muted-foreground">업타임</p>
-            <p className="text-lg font-semibold">{formatUptime(data?.uptime ?? 0)}</p>
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">총 요청 수</p>
-            <p className="text-lg font-semibold">{(data?.request_count ?? 0).toLocaleString()}</p>
-          </div>
-        </div>
+        <p className="text-xl font-bold mt-3 leading-tight">{formatUptime(data?.uptime ?? 0)}</p>
+        <p className="text-xs text-muted-foreground mt-1">
+          총 요청 {(data?.request_count ?? 0).toLocaleString()}건
+        </p>
       </CardContent>
     </Card>
   );

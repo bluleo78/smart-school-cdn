@@ -10,7 +10,10 @@ import { EntryCountCard } from '../components/dashboard/EntryCountCard';
 export function DashboardPage() {
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-semibold tracking-tight">대시보드</h2>
+      <div>
+        <h2 className="text-2xl font-semibold tracking-tight">대시보드</h2>
+        <p className="text-sm text-muted-foreground mt-1">CDN 서비스 현황을 한눈에 확인합니다.</p>
+      </div>
 
       {/* 1행: 요약 카드 — 모바일 2열, 데스크탑 4열 */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

@@ -38,7 +38,7 @@ export function StorageUsageCard() {
     <Card data-testid="storage-usage-card">
       <CardHeader><CardTitle>스토리지 사용량</CardTitle></CardHeader>
       <CardContent>
-        <p className="text-lg font-bold text-amber-600 mb-2">{formatBytes(used)}</p>
+        <p className="text-lg font-bold mb-2">{formatBytes(used)}</p>
         <div className="w-full bg-muted rounded-full h-2 mb-1">
           <div
             className={`${barColor} h-2 rounded-full transition-all`}

@@ -2,6 +2,7 @@
  * Card·Skeleton 기반, 에러 상태 처리, formatUptime 공통 유틸 사용
  * 마이크로서비스 상태 그리드 + 장애 배너 추가
  */
+import { AlertTriangle } from 'lucide-react';
 import { useProxyStatus } from '../hooks/useProxyStatus';
 import { useSystemStatus } from '../api/system';
 import { ServiceStatusCard } from '../components/system/ServiceStatusCard';
@@ -23,6 +24,7 @@ const SERVICE_LABELS: Record<keyof SystemStatus, string> = {
   storage: 'Storage',
   tls: 'TLS',
   dns: 'DNS',
+  optimizer: 'Optimizer',
 };
 
 /** 인증서 만료일 기준 상태 배지 */
@@ -51,7 +53,7 @@ export function SystemPage() {
 
   // 하나라도 오프라인인 서비스가 있으면 장애 배너 표시
   const anyOffline = systemStatus
-    ? !systemStatus.proxy.online || !systemStatus.storage.online || !systemStatus.tls.online || !systemStatus.dns.online
+    ? !systemStatus.proxy.online || !systemStatus.storage.online || !systemStatus.tls.online || !systemStatus.dns.online || !systemStatus.optimizer.online
     : false;
 
   const diskUsageRatio =
@@ -66,11 +68,14 @@ export function SystemPage() {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-semibold tracking-tight">시스템</h2>
+      <div>
+        <h2 className="text-2xl font-semibold tracking-tight">시스템</h2>
+        <p className="text-sm text-muted-foreground mt-1">서비스 상태, 인증서, 디스크 사용량을 확인합니다.</p>
+      </div>
 
       {/* 마이크로서비스 상태 그리드 */}
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        {(['proxy', 'storage', 'tls', 'dns'] as const).map((key) => (
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+        {(['proxy', 'storage', 'tls', 'dns', 'optimizer'] as const).map((key) => (
           <ServiceStatusCard
             key={key}
             name={SERVICE_LABELS[key]}
@@ -82,9 +87,12 @@ export function SystemPage() {
 
       {/* 서비스 장애 배너 */}
       {anyOffline && (
-        <div data-testid="service-offline-banner" className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-destructive">
-          <p className="font-semibold">일부 서비스가 오프라인입니다.</p>
-          <p className="mt-1 text-sm">서비스 상태를 확인하세요.</p>
+        <div data-testid="service-offline-banner" className="flex gap-3 rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-destructive">
+          <AlertTriangle size={20} className="mt-0.5 shrink-0" />
+          <div>
+            <p className="font-semibold">일부 서비스가 오프라인입니다.</p>
+            <p className="mt-1 text-sm">서비스 상태를 확인하세요.</p>
+          </div>
         </div>
       )}
 

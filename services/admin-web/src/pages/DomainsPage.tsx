@@ -7,7 +7,7 @@
  * - Table: 시맨틱 컴포넌트
  */
 import { useState } from 'react';
-import { X } from 'lucide-react';
+import { X, Globe } from 'lucide-react';
 import { toast } from 'sonner';
 import { useDomains } from '../hooks/useDomains';
 import { useAddDomain } from '../hooks/useAddDomain';
@@ -297,11 +297,10 @@ export function DomainsPage() {
               <p className="p-6 text-sm text-destructive">도메인 목록을 불러오지 못했습니다.</p>
             )}
             {!isLoading && !error && domains.length === 0 && (
-              <div className="p-6 text-center" data-testid="domains-empty">
-                <p className="text-sm text-muted-foreground">등록된 도메인이 없습니다.</p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  + 도메인 추가 버튼으로 첫 번째 도메인을 등록하세요.
-                </p>
+              <div className="flex flex-col items-center gap-2 py-12 text-muted-foreground" data-testid="domains-empty">
+                <Globe size={36} className="opacity-30" />
+                <p className="text-sm">등록된 도메인이 없습니다.</p>
+                <p className="text-xs">우측 상단 "+ 도메인 추가" 버튼으로 첫 번째 도메인을 등록하세요.</p>
               </div>
             )}
             {domains.length > 0 && (

@@ -8,12 +8,13 @@ export interface ServiceStatus {
   latency_ms: number;
 }
 
-/** 전체 시스템 상태 (proxy / storage / tls / dns) */
+/** 전체 시스템 상태 (proxy / storage / tls / dns / optimizer) */
 export interface SystemStatus {
   proxy: ServiceStatus;
   storage: ServiceStatus;
   tls: ServiceStatus;
   dns: ServiceStatus;
+  optimizer: ServiceStatus;
 }
 
 /** GET /api/system/status 호출 */

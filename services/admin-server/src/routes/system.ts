@@ -33,13 +33,14 @@ export async function systemRoutes(app: FastifyInstance) {
       }
     };
 
-    const [proxy, storage, tls, dns] = await Promise.all([
+    const [proxy, storage, tls, dns, optimizer] = await Promise.all([
       proxyCheck(),
       measure(() => app.storageClient.health()),
       measure(() => app.tlsClient.health()),
       measure(() => app.dnsClient.health()),
+      measure(() => app.optimizerClient.health()),
     ]);
 
-    reply.send({ proxy, storage, tls, dns });
+    reply.send({ proxy, storage, tls, dns, optimizer });
   });
 }
