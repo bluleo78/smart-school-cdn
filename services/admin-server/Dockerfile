@@ -9,6 +9,8 @@ COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY services/admin-server/package.json ./services/admin-server/
 # admin-server 의존성만 설치
 RUN pnpm install --frozen-lockfile --filter admin-server...
+# proto 파일 복사 (gRPC 클라이언트 런타임 로딩에 필요)
+COPY crates/cdn-proto/proto/ ./crates/cdn-proto/proto/
 # 소스 복사 후 TypeScript 빌드
 COPY services/admin-server/ ./services/admin-server/
 RUN pnpm --filter admin-server build
@@ -24,5 +26,7 @@ WORKDIR /app
 COPY --from=build /prod ./
 # 컴파일된 JS 복사
 COPY --from=build /app/services/admin-server/dist ./dist
+# proto 파일 복사 (런타임 gRPC 로딩용)
+COPY --from=build /app/crates/cdn-proto/proto /crates/cdn-proto/proto
 EXPOSE 4001
 CMD ["node", "dist/index.js"]
