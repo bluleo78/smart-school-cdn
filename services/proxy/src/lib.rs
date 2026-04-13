@@ -88,6 +88,14 @@ fn compute_cache_key(method: &str, host: &str, path: &str, query: &str) -> Strin
     hex::encode(hash)
 }
 
+/// 이미지 콘텐츠 최적화 대상 여부 — image/jpeg, image/png만 optimizer 호출
+fn should_optimize(content_type: Option<&str>) -> bool {
+    matches!(
+        content_type.unwrap_or("").split(';').next().unwrap_or("").trim(),
+        "image/jpeg" | "image/png"
+    )
+}
+
 /// Cache-Control 헤더 해석 결과
 #[derive(Debug, PartialEq)]
 enum CacheDirective {
@@ -298,8 +306,24 @@ async fn proxy_handler(
                     .and_then(|v| v.to_str().ok())
                     .map(|s| s.to_string());
                 let full_url = format!("https://{}{}", host, uri);
+                let domain = host.split(':').next().unwrap_or(&host).to_string();
+
+                // 이미지 콘텐츠: optimizer gRPC로 WebP 변환 시도
+                let (store_body, store_ct) = if should_optimize(content_type.as_deref()) {
+                    let ct = content_type.clone().unwrap_or_default();
+                    let opt_result = ps.optimizer.lock().await
+                        .optimize(response_body.clone(), ct, &domain)
+                        .await;
+                    match opt_result {
+                        Some((opt_bytes, opt_ct)) => (opt_bytes, Some(opt_ct)),
+                        None => (response_body.clone(), content_type.clone()),
+                    }
+                } else {
+                    (response_body.clone(), content_type.clone())
+                };
+
                 ps.storage.lock().await
-                    .put(key, &full_url, &host, content_type, response_body.clone(), Some(ttl))
+                    .put(key, &full_url, &host, store_ct, store_body, Some(ttl))
                     .await;
                 "MISS"
             }
@@ -1573,5 +1597,18 @@ mod tests {
     #[test]
     fn test_pragma_no_cache() {
         assert_eq!(parse_cache_control(None, Some("no-cache")), CacheDirective::NoStore);
+    }
+
+    #[test]
+    fn should_optimize_은_이미지_타입만_true를_반환한다() {
+        assert!(should_optimize(Some("image/jpeg")));
+        assert!(should_optimize(Some("image/png")));
+        assert!(!should_optimize(Some("image/webp")));
+        assert!(!should_optimize(Some("image/avif")));
+        assert!(!should_optimize(Some("text/html")));
+        assert!(!should_optimize(Some("application/javascript")));
+        assert!(!should_optimize(None));
+        // content-type with charset
+        assert!(should_optimize(Some("image/jpeg; charset=utf-8")));
     }
 }
