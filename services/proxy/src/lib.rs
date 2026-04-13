@@ -8,6 +8,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, RwLock};
+use bytes::Bytes;
+use coalescer::{Coalescer, CoalescedResponse};
 
 use sha2::{Digest, Sha256};
 use axum::body::Body;
@@ -34,6 +36,7 @@ pub struct ProxyState {
     pub optimizer:   Option<Arc<Mutex<OptimizerClient>>>,   // optimizer gRPC 클라이언트 (없으면 최적화 비활성화)
     pub domain_map:  DomainMap,
     pub cert_cache:  CertCache,
+    pub coalescer:   Arc<Coalescer>,
 }
 
 /// 관리 API 핸들러 상태
@@ -162,8 +165,8 @@ async fn proxy_handler(
     body: Body,
 ) -> Response {
     let start = Instant::now();
-    let state = ps.shared;
-    let client = ps.http_client;
+    let state = ps.shared.clone();
+    let client = ps.http_client.clone();
 
     let host = match headers.get("host").and_then(|v| v.to_str().ok()) {
         Some(h) => h.to_string(),
@@ -232,13 +235,158 @@ async fn proxy_handler(
         }
     }
 
-    // ── 원본 서버에 요청 전달 ─────────────────────────────────────
-    let path_and_query = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
-    let origin_url = format!("{}{}", origin, path_and_query);
+    // ── 요청 본문 읽기 (body는 한 번만 소비 가능 — GET/non-GET 공통) ───
     let body_bytes = match axum::body::to_bytes(body, 10 * 1024 * 1024).await {
         Ok(b) => b,
         Err(_) => return (StatusCode::BAD_REQUEST, "Failed to read request body").into_response(),
     };
+
+    // ── GET MISS: coalescer 경유로 동시 중복 fetch 방지 ──────────────
+    if let Some(ref key) = cache_key {
+        let path_and_query = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/").to_string();
+        let origin_url = format!("{}{}", origin, path_and_query);
+
+        let key_for_coalescer = key.clone();
+        let key_for_put     = key.clone();
+        let host_c          = host.clone();
+        let uri_str         = uri.to_string();
+        let headers_c       = headers.clone();
+        let body_bytes_c    = body_bytes.clone();
+        let client_c        = client.clone();
+        let origin_url_c    = origin_url.clone();
+        let ps_c            = ps.clone();
+        let method_c        = method.clone();
+
+        let coalesced = ps.coalescer.get_or_fetch(key_for_coalescer, move || async move {
+            // 헤더 필터링 후 원본 요청 빌드
+            let mut req_builder = client_c.request(method_c, &origin_url_c);
+            for (k, v) in headers_c.iter() {
+                let name = k.as_str();
+                if !matches!(
+                    name,
+                    "host" | "connection" | "transfer-encoding" | "proxy-connection"
+                        | "keep-alive" | "upgrade" | "te" | "trailer"
+                ) {
+                    req_builder = req_builder.header(k, v);
+                }
+            }
+
+            let origin_resp = match req_builder.body(body_bytes_c).send().await {
+                Ok(r) => r,
+                Err(err) => {
+                    tracing::error!(error=%err, url=%origin_url_c, "원본 서버 연결 실패");
+                    return Err(());
+                }
+            };
+
+            let status = origin_resp.status();
+            let resp_headers = origin_resp.headers().clone();
+
+            let cache_directive = {
+                let cc = resp_headers.get("cache-control").and_then(|v| v.to_str().ok());
+                let pragma = resp_headers.get("pragma").and_then(|v| v.to_str().ok());
+                parse_cache_control(cc, pragma)
+            };
+
+            let resp_body = match origin_resp.bytes().await {
+                Ok(b) => b,
+                Err(err) => {
+                    tracing::error!(error=%err, "원본 응답 본문 읽기 실패");
+                    return Err(());
+                }
+            };
+
+            let content_type = resp_headers
+                .get("content-type")
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.to_string());
+
+            // 캐시 가능 + 성공 응답이면 optimizer → storage.put
+            let (serve_bytes, serve_ct) = if matches!(&cache_directive, CacheDirective::Cacheable(_)) && status.is_success() {
+                let ttl = if let CacheDirective::Cacheable(Some(t)) = cache_directive { t } else { DEFAULT_TTL };
+                let full_url = format!("https://{}{}", host_c, uri_str);
+                let domain = host_c.split(':').next().unwrap_or(&host_c).to_string();
+
+                let (store_bytes, store_ct) = if should_optimize(content_type.as_deref()) {
+                    if let Some(ref opt) = ps_c.optimizer {
+                        let ct = content_type.clone().unwrap_or_default();
+                        match opt.lock().await.optimize(resp_body.clone(), ct, &domain).await {
+                            Some((ob, oct)) => (ob, Some(oct)),
+                            None => (resp_body.clone(), content_type.clone()),
+                        }
+                    } else {
+                        (resp_body.clone(), content_type.clone())
+                    }
+                } else {
+                    (resp_body.clone(), content_type.clone())
+                };
+
+                ps_c.storage.lock().await
+                    .put(&key_for_put, &full_url, &host_c, store_ct.clone(), store_bytes.clone(), Some(ttl))
+                    .await;
+
+                (Bytes::from(store_bytes), store_ct)
+            } else {
+                (resp_body, content_type)
+            };
+
+            Ok(Arc::new((serve_bytes, serve_ct, status)))
+        }).await;
+
+        let elapsed_ms = start.elapsed().as_millis() as u64;
+        match coalesced {
+            Ok(resp) => {
+                let (body, ct, status) = resp.as_ref();
+                {
+                    let mut app_state = state.write().await;
+                    app_state.record_cache_miss();
+                    app_state.record_request(RequestLog {
+                        method: method.to_string(),
+                        host: host.clone(),
+                        url: uri.to_string(),
+                        status_code: status.as_u16(),
+                        response_time_ms: elapsed_ms,
+                        timestamp: chrono::Utc::now(),
+                        cache_status: "MISS".to_string(),
+                    });
+                }
+                tracing::info!(
+                    method=%method, host=%host, url=%uri,
+                    status=%status.as_u16(), elapsed_ms=%elapsed_ms,
+                    cache="MISS", "프록시 요청 처리 완료"
+                );
+                let mut response = Response::builder().status(*status);
+                if let Some(ct_str) = ct {
+                    response = response.header("Content-Type", ct_str.as_str());
+                }
+                return response
+                    .header("X-Cache-Status", HeaderValue::from_static("MISS"))
+                    .header("X-Served-By", HeaderValue::from_static("smart-school-cdn"))
+                    .body(Body::from(body.clone()))
+                    .unwrap();
+            }
+            Err(()) => {
+                {
+                    let mut app_state = state.write().await;
+                    app_state.record_cache_bypass();
+                    app_state.record_request(RequestLog {
+                        method: method.to_string(),
+                        host: host.clone(),
+                        url: uri.to_string(),
+                        status_code: 502,
+                        response_time_ms: elapsed_ms,
+                        timestamp: chrono::Utc::now(),
+                        cache_status: "BYPASS".to_string(),
+                    });
+                }
+                return (StatusCode::BAD_GATEWAY, "Origin fetch failed").into_response();
+            }
+        }
+    }
+
+    // ── non-GET: coalescer 미사용, 직접 원본 fetch ────────────────────
+    let path_and_query = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
+    let origin_url = format!("{}{}", origin, path_and_query);
 
     let mut req_builder = client.request(method.clone(), &origin_url);
     for (key, value) in headers.iter() {
@@ -277,14 +425,9 @@ async fn proxy_handler(
     let status = origin_response.status();
     let response_headers = origin_response.headers().clone();
 
-    // Cache-Control + Pragma 파싱 → 캐시 가능 여부 결정
     let cache_directive = {
-        let cc = response_headers
-            .get("cache-control")
-            .and_then(|v| v.to_str().ok());
-        let pragma = response_headers
-            .get("pragma")
-            .and_then(|v| v.to_str().ok());
+        let cc = response_headers.get("cache-control").and_then(|v| v.to_str().ok());
+        let pragma = response_headers.get("pragma").and_then(|v| v.to_str().ok());
         parse_cache_control(cc, pragma)
     };
 
@@ -297,59 +440,10 @@ async fn proxy_handler(
     };
     let elapsed_ms = start.elapsed().as_millis() as u64;
 
-    // ── 캐시 저장 또는 BYPASS (storage gRPC) ─────────────────────
-    // 최적화 결과를 응답 빌드에서도 사용하기 위해 외부 변수로 선언
-    let mut optimized_result: Option<(Vec<u8>, Option<String>)> = None;
-    let cache_status_str = if let Some(ref key) = cache_key {
-        match &cache_directive {
-            CacheDirective::Cacheable(maybe_ttl) if status.is_success() => {
-                let ttl = maybe_ttl.unwrap_or(DEFAULT_TTL);
-                let content_type = response_headers
-                    .get("content-type")
-                    .and_then(|v| v.to_str().ok())
-                    .map(|s| s.to_string());
-                let full_url = format!("https://{}{}", host, uri);
-                let domain = host.split(':').next().unwrap_or(&host).to_string();
-
-                // 이미지 콘텐츠: optimizer gRPC로 WebP 변환 시도
-                let (store_body, store_ct) = if should_optimize(content_type.as_deref()) {
-                    if let Some(ref opt) = ps.optimizer {
-                        let ct = content_type.clone().unwrap_or_default();
-                        let opt_result = opt.lock().await
-                            .optimize(response_body.clone(), ct, &domain)
-                            .await;
-                        match opt_result {
-                            Some((opt_bytes, opt_ct)) => (opt_bytes, Some(opt_ct)),
-                            None => (response_body.clone(), content_type.clone()),
-                        }
-                    } else {
-                        (response_body.clone(), content_type.clone())
-                    }
-                } else {
-                    (response_body.clone(), content_type.clone())
-                };
-
-                // 첫 번째 요청자에게도 최적화된 본문을 제공하기 위해 저장
-                optimized_result = Some((store_body.to_vec(), store_ct.clone()));
-
-                ps.storage.lock().await
-                    .put(key, &full_url, &host, store_ct, store_body, Some(ttl))
-                    .await;
-                "MISS"
-            }
-            _ => "BYPASS",
-        }
-    } else {
-        "BYPASS"
-    };
-
-    // 캐시 이벤트 + 요청 로그 기록
+    // non-GET은 항상 BYPASS
     {
         let mut app_state = state.write().await;
-        match cache_status_str {
-            "MISS" => app_state.record_cache_miss(),
-            _ => app_state.record_cache_bypass(),
-        }
+        app_state.record_cache_bypass();
         app_state.record_request(RequestLog {
             method: method.to_string(),
             host: host.clone(),
@@ -357,44 +451,34 @@ async fn proxy_handler(
             status_code: status.as_u16(),
             response_time_ms: elapsed_ms,
             timestamp: chrono::Utc::now(),
-            cache_status: cache_status_str.to_string(),
+            cache_status: "BYPASS".to_string(),
         });
     }
 
     tracing::info!(
         method = %method, host = %host, url = %uri,
         status = %status.as_u16(), elapsed_ms = %elapsed_ms,
-        cache = %cache_status_str, "프록시 요청 처리 완료"
+        cache = "BYPASS", "프록시 요청 처리 완료"
     );
-
-    // ── 응답 빌드 ─────────────────────────────────────────────────
-    // MISS 분기에서 최적화된 본문이 있으면 첫 번째 요청자에게도 제공
-    let (serve_body, serve_ct_override) = match optimized_result {
-        Some((body, ct)) => (bytes::Bytes::from(body), ct),
-        None => (response_body.clone(), None),
-    };
 
     let mut response = Response::builder().status(status);
     for (key, value) in response_headers.iter() {
-        // content-type은 최적화 결과로 덮어쓸 수 있으므로 별도 처리
-        if key.as_str().to_lowercase() != "content-type" {
+        let name = key.as_str();
+        if !matches!(name, "content-type") {
             response = response.header(key, value);
         }
     }
-    // 최적화된 content-type 우선, 없으면 원본 헤더에서 가져옴
-    let final_ct = serve_ct_override.or_else(|| {
-        response_headers
-            .get("content-type")
-            .and_then(|v| v.to_str().ok())
-            .map(|s| s.to_string())
-    });
+    let final_ct = response_headers
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
     if let Some(ct) = final_ct {
         response = response.header("Content-Type", ct);
     }
     response
-        .header("X-Cache-Status", cache_status_str)
+        .header("X-Cache-Status", HeaderValue::from_static("BYPASS"))
         .header("X-Served-By", HeaderValue::from_static("smart-school-cdn"))
-        .body(Body::from(serve_body))
+        .body(Body::from(response_body))
         .unwrap()
 }
 
