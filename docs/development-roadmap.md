@@ -273,32 +273,32 @@
 
 ---
 
-## Phase 7: 콘텐츠 최적화 + 최적화 설정 UI
+## Phase 7: 콘텐츠 최적화 + 최적화 설정 UI ✅
 
 > 목표: 이미지 최적화 통합, Dashboard에서 최적화 프로파일 관리 + 절감 효과 확인
 
 ### 7-1. Optimizer Service
-- [ ] `proto/optimizer.proto` (Optimize, GetProfiles, SetProfile)
-- [ ] PNG/JPEG → WebP 변환 + 리사이즈 + 품질 조정
-- [ ] Proxy가 캐시 MISS 시 Optimizer 경유 후 저장
-- [ ] 이미 최적화된 포맷(WebP, AVIF) 바이패스
-- [ ] 텍스트 압축 (gzip/brotli)
+- [x] `proto/optimizer.proto` (Optimize, GetProfiles, SetProfile)
+- [x] PNG/JPEG → WebP 변환 + 리사이즈 + 품질 조정
+- [x] Proxy가 캐시 MISS 시 Optimizer 경유 후 저장
+- [x] 이미 최적화된 포맷(WebP, AVIF) 바이패스
+- [x] 텍스트 압축 (gzip/brotli)
 
 ### 7-2. Admin API — 최적화 관리
-- [ ] `GET /api/optimizer/profiles` — 프로파일 목록
-- [ ] `PUT /api/optimizer/profiles/:id` — 프로파일 수정 (품질, 해상도, 포맷)
-- [ ] `GET /api/stats/optimization` — 최적화 절감 통계 (원본 크기 vs 최적화 크기)
+- [x] `GET /api/optimizer/profiles` — 프로파일 목록
+- [x] `PUT /api/optimizer/profiles/:id` — 프로파일 수정 (품질, 해상도, 포맷)
+- [x] `GET /api/stats/optimization` — 최적화 절감 통계 (원본 크기 vs 최적화 크기)
 
 ### 7-3. Dashboard — 최적화 페이지 + 대시보드 (v3)
-- [ ] 최적화 프로파일 편집 폼 (품질 슬라이더, 최대 해상도, 포맷 선택)
-- [ ] 최적화 절감 통계 카드 (원본 총 용량 vs 최적화 후 용량, 절감률)
-- [ ] 대시보드에 최적화 절감 카드 추가
+- [x] 최적화 프로파일 편집 폼 (품질 슬라이더, 최대 해상도, 포맷 선택)
+- [x] 최적화 절감 통계 카드 (원본 총 용량 vs 최적화 후 용량, 절감률)
+- [x] 대시보드에 최적화 절감 카드 추가
 
 ### 검증
 > 최적화 페이지에서 프로파일 "tablet" 설정 (WebP, 80%, max 2048px)
 > 프록시를 통해 2MB PNG 요청 → 대시보드에서 최적화 절감 표시 (원본 2MB → 최적화 ~300KB)
 > 최적화 페이지에서 품질 60%로 변경 → 재요청 → 용량 추가 감소 확인
-> 이미 WebP인 이미지 → 변환 없이 통과 (절감 0%)
+> 이미 WebP인 이미지 → 변환 없이 통과 (절감 0%) ✅
 
 ---
 

@@ -8,6 +8,7 @@ set -euo pipefail
 # storage-service — 캐시 스토리지 gRPC 서비스 (:50051)
 # tls-service     — TLS 인증서 gRPC 서비스 (:50052)
 # dns-service     — DNS gRPC + UDP 서비스 (:50053, :53)
+# optimizer-service — 이미지 최적화 gRPC 서비스 (:50054)
 # admin-server    — Fastify API (:4001 내부)
 # admin-web       — nginx 정적 서빙 + API 프록시 (:7777)
 # all             — 전체 재배포 (기본값)
@@ -84,6 +85,12 @@ build_and_push() {
         -t "$REGISTRY/dns-service:latest" \
         -f services/dns-service/Dockerfile --push .
       ;;
+    optimizer-service)
+      log "Building + pushing optimizer-service..."
+      docker buildx build --platform "$PLATFORM" --no-cache \
+        -t "$REGISTRY/optimizer-service:latest" \
+        -f services/optimizer-service/Dockerfile --push .
+      ;;
     admin-web)
       log "Building + pushing admin-web..."
       docker buildx build --platform "$PLATFORM" --no-cache \
@@ -126,12 +133,13 @@ case $TARGET in
   proxy)           SERVICES=("proxy") ;;
   storage-service) SERVICES=("storage-service") ;;
   tls-service)     SERVICES=("tls-service") ;;
-  dns-service)     SERVICES=("dns-service") ;;
+  dns-service)      SERVICES=("dns-service") ;;
+  optimizer-service) SERVICES=("optimizer-service") ;;
   admin-server)    SERVICES=("admin-server") ;;
   admin-web)       SERVICES=("admin-web") ;;
   admin)           SERVICES=("admin-server" "admin-web") ;;
-  all)             SERVICES=("storage-service" "tls-service" "dns-service" "proxy" "admin-server" "admin-web") ;;
-  *)               error "알 수 없는 대상: $TARGET (유효값: proxy | storage-service | tls-service | dns-service | admin-server | admin-web | admin | all)" ;;
+  all)             SERVICES=("storage-service" "tls-service" "dns-service" "optimizer-service" "proxy" "admin-server" "admin-web") ;;
+  *)               error "알 수 없는 대상: $TARGET (유효값: proxy | storage-service | tls-service | dns-service | optimizer-service | admin-server | admin-web | admin | all)" ;;
 esac
 
 log "=== 빌드 + Push → GHCR ==="
