@@ -27,19 +27,8 @@ interface ProxyRouteOptions {
 export async function proxyRoutes(app: FastifyInstance, opts: ProxyRouteOptions = {}) {
   const { domainRepo } = opts;
 
-  /** 프록시 상태 조회 — 온라인 여부, 업타임, 총 요청 수 */
-  app.get('/api/proxy/status', async () => {
-    try {
-      // Proxy 관리 API에서 상태 정보 조회
-      const res = await axios.get(`${PROXY_ADMIN_URL}/status`, {
-        timeout: TIMEOUT_MS,
-      });
-      return res.data;
-    } catch {
-      // Proxy 서버 연결 실패 → 오프라인 상태 반환
-      return { online: false, uptime: 0, request_count: 0 };
-    }
-  });
+  /** 프록시 상태 조회 — HealthMonitor 캐시 반환 (downstream 직접 호출 없음) */
+  app.get('/api/proxy/status', async () => app.healthMonitor.getProxyStatus());
 
   /** 최근 요청 로그 조회 — URL, 상태코드, 응답시간, 타임스탬프 */
   app.get('/api/proxy/requests', async () => {

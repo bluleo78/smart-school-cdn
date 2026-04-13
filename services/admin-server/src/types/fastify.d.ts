@@ -3,6 +3,7 @@ import type { StorageClient } from '../grpc/storage_client.js';
 import type { TlsClient } from '../grpc/tls_client.js';
 import type { DnsClient } from '../grpc/dns_client.js';
 import type { OptimizerClient } from '../grpc/optimizer_client.js';
+import type { HealthMonitor } from '../health-monitor.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -11,5 +12,6 @@ declare module 'fastify' {
     dnsClient:       DnsClient;
     optimizerClient: OptimizerClient;
     proxyAdminUrl:   string;
+    healthMonitor:   HealthMonitor;
   }
 }

@@ -1,11 +1,11 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import Database from 'better-sqlite3';
-import axios from 'axios';
+import { HealthMonitor } from './health-monitor.js';
 import { proxyRoutes } from './routes/proxy.js';
 import { cacheRoutes } from './routes/cache.js';
 import { tlsRoutes } from './routes/tls.js';
-import { domainRoutes, syncToProxy } from './routes/domains.js';
+import { domainRoutes } from './routes/domains.js';
 import { systemRoutes } from './routes/system.js';
 import { DomainRepository, DOMAIN_SCHEMA } from './db/domain-repo.js';
 import { createStorageClient } from './grpc/storage_client.js';
@@ -41,6 +41,15 @@ app.decorate('tlsClient', tlsClient);
 app.decorate('dnsClient', dnsClient);
 app.decorate('optimizerClient', optimizerClient);
 app.decorate('proxyAdminUrl', proxyAdminUrl);
+app.decorate('healthMonitor', new HealthMonitor({
+  proxyAdminUrl,
+  storageClient,
+  tlsClient,
+  dnsClient,
+  optimizerClient,
+  domainRepo,
+  log: app.log,
+}));
 
 /** 헬스체크 엔드포인트 */
 app.get('/api/health', async () => {
@@ -70,22 +79,8 @@ const port = Number(process.env.PORT) || 4001;
 try {
   await app.listen({ port, host: '0.0.0.0' });
   app.log.info(`Admin Server listening on port ${port}`);
-  // Proxy 연결 상태 모니터링 — 5초마다 상태 확인, offline→online 전환 시 즉시 sync
-  // proxy 재시작 시 in-memory domain_map·cert_cache 자동 복구
-  let proxyWasOnline = false;
-  setInterval(async () => {
-    let isOnline = false;
-    try {
-      await axios.get(`${proxyAdminUrl}/status`, { timeout: 2000 });
-      isOnline = true;
-    } catch { /* offline */ }
-
-    if (isOnline && !proxyWasOnline) {
-      app.log.info('proxy 온라인 전환 감지 — 도메인 sync 시작');
-      await syncToProxy(domainRepo);
-    }
-    proxyWasOnline = isOnline;
-  }, 5_000);
+  // 전체 서비스 헬스 모니터 시작 — 5초마다 상태 수집·캐시, proxy 전환 시 sync
+  app.healthMonitor.start();
 } catch (err) {
   app.log.error(err);
   process.exit(1);
