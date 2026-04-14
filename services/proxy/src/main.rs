@@ -83,11 +83,25 @@ async fn main() {
         }
     });
 
+    // L1 메모리 캐시 — 환경변수 기반 용량 설정
+    let memory_cache_max_bytes: u64 = std::env::var("MEMORY_CACHE_MAX_BYTES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(256 * 1024 * 1024); // 기본 256MB
+    let memory_cache_ttl_secs: u64 = std::env::var("MEMORY_CACHE_TTL_SECS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(600);
     let memory_cache: moka::future::Cache<String, Arc<MemoryCacheEntry>> =
         moka::future::Cache::builder()
-            .max_capacity(10_000)
-            .time_to_live(std::time::Duration::from_secs(300))
+            .max_capacity(memory_cache_max_bytes)
+            .time_to_live(std::time::Duration::from_secs(memory_cache_ttl_secs))
             .build();
+    tracing::info!(
+        max_bytes = memory_cache_max_bytes,
+        ttl_secs = memory_cache_ttl_secs,
+        "L1 메모리 캐시 초기화"
+    );
 
     let ps = ProxyState {
         shared: shared_state.clone(),

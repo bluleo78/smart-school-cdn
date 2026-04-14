@@ -644,6 +644,8 @@ async fn cache_stats_handler(State(admin): State<AdminState>) -> impl IntoRespon
     let hit_count = state.hit_count;
     let miss_count = state.miss_count;
     let bypass_count = state.bypass_count;
+    let memory_hit_count = state.memory_hit_count;
+    let disk_hit_count = state.disk_hit_count;
     let total = hit_count + miss_count;
     let hit_rate = if total > 0 {
         (hit_count as f64 / total as f64) * 100.0
@@ -652,6 +654,10 @@ async fn cache_stats_handler(State(admin): State<AdminState>) -> impl IntoRespon
     };
     let hit_rate_history: Vec<_> = state.hit_rate_history.iter().cloned().collect();
     drop(state);
+
+    // L1 메모리 캐시 통계
+    let memory_cache_entry_count = admin.memory_cache.entry_count();
+    let memory_cache_max_bytes = admin.memory_cache.policy().max_capacity().unwrap_or(0);
 
     let stats = admin.storage.lock().await.stats().await;
 
@@ -680,6 +686,10 @@ async fn cache_stats_handler(State(admin): State<AdminState>) -> impl IntoRespon
         "entry_count": entry_count,
         "by_domain": domain_stats,
         "hit_rate_history": hit_rate_history,
+        "memory_hit_count": memory_hit_count,
+        "disk_hit_count": disk_hit_count,
+        "memory_cache_entry_count": memory_cache_entry_count,
+        "memory_cache_max_bytes": memory_cache_max_bytes,
     }))
 }
 
@@ -1458,6 +1468,61 @@ mod tests {
             memory_cache_check.get(&"test-key".to_string()).await.is_none(),
             "purge all 후 memory_cache 항목이 제거되어야 한다"
         );
+    }
+
+    /// /cache/stats → memory_hit_count, disk_hit_count, memory_cache_entry_count 필드 포함
+    #[tokio::test]
+    async fn cache_stats_handler_메모리_캐시_통계를_포함한다() {
+        let (shared, storage, tls, domain_map, cert_cache) = make_test_admin_state().await;
+
+        // 카운터 사전 설정
+        {
+            let mut s = shared.write().await;
+            s.record_memory_hit();
+            s.record_memory_hit();
+            s.record_disk_hit();
+        }
+
+        let memory_cache: moka::future::Cache<String, Arc<MemoryCacheEntry>> =
+            moka::future::Cache::builder()
+                .max_capacity(100)
+                .build();
+        memory_cache.insert("k1".to_string(), Arc::new(MemoryCacheEntry {
+            body: Bytes::from("aaa"),
+            content_type: None,
+        })).await;
+        memory_cache.insert("k2".to_string(), Arc::new(MemoryCacheEntry {
+            body: Bytes::from("bbb"),
+            content_type: None,
+        })).await;
+        // moka 비동기 캐시는 pending tasks 실행 후 entry_count 반영
+        memory_cache.run_pending_tasks().await;
+
+        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache, memory_cache);
+
+        let resp = router
+            .oneshot(
+                Request::builder()
+                    .uri("/cache/stats")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = to_bytes(resp.into_body(), 8192).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        // 기존 필드
+        assert_eq!(json["hit_count"], 3); // memory(2) + disk(1)
+        assert!(json.get("miss_count").is_some());
+
+        // 신규 필드
+        assert_eq!(json["memory_hit_count"], 2);
+        assert_eq!(json["disk_hit_count"], 1);
+        assert_eq!(json["memory_cache_entry_count"], 2);
+        assert!(json.get("memory_cache_max_bytes").is_some());
     }
 
     // ─── pem_to_uuid 테스트 ─────────────────────────────────────────────
