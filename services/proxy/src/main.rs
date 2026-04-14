@@ -7,7 +7,7 @@ use tracing_subscriber::EnvFilter;
 use rustls::{ServerConfig, server::{ClientHello, ResolvesServerCert}, sign::CertifiedKey};
 use axum_server::tls_rustls::RustlsConfig;
 
-use proxy::{DomainMap, build_admin_router, build_proxy_router, ProxyState};
+use proxy::{DomainMap, MemoryCacheEntry, build_admin_router, build_proxy_router, ProxyState};
 use proxy::clients::optimizer_client::OptimizerClient;
 use proxy::clients::storage_client::StorageClient;
 use proxy::clients::tls_client::{TlsClient, CertCache};
@@ -83,6 +83,12 @@ async fn main() {
         }
     });
 
+    let memory_cache: moka::future::Cache<String, Arc<MemoryCacheEntry>> =
+        moka::future::Cache::builder()
+            .max_capacity(10_000)
+            .time_to_live(std::time::Duration::from_secs(300))
+            .build();
+
     let ps = ProxyState {
         shared: shared_state.clone(),
         http_client,
@@ -92,11 +98,12 @@ async fn main() {
         domain_map: domain_map.clone(),
         cert_cache: cert_cache.clone(),
         coalescer: Arc::new(Coalescer::new()),
+        memory_cache: memory_cache.clone(),
     };
 
     let proxy_router = build_proxy_router(ps);
     let admin_router = build_admin_router(
-        shared_state, storage, tls_client, domain_map, cert_cache.clone(),
+        shared_state, storage, tls_client, domain_map, cert_cache.clone(), memory_cache,
     );
 
     let server_config = ServerConfig::builder()

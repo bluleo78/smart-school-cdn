@@ -51,11 +51,12 @@ pub struct ProxyState {
 #[derive(Clone)]
 #[allow(dead_code)]
 struct AdminState {
-    state:      SharedState,
-    storage:    Arc<Mutex<StorageClient>>,
-    tls_client: Arc<Mutex<TlsClient>>,
-    domain_map: DomainMap,
-    cert_cache: CertCache,
+    state:        SharedState,
+    storage:      Arc<Mutex<StorageClient>>,
+    tls_client:   Arc<Mutex<TlsClient>>,
+    domain_map:   DomainMap,
+    cert_cache:   CertCache,
+    memory_cache: moka::future::Cache<String, Arc<MemoryCacheEntry>>,
 }
 
 /// 기본 캐시 TTL (Cache-Control 헤더 없을 때)
@@ -77,8 +78,9 @@ pub fn build_admin_router(
     tls_client:   Arc<Mutex<TlsClient>>,
     domain_map:   DomainMap,
     cert_cache:   CertCache,
+    memory_cache: moka::future::Cache<String, Arc<MemoryCacheEntry>>,
 ) -> Router {
-    let admin_state = AdminState { state: shared_state, storage, tls_client, domain_map, cert_cache };
+    let admin_state = AdminState { state: shared_state, storage, tls_client, domain_map, cert_cache, memory_cache };
     Router::new()
         .route("/status", get(status_handler))
         .route("/requests", get(requests_handler))
@@ -372,6 +374,15 @@ async fn proxy_handler(
                 ps_c.storage.lock().await
                     .put(&key_for_put, &full_url, &host_c, store_ct.clone(), store_bytes.clone(), Some(ttl))
                     .await;
+
+                // L1 메모리 캐시 저장 (16MB 이하만)
+                const MAX_MEMORY_ENTRY_BYTES: usize = 16 * 1024 * 1024;
+                if store_bytes.len() <= MAX_MEMORY_ENTRY_BYTES {
+                    ps_c.memory_cache.insert(key_for_put.clone(), Arc::new(MemoryCacheEntry {
+                        body: Bytes::from(store_bytes.clone()),
+                        content_type: store_ct.clone(),
+                    })).await;
+                }
 
                 (Bytes::from(store_bytes), store_ct)
             } else {
@@ -703,6 +714,28 @@ async fn cache_purge_handler(
     State(admin): State<AdminState>,
     Json(req): Json<PurgeBody>,
 ) -> Response {
+    // L1 메모리 캐시 무효화
+    match req.r#type.as_str() {
+        "url" => {
+            if let Some(ref target) = req.target {
+                if !target.is_empty() {
+                    if let Ok(parsed) = target.parse::<Uri>() {
+                        let host = parsed.authority().map(|a| a.as_str()).unwrap_or("");
+                        let path = parsed.path();
+                        let query = parsed.query().unwrap_or("");
+                        let key = compute_cache_key("GET", host, path, query);
+                        admin.memory_cache.invalidate(&key).await;
+                    }
+                }
+            }
+        }
+        "domain" | "all" => {
+            admin.memory_cache.invalidate_all();
+        }
+        _ => {}
+    }
+
+    // L2 디스크 캐시 퍼지 (기존 로직)
     let mut storage = admin.storage.lock().await;
     let (purged_count, freed_bytes) = match req.r#type.as_str() {
         "url" => {
@@ -1111,7 +1144,7 @@ mod tests {
     #[tokio::test]
     async fn status_handler_현재_상태를_반환한다() {
         let (shared, storage, tls, domain_map, cert_cache) = make_test_admin_state().await;
-        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache);
+        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache, moka::future::Cache::builder().max_capacity(100).build());
 
         let resp = router
             .oneshot(
@@ -1133,7 +1166,7 @@ mod tests {
     #[tokio::test]
     async fn requests_handler_요청_로그를_반환한다() {
         let (shared, storage, tls, domain_map, cert_cache) = make_test_admin_state().await;
-        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache);
+        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache, moka::future::Cache::builder().max_capacity(100).build());
 
         let resp = router
             .oneshot(
@@ -1155,7 +1188,7 @@ mod tests {
     #[tokio::test]
     async fn cache_stats_handler_통계를_반환한다() {
         let (shared, storage, tls, domain_map, cert_cache) = make_test_admin_state().await;
-        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache);
+        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache, moka::future::Cache::builder().max_capacity(100).build());
 
         let resp = router
             .oneshot(
@@ -1178,7 +1211,7 @@ mod tests {
     #[tokio::test]
     async fn cache_popular_handler_인기_항목을_반환한다() {
         let (shared, storage, tls, domain_map, cert_cache) = make_test_admin_state().await;
-        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache);
+        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache, moka::future::Cache::builder().max_capacity(100).build());
 
         let resp = router
             .oneshot(
@@ -1203,7 +1236,7 @@ mod tests {
     #[tokio::test]
     async fn cache_purge_handler_target_없으면_400을_반환한다() {
         let (shared, storage, tls, domain_map, cert_cache) = make_test_admin_state().await;
-        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache);
+        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache, moka::future::Cache::builder().max_capacity(100).build());
 
         let resp = router
             .oneshot(
@@ -1224,7 +1257,7 @@ mod tests {
     #[tokio::test]
     async fn cache_purge_handler_url_퍼지_성공() {
         let (shared, storage, tls, domain_map, cert_cache) = make_test_admin_state().await;
-        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache);
+        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache, moka::future::Cache::builder().max_capacity(100).build());
 
         let resp = router
             .oneshot(
@@ -1250,7 +1283,7 @@ mod tests {
     #[tokio::test]
     async fn cache_purge_handler_domain_퍼지_성공() {
         let (shared, storage, tls, domain_map, cert_cache) = make_test_admin_state().await;
-        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache);
+        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache, moka::future::Cache::builder().max_capacity(100).build());
 
         let resp = router
             .oneshot(
@@ -1273,7 +1306,7 @@ mod tests {
     #[tokio::test]
     async fn cache_purge_handler_all_퍼지_성공() {
         let (shared, storage, tls, domain_map, cert_cache) = make_test_admin_state().await;
-        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache);
+        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache, moka::future::Cache::builder().max_capacity(100).build());
 
         let resp = router
             .oneshot(
@@ -1294,7 +1327,7 @@ mod tests {
     #[tokio::test]
     async fn cache_purge_handler_invalid_type_은_0을_반환한다() {
         let (shared, storage, tls, domain_map, cert_cache) = make_test_admin_state().await;
-        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache);
+        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache, moka::future::Cache::builder().max_capacity(100).build());
 
         let resp = router
             .oneshot(
@@ -1318,7 +1351,7 @@ mod tests {
     #[tokio::test]
     async fn tls_ca_handler_ca_pem을_반환한다() {
         let (shared, storage, tls, domain_map, cert_cache) = make_test_admin_state().await;
-        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache);
+        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache, moka::future::Cache::builder().max_capacity(100).build());
 
         let resp = router
             .oneshot(
@@ -1343,7 +1376,7 @@ mod tests {
     #[tokio::test]
     async fn tls_certificates_handler_인증서_목록을_반환한다() {
         let (shared, storage, tls, domain_map, cert_cache) = make_test_admin_state().await;
-        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache);
+        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache, moka::future::Cache::builder().max_capacity(100).build());
 
         let resp = router
             .oneshot(
@@ -1367,7 +1400,7 @@ mod tests {
     async fn update_domains_handler_도메인_맵을_갱신한다() {
         let (shared, storage, tls, domain_map, cert_cache) = make_test_admin_state().await;
         let domain_map_check = domain_map.clone();
-        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache);
+        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache, moka::future::Cache::builder().max_capacity(100).build());
 
         let resp = router
             .oneshot(
@@ -1387,6 +1420,44 @@ mod tests {
         // 도메인 맵이 갱신되었는지 확인
         let map = domain_map_check.read().await;
         assert!(map.contains_key("cdn.test.com"));
+    }
+
+    /// 퍼지 type=all → memory_cache 전체 무효화
+    #[tokio::test]
+    async fn cache_purge_all_이_memory_cache를_무효화한다() {
+        let (shared, storage, tls, domain_map, cert_cache) = make_test_admin_state().await;
+
+        let memory_cache: moka::future::Cache<String, Arc<MemoryCacheEntry>> =
+            moka::future::Cache::builder()
+                .max_capacity(100)
+                .build();
+        memory_cache.insert("test-key".to_string(), Arc::new(MemoryCacheEntry {
+            body: Bytes::from("data"),
+            content_type: Some("text/plain".to_string()),
+        })).await;
+
+        let memory_cache_check = memory_cache.clone();
+        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache, memory_cache);
+
+        let resp = router
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/cache/purge")
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(r#"{"type":"all"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        memory_cache_check.run_pending_tasks().await;
+        assert!(
+            memory_cache_check.get(&"test-key".to_string()).await.is_none(),
+            "purge all 후 memory_cache 항목이 제거되어야 한다"
+        );
     }
 
     // ─── pem_to_uuid 테스트 ─────────────────────────────────────────────
