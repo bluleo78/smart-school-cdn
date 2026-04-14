@@ -121,18 +121,27 @@ export async function logRoutes(app: FastifyInstance) {
               buf = buf.slice(offset);
             });
 
+            // 중복 종료 방지 플래그 — resolve/end는 한 번만
+            let closed = false;
+
             dockerRes.on('end', () => {
+              if (closed) return;
+              closed = true;
               reply.raw.end();
               resolve();
             });
 
             dockerRes.on('error', () => {
+              if (closed) return;
+              closed = true;
               reply.raw.end();
               resolve();
             });
 
             // 클라이언트 연결 종료 시 Docker 스트림도 종료
             request.raw.on('close', () => {
+              if (closed) return;
+              closed = true;
               req.destroy();
               resolve();
             });

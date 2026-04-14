@@ -3,7 +3,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import Fastify from 'fastify';
 import http from 'http';
-import type { ClientRequest, IncomingMessage, RequestOptions } from 'http';
+import type { ClientRequest, IncomingMessage } from 'http';
 import { PassThrough } from 'stream';
 import { logRoutes } from './logs.js';
 
@@ -38,13 +38,13 @@ describe('GET /api/logs/:service', () => {
       const mockRes = new PassThrough() as unknown as IncomingMessage;
       (mockRes as unknown as Record<string, unknown>).statusCode = 200;
       vi.spyOn(http, 'request').mockImplementationOnce(
-        (_opts: RequestOptions | string | URL, cb?: RequestCallback): ClientRequest => {
+        ((_opts, cb?: RequestCallback): ClientRequest => {
           if (cb) cb(mockRes);
           (mockRes as unknown as PassThrough).end();
           const mockReq = new PassThrough() as unknown as ClientRequest;
           (mockReq as unknown as Record<string, unknown>).end = vi.fn();
           return mockReq;
-        }
+        }) as typeof http.request
       );
 
       const res = await app.inject({
@@ -61,7 +61,7 @@ describe('GET /api/logs/:service', () => {
     (mockRes as unknown as Record<string, unknown>).statusCode = 200;
 
     vi.spyOn(http, 'request').mockImplementationOnce(
-      (_opts: RequestOptions | string | URL, cb?: RequestCallback): ClientRequest => {
+      ((_opts, cb?: RequestCallback): ClientRequest => {
         if (cb) cb(mockRes);
         // Docker 멀티플렉스 형식: 8-byte 헤더 [stream_type(1), 0,0,0, size(4)] + payload
         const line1 = '2026-04-14T10:00:00.000Z INFO  cache HIT host=example.com\n';
@@ -80,7 +80,7 @@ describe('GET /api/logs/:service', () => {
         const mockReq = new PassThrough() as unknown as ClientRequest;
         (mockReq as unknown as Record<string, unknown>).end = vi.fn();
         return mockReq;
-      }
+      }) as typeof http.request
     );
 
     const res = await app.inject({
