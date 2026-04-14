@@ -13,6 +13,7 @@ import { createTlsClient } from './grpc/tls_client.js';
 import { createDnsClient } from './grpc/dns_client.js';
 import { createOptimizerClient } from './grpc/optimizer_client.js';
 import { optimizerRoutes } from './routes/optimizer.js';
+import { logRoutes } from './routes/logs.js';
 
 // SQLite DB 초기화 — 앱 기동 시 1회 실행
 const db = new Database(process.env.DB_PATH || './data/admin.db');
@@ -73,6 +74,9 @@ await app.register(systemRoutes);
 
 /** 최적화 프로파일 + 절감 통계 API 라우트 등록 */
 await app.register(optimizerRoutes);
+
+/** 실시간 로그 스트리밍 SSE 라우트 등록 */
+await app.register(logRoutes);
 
 const port = Number(process.env.PORT) || 4001;
 
