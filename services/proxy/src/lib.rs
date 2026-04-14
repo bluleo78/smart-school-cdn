@@ -43,6 +43,8 @@ pub struct ProxyState {
     pub domain_map:  DomainMap,
     pub cert_cache:  CertCache,
     pub coalescer:   Arc<Coalescer>,
+    /// L1 메모리 캐시 — moka async cache (key: SHA-256 hex, value: body + content_type)
+    pub memory_cache: moka::future::Cache<String, Arc<MemoryCacheEntry>>,
 }
 
 /// 관리 API 핸들러 상태
@@ -210,13 +212,13 @@ async fn proxy_handler(
         None
     };
 
-    // ── 캐시 HIT 확인 (storage gRPC) ─────────────────────────────
+    // ── L1 메모리 캐시 확인 ──────────────────────────────────────
     if let Some(ref key) = cache_key {
-        if let Some((cached_bytes, content_type)) = ps.storage.lock().await.get(key).await {
+        if let Some(entry) = ps.memory_cache.get(key).await {
             let elapsed_ms = start.elapsed().as_millis() as u64;
             {
                 let mut app_state = state.write().await;
-                app_state.record_cache_hit();
+                app_state.record_memory_hit();
                 app_state.record_request(RequestLog {
                     method: method.to_string(),
                     host: host.clone(),
@@ -227,7 +229,47 @@ async fn proxy_handler(
                     cache_status: "HIT".to_string(),
                 });
             }
-            tracing::info!(host=%host, url=%uri, elapsed_ms=%elapsed_ms, "캐시 HIT");
+            tracing::info!(host=%host, url=%uri, elapsed_ms=%elapsed_ms, "L1 메모리 캐시 HIT");
+
+            let mut resp = Response::builder().status(StatusCode::OK);
+            if let Some(ref ct) = entry.content_type {
+                resp = resp.header("Content-Type", ct.as_str());
+            }
+            return resp
+                .header("X-Cache-Status", HeaderValue::from_static("HIT"))
+                .header("X-Served-By", HeaderValue::from_static("smart-school-cdn"))
+                .body(Body::from(entry.body.clone()))
+                .unwrap();
+        }
+    }
+
+    // ── L2 디스크 캐시 확인 (storage gRPC) ───────────────────────
+    if let Some(ref key) = cache_key {
+        if let Some((cached_bytes, content_type)) = ps.storage.lock().await.get(key).await {
+            // L2 HIT → L1 승격 (16MB 이하만)
+            const MAX_MEMORY_ENTRY_BYTES: usize = 16 * 1024 * 1024;
+            if cached_bytes.len() <= MAX_MEMORY_ENTRY_BYTES {
+                ps.memory_cache.insert(key.clone(), Arc::new(MemoryCacheEntry {
+                    body: Bytes::from(cached_bytes.clone()),
+                    content_type: content_type.clone(),
+                })).await;
+            }
+
+            let elapsed_ms = start.elapsed().as_millis() as u64;
+            {
+                let mut app_state = state.write().await;
+                app_state.record_disk_hit();
+                app_state.record_request(RequestLog {
+                    method: method.to_string(),
+                    host: host.clone(),
+                    url: uri.to_string(),
+                    status_code: 200,
+                    response_time_ms: elapsed_ms,
+                    timestamp: chrono::Utc::now(),
+                    cache_status: "HIT".to_string(),
+                });
+            }
+            tracing::info!(host=%host, url=%uri, elapsed_ms=%elapsed_ms, "L2 디스크 캐시 HIT (L1 승격)");
 
             let mut resp = Response::builder().status(StatusCode::OK);
             if let Some(ct) = content_type {
@@ -1397,6 +1439,7 @@ mod tests {
             domain_map,
             cert_cache,
             coalescer: Arc::new(coalescer::Coalescer::new()),
+            memory_cache: moka::future::Cache::builder().max_capacity(100).build(),
         };
 
         let router = build_proxy_router(ps);
@@ -1450,6 +1493,7 @@ mod tests {
             domain_map,
             cert_cache,
             coalescer: Arc::new(coalescer::Coalescer::new()),
+            memory_cache: moka::future::Cache::builder().max_capacity(100).build(),
         };
 
         let router = build_proxy_router(ps);
@@ -1502,6 +1546,7 @@ mod tests {
             domain_map: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
             cert_cache,
             coalescer: Arc::new(coalescer::Coalescer::new()),
+            memory_cache: moka::future::Cache::builder().max_capacity(100).build(),
         };
 
         let router = build_proxy_router(ps);
@@ -1557,6 +1602,7 @@ mod tests {
             domain_map: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
             cert_cache,
             coalescer: Arc::new(coalescer::Coalescer::new()),
+            memory_cache: moka::future::Cache::builder().max_capacity(100).build(),
         };
 
         let router = build_proxy_router(ps);
@@ -1637,6 +1683,7 @@ mod tests {
             domain_map,
             cert_cache,
             coalescer: Arc::new(coalescer::Coalescer::new()),
+            memory_cache: moka::future::Cache::builder().max_capacity(100).build(),
         };
 
         let router = build_proxy_router(ps);
@@ -1789,6 +1836,7 @@ mod tests {
             domain_map,
             cert_cache,
             coalescer: Arc::new(coalescer::Coalescer::new()),
+            memory_cache: moka::future::Cache::builder().max_capacity(100).build(),
         };
         let router = build_proxy_router(ps.clone());
         (ps, router)
@@ -1988,5 +2036,161 @@ mod tests {
         assert_eq!(resp.headers().get("content-type").unwrap(), "image/jpeg");
         let body = to_bytes(resp.into_body(), 4096).await.unwrap();
         assert_eq!(body.as_ref(), fake_jpeg.as_slice());
+    }
+
+    /// L1 메모리 캐시 HIT → gRPC storage 호출 없이 200 반환 + memory_hit_count 증가
+    #[tokio::test]
+    async fn memory_cache_hit_이_gRPC_호출_없이_반환한다() {
+        let storage_url = start_mock_storage_server().await;
+        let tls_url = start_mock_tls_server().await;
+        let optimizer_url = start_mock_optimizer_server().await;
+
+        let storage = loop {
+            match clients::storage_client::StorageClient::connect(&storage_url).await {
+                Ok(c) => break c,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        };
+        let tls = loop {
+            match clients::tls_client::TlsClient::connect(&tls_url).await {
+                Ok(c) => break c,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        };
+        let optimizer = loop {
+            match clients::optimizer_client::OptimizerClient::connect(&optimizer_url).await {
+                Ok(c) => break c,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        };
+        let cert_cache = tls.cert_cache.clone();
+        let mut dm = HashMap::new();
+        dm.insert("test.com".to_string(), "http://origin.test.com".to_string());
+        let domain_map: DomainMap = Arc::new(tokio::sync::RwLock::new(dm));
+
+        let memory_cache: moka::future::Cache<String, Arc<MemoryCacheEntry>> =
+            moka::future::Cache::builder().max_capacity(100).build();
+        let key = compute_cache_key("GET", "test.com", "/hello", "");
+        memory_cache.insert(key, Arc::new(MemoryCacheEntry {
+            body: Bytes::from("cached-in-memory"),
+            content_type: Some("text/plain".to_string()),
+        })).await;
+
+        let ps = ProxyState {
+            shared: Arc::new(tokio::sync::RwLock::new(state::AppState::new())),
+            http_client: reqwest::Client::new(),
+            storage: Arc::new(Mutex::new(storage)),
+            tls_client: Arc::new(Mutex::new(tls)),
+            optimizer: Some(Arc::new(Mutex::new(optimizer))),
+            domain_map,
+            cert_cache,
+            coalescer: Arc::new(coalescer::Coalescer::new()),
+            memory_cache,
+        };
+
+        let shared = ps.shared.clone();
+        let router = build_proxy_router(ps);
+        let resp = router
+            .oneshot(
+                Request::builder()
+                    .uri("/hello")
+                    .header("host", "test.com")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.headers().get("X-Cache-Status").unwrap(), "HIT");
+        let body = to_bytes(resp.into_body(), 4096).await.unwrap();
+        assert_eq!(&body[..], b"cached-in-memory");
+
+        let app_state = shared.read().await;
+        assert_eq!(app_state.memory_hit_count, 1);
+        assert_eq!(app_state.disk_hit_count, 0);
+    }
+
+    /// L2 디스크 HIT → L1 메모리 캐시에 승격 + disk_hit_count 증가
+    #[tokio::test]
+    async fn disk_hit_이_memory_cache로_승격된다() {
+        let storage_url = start_mock_storage_server().await;
+        let tls_url = start_mock_tls_server().await;
+        let optimizer_url = start_mock_optimizer_server().await;
+
+        let storage_client = loop {
+            match clients::storage_client::StorageClient::connect(&storage_url).await {
+                Ok(c) => break c,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        };
+        let tls = loop {
+            match clients::tls_client::TlsClient::connect(&tls_url).await {
+                Ok(c) => break c,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        };
+        let optimizer = loop {
+            match clients::optimizer_client::OptimizerClient::connect(&optimizer_url).await {
+                Ok(c) => break c,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        };
+        let cert_cache = tls.cert_cache.clone();
+        let mut dm = HashMap::new();
+        dm.insert("test.com".to_string(), "http://origin.test.com".to_string());
+        let domain_map: DomainMap = Arc::new(tokio::sync::RwLock::new(dm));
+
+        let key = compute_cache_key("GET", "test.com", "/disk-item", "");
+        {
+            let mut s = loop {
+                match clients::storage_client::StorageClient::connect(&storage_url).await {
+                    Ok(c) => break c,
+                    Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+                }
+            };
+            s.put(&key, "https://test.com/disk-item", "test.com", Some("text/html".to_string()), vec![60, 104, 49, 62].into(), Some(std::time::Duration::from_secs(3600))).await;
+        }
+
+        let memory_cache: moka::future::Cache<String, Arc<MemoryCacheEntry>> =
+            moka::future::Cache::builder().max_capacity(100).build();
+        let memory_cache_check = memory_cache.clone();
+
+        let ps = ProxyState {
+            shared: Arc::new(tokio::sync::RwLock::new(state::AppState::new())),
+            http_client: reqwest::Client::new(),
+            storage: Arc::new(Mutex::new(storage_client)),
+            tls_client: Arc::new(Mutex::new(tls)),
+            optimizer: Some(Arc::new(Mutex::new(optimizer))),
+            domain_map,
+            cert_cache,
+            coalescer: Arc::new(coalescer::Coalescer::new()),
+            memory_cache,
+        };
+
+        let shared = ps.shared.clone();
+        let router = build_proxy_router(ps);
+        let resp = router
+            .oneshot(
+                Request::builder()
+                    .uri("/disk-item")
+                    .header("host", "test.com")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.headers().get("X-Cache-Status").unwrap(), "HIT");
+
+        let app_state = shared.read().await;
+        assert_eq!(app_state.disk_hit_count, 1);
+        assert_eq!(app_state.memory_hit_count, 0);
+        drop(app_state);
+
+        let entry = memory_cache_check.get(&key).await;
+        assert!(entry.is_some(), "L2 HIT 후 L1 메모리 캐시에 승격되어야 한다");
+        assert_eq!(&entry.unwrap().body[..], &[60, 104, 49, 62]);
     }
 }
