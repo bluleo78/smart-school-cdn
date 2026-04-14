@@ -23,6 +23,12 @@ use clients::optimizer_client::OptimizerClient;
 use clients::storage_client::StorageClient;
 use clients::tls_client::{TlsClient, CertCache};
 
+/// L1 메모리 캐시 항목 — body + content_type
+pub struct MemoryCacheEntry {
+    pub body: Bytes,
+    pub content_type: Option<String>,
+}
+
 /// 런타임에 교체 가능한 도메인→원본서버 맵
 pub type DomainMap = Arc<RwLock<HashMap<String, String>>>;
 

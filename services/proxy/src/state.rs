@@ -49,6 +49,10 @@ pub struct AppState {
     pub miss_count: u64,
     /// 캐시 BYPASS 횟수 (no-store 등)
     pub bypass_count: u64,
+    /// L1 메모리 캐시 HIT 횟수
+    pub memory_hit_count: u64,
+    /// L2 디스크 캐시 HIT 횟수
+    pub disk_hit_count: u64,
     /// 매분 히트율 스냅샷 (최대 60개)
     pub hit_rate_history: VecDeque<HitRateSnapshot>,
 }
@@ -71,6 +75,8 @@ impl AppState {
             hit_count: 0,
             miss_count: 0,
             bypass_count: 0,
+            memory_hit_count: 0,
+            disk_hit_count: 0,
             hit_rate_history: VecDeque::with_capacity(MAX_HIT_RATE_HISTORY),
         }
     }
@@ -97,6 +103,18 @@ impl AppState {
     /// 캐시 BYPASS 기록 (no-store / 비GET 등)
     pub fn record_cache_bypass(&mut self) {
         self.bypass_count += 1;
+    }
+
+    /// L1 메모리 캐시 HIT 기록 — hit_count도 함께 증가 (하위 호환)
+    pub fn record_memory_hit(&mut self) {
+        self.memory_hit_count += 1;
+        self.hit_count += 1;
+    }
+
+    /// L2 디스크 캐시 HIT 기록 — hit_count도 함께 증가 (하위 호환)
+    pub fn record_disk_hit(&mut self) {
+        self.disk_hit_count += 1;
+        self.hit_count += 1;
     }
 
     /// 현재 히트율을 스냅샷으로 기록 (매분 백그라운드 태스크에서 호출)
@@ -209,5 +227,17 @@ mod tests {
         state.record_hit_rate_snapshot();
         let snap = state.hit_rate_history.back().unwrap();
         assert!((snap.hit_rate - 75.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn 메모리_히트_디스크_히트_카운터가_독립적으로_증가한다() {
+        let mut state = AppState::new();
+        state.record_memory_hit();
+        state.record_memory_hit();
+        state.record_disk_hit();
+        assert_eq!(state.memory_hit_count, 2);
+        assert_eq!(state.disk_hit_count, 1);
+        // 하위 호환: hit_count = memory + disk
+        assert_eq!(state.hit_count, 3);
     }
 }

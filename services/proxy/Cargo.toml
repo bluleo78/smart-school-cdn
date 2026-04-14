@@ -29,6 +29,7 @@ rustls         = { version = "0.23", features = ["ring"] }
 tokio-rustls   = "0.26"
 axum-server    = { version = "0.7", features = ["tls-rustls"] }
 rustls-pemfile = "2"
+moka           = { version = "0.12", features = ["future"] }
 
 [dev-dependencies]
 tempfile     = "3"
