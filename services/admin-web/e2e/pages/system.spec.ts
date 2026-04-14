@@ -190,3 +190,76 @@ test.describe('서비스 상태 그리드', () => {
     await expect(page.getByTestId('service-offline-banner')).not.toBeVisible();
   });
 });
+
+/// LogViewer — Phase 8-3 실시간 로그 뷰어 통합 테스트
+/// 커버리지:
+///   카드 렌더링     ✅
+///   서비스 셀렉트   ✅
+///   레벨 셀렉트     ✅
+///   지우기 버튼     ✅
+test.describe('LogViewer', () => {
+  /** SSE mock 설정 헬퍼 — 1줄 로그를 포함한 스트림 반환 */
+  async function mockSse(page: import('@playwright/test').Page, withLine = false) {
+    await page.route('**/api/logs/**', async (route) => {
+      const body = withLine
+        ? `data: ${JSON.stringify({
+            timestamp: '2026-04-14T10:00:00.000Z',
+            level: 'INFO',
+            message: 'cache HIT host=example.com',
+            service: 'proxy',
+          })}\n\n`
+        : '';
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        headers: { 'Cache-Control': 'no-cache' },
+        body,
+      });
+    });
+  }
+
+  test.beforeEach(async ({ page }) => {
+    await mockApi(page, 'GET', '/proxy/status', { online: true, uptime: 3600 });
+    await mockApi(page, 'GET', '/cache/stats', {
+      total_size_bytes: 500_000_000,
+      max_size_bytes: 5_000_000_000,
+      hit_count: 100, miss_count: 50, bypass_count: 10,
+      hit_rate: 66.7, entry_count: 42, by_domain: [], hit_rate_history: [],
+    });
+  });
+
+  test('LogViewer 카드가 표시된다', async ({ page }) => {
+    await mockSse(page);
+    await page.goto('/system');
+
+    await expect(page.getByTestId('log-viewer')).toBeVisible();
+  });
+
+  test('서비스 선택 셀렉트가 표시된다', async ({ page }) => {
+    await mockSse(page);
+    await page.goto('/system');
+
+    await expect(page.getByTestId('log-service-select')).toBeVisible();
+  });
+
+  test('레벨 필터 셀렉트가 표시된다', async ({ page }) => {
+    await mockSse(page);
+    await page.goto('/system');
+
+    await expect(page.getByTestId('log-level-select')).toBeVisible();
+  });
+
+  test('지우기 버튼을 클릭하면 로그가 비워진다', async ({ page }) => {
+    await mockSse(page, true);
+    await page.goto('/system');
+
+    // SSE 데이터(로그 줄)가 도착할 때까지 대기
+    await page.waitForFunction(() =>
+      document.querySelector('[data-testid="log-scroll-area"]')?.textContent?.includes('cache HIT'),
+    );
+
+    await page.getByTestId('log-clear-btn').click();
+
+    await expect(page.getByTestId('log-empty')).toBeVisible();
+  });
+});

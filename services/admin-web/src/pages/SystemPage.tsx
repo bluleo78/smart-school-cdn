@@ -16,6 +16,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { downloadCACert, downloadMobileConfig } from '../api/tls';
 import { useCertificates } from '../hooks/useTls';
 import { formatUptime } from '../lib/format';
+import { LogViewer } from '../components/system/LogViewer';
 import type { SystemStatus } from '../api/system';
 
 /** 서비스 키 → 표시 레이블 매핑 (SystemStatus 타입과 동기화) */
@@ -84,6 +85,9 @@ export function SystemPage() {
           />
         ))}
       </div>
+
+      {/* 실시간 로그 뷰어 */}
+      <LogViewer />
 
       {/* 서비스 장애 배너 */}
       {anyOffline && (
