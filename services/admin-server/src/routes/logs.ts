@@ -76,7 +76,8 @@ export async function logRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: '허용되지 않은 서비스입니다.' });
     }
 
-    const tail = Math.min(Number(request.query.tail ?? '100'), 500);
+    const tailRaw = parseInt(request.query.tail ?? '100', 10);
+    const tail = Math.min(isNaN(tailRaw) ? 100 : Math.max(1, tailRaw), 500);
     const follow = request.query.follow !== 'false';
     const dockerSocket = process.env.DOCKER_SOCKET ?? '/var/run/docker.sock';
 
