@@ -135,7 +135,7 @@ export function LogViewer() {
 
             <Button
               variant={autoScroll ? 'default' : 'outline'}
-              size="sm"
+              className="text-xs px-3 py-1.5"
               onClick={() => setAutoScroll((v) => !v)}
               data-testid="log-autoscroll-btn"
             >
@@ -144,7 +144,7 @@ export function LogViewer() {
 
             <Button
               variant="outline"
-              size="sm"
+              className="text-xs px-3 py-1.5"
               onClick={clear}
               data-testid="log-clear-btn"
             >
