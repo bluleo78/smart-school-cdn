@@ -95,6 +95,10 @@ async fn main() {
     let memory_cache: moka::future::Cache<String, Arc<MemoryCacheEntry>> =
         moka::future::Cache::builder()
             .max_capacity(memory_cache_max_bytes)
+            // weigher 없으면 max_capacity가 엔트리 수로 해석되므로 바이트 기반 가중치 설정
+            .weigher(|_k: &String, v: &Arc<MemoryCacheEntry>| {
+                (v.body.len() as u64).min(u32::MAX as u64) as u32
+            })
             .time_to_live(std::time::Duration::from_secs(memory_cache_ttl_secs))
             .build();
     tracing::info!(

@@ -100,6 +100,7 @@ export async function logRoutes(app: FastifyInstance) {
 
             let buf = Buffer.alloc(0);
             dockerRes.on('data', (chunk: Buffer) => {
+              if (closed) return;
               buf = Buffer.concat([buf, chunk]);
               // 헤더+페이로드 단위로 처리
               let offset = 0;
