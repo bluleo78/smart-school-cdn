@@ -81,8 +81,8 @@ impl Coalescer {
             // 첫 번째 요청자: origin fetch 실행
             let result = fetch_fn().await;
 
-            // fetch 완료 — guard 해제 후 원자적으로 키 제거 + broadcast
-            guard.key = None; // guard가 더 이상 제거하지 않도록
+            // fetch 완료 — 원자적으로 키 제거 + broadcast (guard 먼저 해제)
+            guard.key = None;
             {
                 let mut map = self.in_flight.lock().unwrap();
                 if let Some(tx) = map.remove(&key) {

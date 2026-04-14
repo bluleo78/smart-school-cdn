@@ -246,21 +246,20 @@ async fn proxy_handler(
         let path_and_query = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/").to_string();
         let origin_url = format!("{}{}", origin, path_and_query);
 
-        let key_for_coalescer = key.clone();
-        let key_for_put     = key.clone();
-        let host_c          = host.clone();
-        let uri_str         = uri.to_string();
-        let headers_c       = headers.clone();
-        let body_bytes_c    = body_bytes.clone();
-        let client_c        = client.clone();
-        let origin_url_c    = origin_url.clone();
-        let ps_c            = ps.clone();
-        let method_c        = method.clone();
-        let state_c2        = state.clone();
+        let key_c        = key.clone();
+        let host_c       = host.clone();
+        let uri_str      = uri.to_string();
+        let headers_c    = headers.clone();
+        let body_bytes_c = body_bytes.clone();
+        let client_c     = client.clone();
+        let method_c     = method.clone();
+        let ps_c         = ps.clone();
+        let state_c      = state.clone();
 
-        let coalesced = ps.coalescer.get_or_fetch(key_for_coalescer, move || async move {
+        let coalesced = ps.coalescer.get_or_fetch(key.clone(), move || async move {
+            let key_for_put = key_c;
             // 헤더 필터링 후 원본 요청 빌드
-            let mut req_builder = client_c.request(method_c, &origin_url_c);
+            let mut req_builder = client_c.request(method_c, &origin_url);
             for (k, v) in headers_c.iter() {
                 let name = k.as_str();
                 if !matches!(
@@ -275,7 +274,7 @@ async fn proxy_handler(
             let origin_resp = match req_builder.body(body_bytes_c).send().await {
                 Ok(r) => r,
                 Err(err) => {
-                    tracing::error!(error=%err, url=%origin_url_c, "원본 서버 연결 실패");
+                    tracing::error!(error=%err, url=%origin_url, "원본 서버 연결 실패");
                     return Err(());
                 }
             };
@@ -332,7 +331,7 @@ async fn proxy_handler(
             };
 
             // 첫 번째 요청자만 miss 카운터 증가 (구독자는 record_request만)
-            state_c2.write().await.record_cache_miss();
+            state_c.write().await.record_cache_miss();
             Ok(Arc::new((serve_bytes, serve_ct, status)))
         }).await;
 
