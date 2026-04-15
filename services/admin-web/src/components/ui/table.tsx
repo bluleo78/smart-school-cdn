@@ -1,4 +1,4 @@
-/** Table 컴포넌트 패밀리 */
+/** Table 컴포넌트 패밀리 — 줄무늬(striped) 스타일 */
 import type { HTMLAttributes, TdHTMLAttributes, ThHTMLAttributes } from 'react';
 import { cn } from '../../lib/utils';
 
@@ -9,7 +9,7 @@ export function Table({ className, ...props }: HTMLAttributes<HTMLTableElement>)
 export function TableHeader({ className, ...props }: HTMLAttributes<HTMLTableSectionElement>) {
   return (
     <thead
-      className={cn('border-b bg-muted/40 text-xs text-muted-foreground', className)}
+      className={cn('border-b bg-accent text-xs text-primary uppercase tracking-wider', className)}
       {...props}
     />
   );
@@ -22,7 +22,7 @@ export function TableBody({ className, ...props }: HTMLAttributes<HTMLTableSecti
 export function TableRow({ className, ...props }: HTMLAttributes<HTMLTableRowElement>) {
   return (
     <tr
-      className={cn('border-b transition-colors last:border-0', className)}
+      className={cn('border-b transition-colors last:border-0 even:bg-muted/50', className)}
       {...props}
     />
   );
