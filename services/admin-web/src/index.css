@@ -51,6 +51,11 @@
   /* 사이드바 그라데이션용 */
   --color-sidebar-from: oklch(0.445 0.258 275.75);
   --color-sidebar-to: oklch(0.496 0.232 277.02);
+
+  /* 대시보드 글래스 영역 그라데이션 */
+  --color-glass-from: oklch(0.941 0.04 260.91);
+  --color-glass-via: oklch(0.962 0.021 272.31);
+  --color-glass-to: oklch(0.961 0.04 350);
 }
 
 /* 다크모드 */
@@ -95,4 +100,10 @@
 
   --color-sidebar-from: oklch(0.257 0.09 281.29);
   --color-sidebar-to: oklch(0.295 0.108 280);
+
+  --color-glass-from: oklch(0.205 0.09 281.29);
+  --color-glass-via: oklch(0.257 0.09 281.29);
+  --color-glass-to: oklch(0.245 0.08 310);
+
+  color-scheme: dark;
 }

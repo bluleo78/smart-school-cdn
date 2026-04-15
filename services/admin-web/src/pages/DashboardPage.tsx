@@ -16,7 +16,7 @@ export function DashboardPage() {
       </div>
 
       {/* 1행: 요약 카드 — 글래스모피즘 그라디언트 배경 */}
-      <div className="rounded-2xl bg-gradient-to-br from-info-subtle via-accent to-pink-subtle dark:from-[#1e1b4b] dark:via-[#312e81] dark:to-[#3b0764] p-5">
+      <div className="rounded-2xl bg-gradient-to-br from-glass-from via-glass-via to-glass-to p-5">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <ProxyStatusCard />
           <CacheHitRateCard />

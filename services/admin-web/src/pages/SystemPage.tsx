@@ -270,6 +270,7 @@ export function SystemPage() {
               <button
                 key={value}
                 onClick={() => handleThemeChange(value)}
+                aria-pressed={currentTheme === value}
                 className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                   currentTheme === value
                     ? 'bg-primary text-primary-foreground'
