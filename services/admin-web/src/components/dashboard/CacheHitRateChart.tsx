@@ -57,14 +57,14 @@ export function CacheHitRateChart() {
       <CardContent>
         <ResponsiveContainer width="100%" height={140}>
           <LineChart data={chartData} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
             <XAxis dataKey="time" tick={{ fontSize: 10 }} />
             <YAxis domain={[0, 100]} tick={{ fontSize: 10 }} unit="%" />
             <Tooltip formatter={(v: unknown) => [`${v as number}%`, '히트율']} />
             <Line
               type="monotone"
               dataKey="hitRate"
-              stroke="#3b82f6"
+              stroke="var(--color-primary)"
               strokeWidth={2}
               dot={false}
               activeDot={{ r: 4 }}

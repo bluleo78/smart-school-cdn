@@ -2,32 +2,108 @@
 
 @theme {
   /* 배경 / 텍스트 */
-  --color-background: oklch(1 0 0);
-  --color-foreground: oklch(0.145 0 0);
+  --color-background: oklch(0.993 0.013 73.67);
+  --color-foreground: oklch(0.145 0.03 281);
 
   /* 카드 */
   --color-card: oklch(1 0 0);
-  --color-card-foreground: oklch(0.145 0 0);
+  --color-card-foreground: oklch(0.145 0.03 281);
 
   /* 뮤트 (연회색 배경·보조 텍스트) */
-  --color-muted: oklch(0.97 0 0);
+  --color-muted: oklch(0.962 0.021 272.31);
   --color-muted-foreground: oklch(0.556 0 0);
 
   /* 테두리 */
-  --color-border: oklch(0.922 0 0);
+  --color-border: oklch(0.929 0.032 272.79);
 
-  /* 프라이머리 (버튼 등) */
-  --color-primary: oklch(0.205 0 0);
+  /* 프라이머리 — 인디고 600 */
+  --color-primary: oklch(0.445 0.258 275.75);
   --color-primary-foreground: oklch(0.985 0 0);
 
   /* 디스트럭티브 (삭제 등) */
   --color-destructive: oklch(0.577 0.245 27.325);
   --color-destructive-foreground: oklch(0.985 0 0);
+  --color-destructive-subtle: oklch(0.955 0.032 17.72);
 
-  /* 액센트 (활성 네비 등) */
-  --color-accent: oklch(0.97 0 0);
-  --color-accent-foreground: oklch(0.205 0 0);
+  /* 액센트 — 인디고 50 */
+  --color-accent: oklch(0.962 0.021 272.31);
+  --color-accent-foreground: oklch(0.257 0.09 281.29);
 
   /* 포커스 링 */
-  --color-ring: oklch(0.708 0 0);
+  --color-ring: oklch(0.445 0.258 275.75);
+
+  /* 시맨틱 상태 토큰 */
+  --color-success: oklch(0.545 0.175 142.5);
+  --color-success-foreground: oklch(1 0 0);
+  --color-success-subtle: oklch(0.952 0.052 149.58);
+
+  --color-warning: oklch(0.646 0.165 75.83);
+  --color-warning-foreground: oklch(1 0 0);
+  --color-warning-subtle: oklch(0.976 0.042 83.6);
+
+  --color-info: oklch(0.518 0.215 264.05);
+  --color-info-foreground: oklch(1 0 0);
+  --color-info-subtle: oklch(0.941 0.04 260.91);
+
+  --color-pink: oklch(0.592 0.2 0);
+  --color-pink-subtle: oklch(0.961 0.04 350);
+
+  /* 사이드바 그라데이션용 */
+  --color-sidebar-from: oklch(0.445 0.258 275.75);
+  --color-sidebar-to: oklch(0.496 0.232 277.02);
+
+  /* 대시보드 글래스 영역 그라데이션 */
+  --color-glass-from: oklch(0.941 0.04 260.91);
+  --color-glass-via: oklch(0.962 0.021 272.31);
+  --color-glass-to: oklch(0.961 0.04 350);
+}
+
+/* 다크모드 */
+.dark {
+  --color-background: oklch(0.165 0.025 290);
+  --color-foreground: oklch(0.93 0.01 281);
+
+  --color-card: oklch(0.205 0.03 290);
+  --color-card-foreground: oklch(0.93 0.01 281);
+
+  --color-muted: oklch(0.225 0.028 290);
+  --color-muted-foreground: oklch(0.6 0 0);
+
+  --color-border: oklch(0.27 0.025 290);
+
+  --color-primary: oklch(0.702 0.183 281.29);
+  --color-primary-foreground: oklch(0.985 0 0);
+
+  --color-destructive: oklch(0.577 0.245 27.325);
+  --color-destructive-foreground: oklch(0.985 0 0);
+  --color-destructive-subtle: oklch(0.258 0.062 17.72);
+
+  --color-accent: oklch(0.225 0.028 290);
+  --color-accent-foreground: oklch(0.9 0 0);
+
+  --color-ring: oklch(0.702 0.183 281.29);
+
+  --color-success: oklch(0.723 0.219 149.58);
+  --color-success-foreground: oklch(0.145 0.03 281);
+  --color-success-subtle: oklch(0.266 0.065 152.93);
+
+  --color-warning: oklch(0.795 0.184 86.05);
+  --color-warning-foreground: oklch(0.145 0.03 281);
+  --color-warning-subtle: oklch(0.412 0.112 60.63);
+
+  --color-info: oklch(0.686 0.169 263.61);
+  --color-info-foreground: oklch(0.145 0.03 281);
+  --color-info-subtle: oklch(0.305 0.085 260);
+
+  --color-pink: oklch(0.756 0.165 350);
+  --color-pink-subtle: oklch(0.305 0.08 350);
+
+  --color-sidebar-from: oklch(0.257 0.09 281.29);
+  --color-sidebar-to: oklch(0.295 0.108 280);
+
+  --color-glass-from: oklch(0.205 0.09 281.29);
+  --color-glass-via: oklch(0.257 0.09 281.29);
+  --color-glass-to: oklch(0.245 0.08 310);
+
+  color-scheme: dark;
 }

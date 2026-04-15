@@ -37,13 +37,13 @@ function levelBadge(level: LogLine['level']) {
       );
     case 'WARN':
       return (
-        <Badge variant="outline" className="border-amber-400 text-amber-700 text-xs font-mono shrink-0">
+        <Badge variant="warning" className="text-xs font-mono shrink-0">
           WRN
         </Badge>
       );
     case 'DEBUG':
       return (
-        <Badge variant="outline" className="border-gray-400 text-gray-500 text-xs font-mono shrink-0">
+        <Badge variant="outline" className="text-xs font-mono shrink-0 text-muted-foreground">
           DBG
         </Badge>
       );
@@ -100,9 +100,9 @@ export function LogViewer() {
           <div className="flex items-center gap-2">
             <CardTitle>서비스 로그</CardTitle>
             {isConnected ? (
-              <span className="w-2 h-2 rounded-full bg-green-500 shrink-0" data-testid="log-connected" />
+              <span className="w-2 h-2 rounded-full bg-success shrink-0" data-testid="log-connected" />
             ) : (
-              <span className="w-2 h-2 rounded-full bg-gray-400 shrink-0" data-testid="log-disconnected" />
+              <span className="w-2 h-2 rounded-full bg-muted-foreground shrink-0" data-testid="log-disconnected" />
             )}
           </div>
 

@@ -9,10 +9,10 @@ import { Skeleton } from '../ui/skeleton';
 /** 상태코드에 따른 배지 색상 반환
  *  2xx: 초록 (성공), 3xx: 파랑 (리다이렉트), 4xx: 노랑 (클라이언트 에러), 5xx: 빨강 (서버 에러) */
 function statusColor(code: number): string {
-  if (code < 300) return 'bg-green-100 text-green-700';
-  if (code < 400) return 'bg-blue-100 text-blue-700';
-  if (code < 500) return 'bg-yellow-100 text-yellow-700';
-  return 'bg-red-100 text-red-700';
+  if (code < 300) return 'bg-success-subtle text-success';
+  if (code < 400) return 'bg-info-subtle text-info';
+  if (code < 500) return 'bg-warning-subtle text-warning';
+  return 'bg-destructive-subtle text-destructive';
 }
 
 /** ISO 타임스탬프를 "HH:MM:SS" 형식으로 변환 */

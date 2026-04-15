@@ -19,14 +19,14 @@ const navItems = [
 export function AppLayout() {
   return (
     <div className="flex h-screen bg-background text-foreground">
-      {/* 사이드바 */}
-      <aside className="w-60 bg-muted/40 border-r border-border flex flex-col shrink-0">
-        <div className="p-4 border-b border-border">
+      {/* 사이드바 — 인디고 그라데이션 */}
+      <aside className="w-60 bg-gradient-to-b from-sidebar-from to-sidebar-to flex flex-col shrink-0">
+        <div className="p-4 border-b border-white/15">
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-md bg-primary flex items-center justify-center shrink-0">
-              <span className="text-primary-foreground text-xs font-bold">SC</span>
+            <div className="w-7 h-7 rounded-md bg-white/20 flex items-center justify-center shrink-0">
+              <span className="text-white text-xs font-bold">SC</span>
             </div>
-            <h1 className="text-sm font-bold leading-tight">Smart School CDN</h1>
+            <h1 className="text-sm font-bold leading-tight text-white">Smart School CDN</h1>
           </div>
         </div>
         <nav className="flex-1 p-2 space-y-1">
@@ -36,10 +36,10 @@ export function AppLayout() {
               to={to}
               end={to === '/'}
               className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors ${
+                `flex items-center gap-3 px-3 py-2 rounded-[10px] text-sm transition-colors ${
                   isActive
-                    ? 'bg-accent text-accent-foreground font-medium'
-                    : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                    ? 'bg-white/20 text-white font-medium'
+                    : 'text-white/70 hover:bg-white/10 hover:text-white/90'
                 }`
               }
             >
