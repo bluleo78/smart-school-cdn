@@ -160,8 +160,8 @@ function SidePanel({ domain, onDelete, onClose }: { domain: Domain; onDelete: ()
   }
 
   return (
-    <div
-      className="w-72 border-l border-border bg-muted/20 p-4 space-y-4 overflow-y-auto"
+    <Card
+      className="w-72 p-4 space-y-4 overflow-y-auto shrink-0"
       data-testid="domain-side-panel"
     >
       {/* 헤더: 도메인명 + 닫기 버튼 */}
@@ -241,7 +241,7 @@ function SidePanel({ domain, onDelete, onClose }: { domain: Domain; onDelete: ()
       >
         도메인 삭제
       </Button>
-    </div>
+    </Card>
   );
 }
 
