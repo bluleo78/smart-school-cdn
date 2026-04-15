@@ -49,4 +49,123 @@ describe('DomainRepository', () => {
     // DB 자체가 새로 만들어졌기 때문에 이 테스트에서 전체 조회는 비어있어야 한다
     expect(repo.findAll()).toEqual([]);
   });
+
+  describe('findAll — 검색/필터', () => {
+    beforeEach(() => {
+      repo.upsert('school.local', 'https://school.local');
+      repo.upsert('cdn.example.com', 'https://cdn.example.com');
+      repo.upsert('disabled.test', 'https://disabled.test');
+      // disabled.test는 비활성화
+      repo.update('disabled.test', { enabled: 0 });
+    });
+
+    it('검색어로 host를 필터링한다', () => {
+      const results = repo.findAll({ q: 'school' });
+      expect(results).toHaveLength(1);
+      expect(results[0].host).toBe('school.local');
+    });
+
+    it('검색어로 origin을 필터링한다', () => {
+      const results = repo.findAll({ q: 'cdn.example' });
+      expect(results).toHaveLength(1);
+      expect(results[0].origin).toBe('https://cdn.example.com');
+    });
+
+    it('enabled=true 필터링 — 활성 도메인만 반환한다', () => {
+      const results = repo.findAll({ enabled: true });
+      expect(results.every((d) => d.enabled === 1)).toBe(true);
+      expect(results.find((d) => d.host === 'disabled.test')).toBeUndefined();
+    });
+
+    it('enabled=false 필터링 — 비활성 도메인만 반환한다', () => {
+      const results = repo.findAll({ enabled: false });
+      expect(results).toHaveLength(1);
+      expect(results[0].host).toBe('disabled.test');
+    });
+
+    it('필터 없으면 전체를 반환한다', () => {
+      expect(repo.findAll()).toHaveLength(3);
+    });
+  });
+
+  describe('update', () => {
+    beforeEach(() => {
+      repo.upsert('update.test', 'https://old.origin');
+    });
+
+    it('origin 변경 시 updated_at이 갱신된다', async () => {
+      const before = repo.findByHost('update.test')!;
+      // updated_at은 초 단위이므로 1초 지연 후 변경
+      await new Promise((r) => setTimeout(r, 1100));
+      const updated = repo.update('update.test', { origin: 'https://new.origin' });
+      expect(updated?.origin).toBe('https://new.origin');
+      expect(updated?.updated_at).toBeGreaterThanOrEqual(before.updated_at);
+    });
+
+    it('description을 변경할 수 있다', () => {
+      const updated = repo.update('update.test', { description: '교과서 CDN' });
+      expect(updated?.description).toBe('교과서 CDN');
+    });
+
+    it('존재하지 않는 도메인은 undefined를 반환한다', () => {
+      expect(repo.update('nonexistent.host', { origin: 'https://x.com' })).toBeUndefined();
+    });
+  });
+
+  describe('toggleEnabled', () => {
+    beforeEach(() => {
+      repo.upsert('toggle.test', 'https://toggle.test');
+    });
+
+    it('활성 상태를 비활성으로 전환한다', () => {
+      const toggled = repo.toggleEnabled('toggle.test');
+      expect(toggled?.enabled).toBe(0);
+    });
+
+    it('비활성 상태를 활성으로 전환한다', () => {
+      repo.update('toggle.test', { enabled: 0 });
+      const toggled = repo.toggleEnabled('toggle.test');
+      expect(toggled?.enabled).toBe(1);
+    });
+  });
+
+  describe('bulkInsert', () => {
+    it('여러 도메인을 일괄 추가한다', () => {
+      const result = repo.bulkInsert([
+        { host: 'a.bulk', origin: 'https://a.bulk' },
+        { host: 'b.bulk', origin: 'https://b.bulk' },
+      ]);
+      expect(result.success).toBe(2);
+      expect(result.failed).toHaveLength(0);
+      expect(repo.findAll()).toHaveLength(2);
+    });
+
+    it('중복 host는 upsert로 origin이 갱신된다', () => {
+      repo.upsert('dup.bulk', 'https://old.dup');
+      const result = repo.bulkInsert([{ host: 'dup.bulk', origin: 'https://new.dup' }]);
+      expect(result.success).toBe(1);
+      expect(repo.findByHost('dup.bulk')?.origin).toBe('https://new.dup');
+    });
+  });
+
+  describe('bulkDelete', () => {
+    beforeEach(() => {
+      repo.upsert('del1.test', 'https://del1.test');
+      repo.upsert('del2.test', 'https://del2.test');
+      repo.upsert('keep.test', 'https://keep.test');
+    });
+
+    it('선택된 도메인을 일괄 삭제하고 삭제된 행 수를 반환한다', () => {
+      const count = repo.bulkDelete(['del1.test', 'del2.test']);
+      expect(count).toBe(2);
+      expect(repo.findByHost('del1.test')).toBeUndefined();
+      expect(repo.findByHost('del2.test')).toBeUndefined();
+      expect(repo.findByHost('keep.test')).toBeDefined();
+    });
+
+    it('빈 배열이면 0을 반환하고 아무것도 삭제하지 않는다', () => {
+      expect(repo.bulkDelete([])).toBe(0);
+      expect(repo.findAll()).toHaveLength(3);
+    });
+  });
 });
