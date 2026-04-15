@@ -17,12 +17,12 @@ export function ServiceStatusCard({ name, online, latency_ms }: Props) {
         <div className="flex items-center justify-between mb-3">
           <p className="text-sm font-semibold">{name}</p>
           <span
-            className={`w-2 h-2 rounded-full shrink-0 ${online ? 'bg-green-500' : 'bg-destructive'}`}
+            className={`w-2 h-2 rounded-full shrink-0 ${online ? 'bg-success' : 'bg-destructive'}`}
           />
         </div>
         {/* 온라인/오프라인 배지 */}
         {online ? (
-          <Badge data-testid="service-status-badge" variant="outline" className="border-green-500 text-green-700 text-xs">
+          <Badge data-testid="service-status-badge" variant="success" className="text-xs">
             온라인
           </Badge>
         ) : (

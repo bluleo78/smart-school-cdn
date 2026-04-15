@@ -35,12 +35,12 @@ function certStatusBadge(expiresAt: string) {
   if (days < 0) return <Badge variant="destructive">만료</Badge>;
   if (days < 7)
     return (
-      <Badge variant="outline" className="border-amber-400 text-amber-700">
+      <Badge variant="warning">
         경고
       </Badge>
     );
   return (
-    <Badge variant="outline" className="border-green-500 text-green-700">
+    <Badge variant="success">
       활성
     </Badge>
   );
