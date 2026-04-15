@@ -9,7 +9,7 @@ export function BandwidthSavedCard() {
 
   if (isLoading) {
     return (
-      <Card>
+      <Card variant="glass">
         <CardHeader><CardTitle>대역폭 절감</CardTitle></CardHeader>
         <CardContent><Skeleton className="h-8 w-24" /></CardContent>
       </Card>
@@ -18,7 +18,7 @@ export function BandwidthSavedCard() {
 
   if (error) {
     return (
-      <Card>
+      <Card variant="glass">
         <CardHeader><CardTitle>대역폭 절감</CardTitle></CardHeader>
         <CardContent><p className="text-sm text-destructive">연결 실패</p></CardContent>
       </Card>
@@ -29,7 +29,7 @@ export function BandwidthSavedCard() {
   const saved = data?.by_domain?.reduce((acc, d) => acc + d.size_bytes, 0) ?? 0;
 
   return (
-    <Card>
+    <Card variant="glass">
       <CardHeader><CardTitle>대역폭 절감</CardTitle></CardHeader>
       <CardContent>
         <p className="text-3xl font-bold">{formatBytes(saved)}</p>

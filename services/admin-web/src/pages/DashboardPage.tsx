@@ -15,12 +15,14 @@ export function DashboardPage() {
         <p className="text-sm text-muted-foreground mt-1">CDN 서비스 현황을 한눈에 확인합니다.</p>
       </div>
 
-      {/* 1행: 요약 카드 — 모바일 2열, 데스크탑 4열 */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <ProxyStatusCard />
-        <CacheHitRateCard />
-        <BandwidthSavedCard />
-        <EntryCountCard />
+      {/* 1행: 요약 카드 — 글래스모피즘 그라디언트 배경 */}
+      <div className="rounded-2xl bg-gradient-to-br from-info-subtle via-accent to-pink-subtle dark:from-[#1e1b4b] dark:via-[#312e81] dark:to-[#3b0764] p-5">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <ProxyStatusCard />
+          <CacheHitRateCard />
+          <BandwidthSavedCard />
+          <EntryCountCard />
+        </div>
       </div>
 
       {/* 2행: 히트율 차트(2/3) + 스토리지(1/3) — 모바일 1열, 데스크탑 3열 */}

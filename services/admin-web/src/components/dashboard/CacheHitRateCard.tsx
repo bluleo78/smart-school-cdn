@@ -8,7 +8,7 @@ export function CacheHitRateCard() {
 
   if (isLoading) {
     return (
-      <Card data-testid="cache-hit-rate-loading">
+      <Card variant="glass" data-testid="cache-hit-rate-loading">
         <CardHeader><CardTitle>캐시 히트율</CardTitle></CardHeader>
         <CardContent className="space-y-2">
           <Skeleton className="h-8 w-20" />
@@ -20,7 +20,7 @@ export function CacheHitRateCard() {
 
   if (error) {
     return (
-      <Card>
+      <Card variant="glass">
         <CardHeader><CardTitle>캐시 히트율</CardTitle></CardHeader>
         <CardContent><p className="text-sm text-destructive">연결 실패</p></CardContent>
       </Card>
@@ -28,7 +28,7 @@ export function CacheHitRateCard() {
   }
 
   return (
-    <Card data-testid="cache-hit-rate-card">
+    <Card variant="glass" data-testid="cache-hit-rate-card">
       <CardHeader><CardTitle>캐시 히트율</CardTitle></CardHeader>
       <CardContent>
         <p className="text-3xl font-bold">{(data?.hit_rate ?? 0).toFixed(1)}%</p>
