@@ -2,7 +2,9 @@
  * Card·Skeleton 기반, 에러 상태 처리, formatUptime 공통 유틸 사용
  * 마이크로서비스 상태 그리드 + 장애 배너 추가
  */
-import { AlertTriangle } from 'lucide-react';
+import { useState } from 'react';
+import { AlertTriangle, Monitor, Sun, Moon } from 'lucide-react';
+import { getTheme, setTheme, type Theme } from '../lib/theme';
 import { useProxyStatus } from '../hooks/useProxyStatus';
 import { useSystemStatus } from '../api/system';
 import { ServiceStatusCard } from '../components/system/ServiceStatusCard';
@@ -47,6 +49,13 @@ function certStatusBadge(expiresAt: string) {
 }
 
 export function SystemPage() {
+  const [currentTheme, setCurrentTheme] = useState<Theme>(getTheme);
+
+  function handleThemeChange(theme: Theme) {
+    setTheme(theme);
+    setCurrentTheme(theme);
+  }
+
   const { data: status, isLoading: statusLoading, error: statusError } = useProxyStatus();
   const { data: cache, isLoading: cacheLoading, error: cacheError } = useCacheStats();
   const { data: certificates, isLoading: certsLoading, error: certsError } = useCertificates();
@@ -244,6 +253,34 @@ export function SystemPage() {
               </TableBody>
             </Table>
           )}
+        </CardContent>
+      </Card>
+      {/* 테마 설정 */}
+      <Card>
+        <CardHeader>
+          <CardTitle>테마 설정</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex gap-2">
+            {([
+              { value: 'system' as const, icon: Monitor, label: '시스템' },
+              { value: 'light' as const, icon: Sun, label: '라이트' },
+              { value: 'dark' as const, icon: Moon, label: '다크' },
+            ]).map(({ value, icon: Icon, label }) => (
+              <button
+                key={value}
+                onClick={() => handleThemeChange(value)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  currentTheme === value
+                    ? 'bg-primary text-primary-foreground'
+                    : 'bg-muted text-muted-foreground hover:bg-accent'
+                }`}
+              >
+                <Icon size={16} />
+                {label}
+              </button>
+            ))}
+          </div>
         </CardContent>
       </Card>
     </div>
