@@ -3,6 +3,7 @@ import { Toaster } from 'sonner';
 import { AppLayout } from './components/layout/AppLayout';
 import { DashboardPage } from './pages/DashboardPage';
 import { DomainsPage } from './pages/DomainsPage';
+import { DomainDetailPage } from './pages/DomainDetailPage';
 import { CachePage } from './pages/CachePage';
 import { OptimizerPage } from './pages/OptimizerPage';
 import { SystemPage } from './pages/SystemPage';
@@ -23,6 +24,7 @@ export function App() {
         <Route element={<AppLayout />}>
           <Route index element={<DashboardPage />} />
           <Route path="domains" element={<DomainsPage />} />
+          <Route path="domains/:host" element={<DomainDetailPage />} />
           <Route path="cache" element={<CachePage />} />
           <Route path="optimizer" element={<OptimizerPage />} />
           <Route path="system" element={<SystemPage />} />

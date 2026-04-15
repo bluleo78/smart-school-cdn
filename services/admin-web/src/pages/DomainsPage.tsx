@@ -1,29 +1,29 @@
 /**
- * 도메인 관리 페이지 — shadcn 컴포넌트 전면 적용 + UX 개선
- * - Dialog: ESC 키 + 백드롭 클릭 닫기
- * - 삭제/프록시 테스트: try/catch + Sonner 토스트
- * - 추가 성공/실패: Sonner 토스트
- * - 사이드 패널: X 닫기 버튼
- * - Table: 시맨틱 컴포넌트
+ * 도메인 관리 페이지 — 전면 교체
+ * - 요약 카드, 경고 배너, 툴바, 테이블, 다이얼로그 서브 컴포넌트 조합
+ * - 기존 사이드패널 + 프록시 테스트 제거
  */
 import { useState } from 'react';
-import { X, Globe } from 'lucide-react';
 import { toast } from 'sonner';
+import { Dialog, DialogContent, DialogTitle } from '../components/ui/dialog';
+import { AlertDialog, AlertDialogContent, AlertDialogTitle } from '../components/ui/alert-dialog';
+import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { useDomains } from '../hooks/useDomains';
 import { useAddDomain } from '../hooks/useAddDomain';
 import { useDeleteDomain } from '../hooks/useDeleteDomain';
-import { useTestProxy } from '../hooks/useTestProxy';
-import type { Domain } from '../api/domains';
-import type { ProxyTestResult } from '../api/proxy';
-import { Button } from '../components/ui/button';
-import { Input } from '../components/ui/input';
-import { Dialog, DialogContent, DialogTitle } from '../components/ui/dialog';
-import { AlertDialog, AlertDialogContent, AlertDialogTitle } from '../components/ui/alert-dialog';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
-import { Skeleton } from '../components/ui/skeleton';
+import { useToggleDomain } from '../hooks/useToggleDomain';
+import { usePurgeDomain } from '../hooks/usePurgeDomain';
+import type { DomainsFilter } from '../api/domain-types';
+import { DomainSummaryCards } from '../components/domains/DomainSummaryCards';
+import { DomainAlertBanner } from '../components/domains/DomainAlertBanner';
+import { DomainToolbar } from '../components/domains/DomainToolbar';
+import { DomainTable } from '../components/domains/DomainTable';
+import { DomainBulkAddDialog } from '../components/domains/DomainBulkAddDialog';
+import { DomainBulkDeleteDialog } from '../components/domains/DomainBulkDeleteDialog';
 
-// ─── 추가 다이얼로그 ─────────────────────────────────────────────
+// ─── 도메인 추가 다이얼로그 ──────────────────────────────────────
 
 function AddDomainDialog({ onClose }: { onClose: () => void }) {
   const [host, setHost] = useState('');
@@ -100,7 +100,7 @@ function AddDomainDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
-// ─── 삭제 확인 다이얼로그 ────────────────────────────────────────
+// ─── 단건 삭제 확인 다이얼로그 ──────────────────────────────────
 
 function DeleteConfirmDialog({
   host,
@@ -137,235 +137,128 @@ function DeleteConfirmDialog({
   );
 }
 
-// ─── 사이드 패널 ────────────────────────────────────────────────
-
-function SidePanel({ domain, onDelete, onClose }: { domain: Domain; onDelete: () => void; onClose: () => void }) {
-  const [path, setPath] = useState('/');
-  const [protocol, setProtocol] = useState<'http' | 'https'>('http');
-  const [testResult, setTestResult] = useState<ProxyTestResult | null>(null);
-  const testProxy = useTestProxy();
-
-  async function handleTest() {
-    setTestResult(null);
-    try {
-      const result = await testProxy.mutateAsync({
-        domain: domain.host.replace(/^\*\./, ''),
-        path,
-        protocol,
-      });
-      setTestResult(result);
-    } catch {
-      toast.error('프록시 테스트 중 오류가 발생했습니다.');
-    }
-  }
-
-  return (
-    <Card
-      className="w-72 p-4 space-y-4 overflow-y-auto shrink-0"
-      data-testid="domain-side-panel"
-    >
-      {/* 헤더: 도메인명 + 닫기 버튼 */}
-      <div className="flex items-start justify-between">
-        <div>
-          <p className="font-mono font-semibold text-sm break-all">{domain.host}</p>
-          <p className="text-xs text-muted-foreground mt-1 break-all">{domain.origin}</p>
-          <p className="text-xs text-muted-foreground mt-1">
-            등록: {new Date(domain.created_at * 1000).toLocaleDateString('ko-KR')}
-          </p>
-        </div>
-        <button
-          onClick={onClose}
-          className="text-muted-foreground hover:text-foreground transition-colors ml-2 shrink-0"
-          aria-label="패널 닫기"
-          data-testid="panel-close-button"
-        >
-          <X size={16} />
-        </button>
-      </div>
-
-      {/* 프록시 테스트 */}
-      <div className="space-y-2">
-        <p className="text-xs font-medium">프록시 테스트</p>
-        <div className="flex gap-1 rounded-md border border-border w-fit p-0.5 bg-card text-xs">
-          {(['http', 'https'] as const).map((p) => (
-            <button
-              key={p}
-              onClick={() => setProtocol(p)}
-              className={`rounded px-2 py-0.5 transition-colors ${
-                protocol === p
-                  ? 'bg-primary text-primary-foreground'
-                  : 'text-muted-foreground'
-              }`}
-              data-testid={`panel-protocol-${p}`}
-            >
-              {p.toUpperCase()}
-            </button>
-          ))}
-        </div>
-        <Input
-          value={path}
-          onChange={(e) => setPath(e.target.value)}
-          placeholder="/path"
-          className="text-xs py-1"
-          data-testid="panel-test-path"
-        />
-        <Button
-          onClick={handleTest}
-          disabled={testProxy.isPending}
-          className="w-full text-xs py-1.5"
-          data-testid="panel-test-button"
-        >
-          {testProxy.isPending ? '테스트 중…' : '테스트'}
-        </Button>
-        {testResult && (
-          <div
-            className={`rounded text-xs px-2 py-1.5 ${
-              testResult.success && testResult.status_code < 400
-                ? 'bg-success-subtle text-success'
-                : 'bg-destructive/10 text-destructive'
-            }`}
-            data-testid="panel-test-result"
-          >
-            {testResult.success && testResult.status_code < 400 ? '✓' : '✗'} HTTP{' '}
-            {testResult.status_code} · {testResult.response_time_ms}ms
-          </div>
-        )}
-      </div>
-
-      {/* 삭제 버튼 */}
-      <Button
-        variant="destructive"
-        onClick={onDelete}
-        className="w-full text-xs"
-        data-testid="panel-delete-button"
-      >
-        도메인 삭제
-      </Button>
-    </Card>
-  );
-}
-
-// ─── 메인 페이지 ────────────────────────────────────────────────
+// ─── 메인 페이지 ─────────────────────────────────────────────────
 
 export function DomainsPage() {
-  const { data: domains = [], isLoading, error } = useDomains();
-  const deleteDomain = useDeleteDomain();
-  const [selectedHost, setSelectedHost] = useState<string | null>(null);
+  // 필터 상태
+  const [filter, setFilter] = useState<DomainsFilter>({});
+
+  // 선택된 호스트 (일괄 작업용)
+  const [selectedHosts, setSelectedHosts] = useState<Set<string>>(new Set());
+
+  // 다이얼로그 표시 상태
   const [showAddDialog, setShowAddDialog] = useState(false);
+  const [showBulkAddDialog, setShowBulkAddDialog] = useState(false);
+  const [showBulkDeleteDialog, setShowBulkDeleteDialog] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
-  const selectedDomain = domains.find((d) => d.host === selectedHost) ?? null;
+  // 데이터 훅
+  const { data: domains, isLoading, isError } = useDomains(filter);
+  const toggleMutation = useToggleDomain();
+  const purgeMutation = usePurgeDomain();
+  const deleteMutation = useDeleteDomain();
 
+  // 단건 삭제 확인
   async function handleDeleteConfirm() {
     if (!deleteTarget) return;
     try {
-      await deleteDomain.mutateAsync(deleteTarget);
+      await deleteMutation.mutateAsync(deleteTarget);
       toast.success(`${deleteTarget} 도메인이 삭제되었습니다.`);
-      if (selectedHost === deleteTarget) setSelectedHost(null);
+      // 삭제된 호스트 선택 해제
+      setSelectedHosts((prev) => {
+        const next = new Set(prev);
+        next.delete(deleteTarget);
+        return next;
+      });
     } catch {
       toast.error('도메인 삭제에 실패했습니다.');
     }
     setDeleteTarget(null);
   }
 
+  // 일괄 삭제 성공 후 선택 초기화
+  function handleBulkDeleteSuccess() {
+    setSelectedHosts(new Set());
+  }
+
   return (
-    <div className="flex flex-col h-full">
-      {/* 헤더 — AppLayout 이 p-6 을 이미 제공하므로 추가 수평 패딩 없음 */}
-      <div className="flex items-center justify-between pb-4">
-        <div>
-          <h2 className="text-2xl font-semibold tracking-tight">도메인 관리</h2>
-          <p className="text-muted-foreground mt-1 text-sm">
-            등록된 도메인에 대해 DNS CDN IP 반환 + HTTPS 프록시 + 캐시가 활성화됩니다.
-          </p>
-        </div>
-        <Button onClick={() => setShowAddDialog(true)} data-testid="add-domain-button">
-          + 도메인 추가
-        </Button>
+    <div className="flex flex-col gap-4 h-full">
+      {/* 페이지 헤더 */}
+      <div>
+        <h2 className="text-2xl font-semibold tracking-tight">도메인 관리</h2>
+        <p className="text-muted-foreground mt-1 text-sm">
+          등록된 도메인에 대해 DNS CDN IP 반환 + HTTPS 프록시 + 캐시가 활성화됩니다.
+        </p>
       </div>
 
-      {/* 본문: 테이블 + 사이드 패널 */}
-      <div className="flex flex-1 overflow-hidden gap-4">
-        {/* 테이블 Card */}
-        <Card className="flex-1 overflow-auto">
-          <CardHeader><CardTitle>도메인 목록</CardTitle></CardHeader>
-          <CardContent className="p-0">
-            {isLoading && (
-              <div className="p-6 space-y-3">
-                {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}
-              </div>
-            )}
-            {error && (
-              <p className="p-6 text-sm text-destructive">도메인 목록을 불러오지 못했습니다.</p>
-            )}
-            {!isLoading && !error && domains.length === 0 && (
-              <div className="flex flex-col items-center gap-2 py-12 text-muted-foreground" data-testid="domains-empty">
-                <Globe size={36} className="opacity-30" />
-                <p className="text-sm">등록된 도메인이 없습니다.</p>
-                <p className="text-xs">우측 상단 "+ 도메인 추가" 버튼으로 첫 번째 도메인을 등록하세요.</p>
-              </div>
-            )}
-            {domains.length > 0 && (
-              <Table data-testid="domains-table">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>도메인</TableHead>
-                    <TableHead>원본 URL</TableHead>
-                    <TableHead>등록일</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {domains.map((domain) => (
-                    <TableRow
-                      key={domain.host}
-                      onClick={() =>
-                        setSelectedHost(selectedHost === domain.host ? null : domain.host)
-                      }
-                      className={`cursor-pointer hover:bg-muted/30 ${
-                        selectedHost === domain.host ? 'bg-accent' : ''
-                      }`}
-                      data-testid={`domain-row-${domain.host}`}
-                    >
-                      <TableCell className="font-mono font-medium">{domain.host}</TableCell>
-                      <TableCell className="text-muted-foreground truncate max-w-xs">
-                        {domain.origin}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground text-xs">
-                        {new Date(domain.created_at * 1000).toLocaleDateString('ko-KR')}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
+      {/* 요약 카드 4개 */}
+      <DomainSummaryCards />
 
-        {/* 사이드 패널 */}
-        {selectedDomain && (
-          <SidePanel
-            domain={selectedDomain}
-            onDelete={() => setDeleteTarget(selectedDomain.host)}
-            onClose={() => setSelectedHost(null)}
-          />
-        )}
-      </div>
+      {/* 경고 배너 (알림 있을 때만 표시) */}
+      <DomainAlertBanner />
 
-      {/* 추가 다이얼로그 */}
+      {/* 툴바 — 추가/일괄 버튼 + 검색/필터 */}
+      <DomainToolbar
+        filter={filter}
+        onFilterChange={setFilter}
+        selectedCount={selectedHosts.size}
+        onAddClick={() => setShowAddDialog(true)}
+        onBulkAddClick={() => setShowBulkAddDialog(true)}
+        onBulkDeleteClick={() => setShowBulkDeleteDialog(true)}
+      />
+
+      {/* 도메인 테이블 */}
+      <Card className="flex-1 overflow-auto">
+        <CardHeader><CardTitle>도메인 목록</CardTitle></CardHeader>
+        <CardContent className="p-0">
+          {isError ? (
+            <p className="py-16 text-center text-sm text-destructive" data-testid="domains-error">
+              도메인 목록을 불러오지 못했습니다.
+            </p>
+          ) : (
+            <DomainTable
+              domains={domains}
+              isLoading={isLoading}
+              selectedHosts={selectedHosts}
+              onSelectChange={setSelectedHosts}
+              onToggle={(host) => toggleMutation.mutate(host)}
+              onPurge={(host) => purgeMutation.mutate(host)}
+              onDelete={(host) => setDeleteTarget(host)}
+            />
+          )}
+        </CardContent>
+      </Card>
+
+      {/* 도메인 추가 다이얼로그 */}
       <Dialog open={showAddDialog} onClose={() => setShowAddDialog(false)}>
         <AddDomainDialog onClose={() => setShowAddDialog(false)} />
       </Dialog>
 
-      {/* 삭제 확인 다이얼로그 */}
+      {/* 단건 삭제 확인 다이얼로그 */}
       <AlertDialog open={!!deleteTarget} onClose={() => setDeleteTarget(null)}>
         {deleteTarget && (
           <DeleteConfirmDialog
             host={deleteTarget}
             onConfirm={handleDeleteConfirm}
             onCancel={() => setDeleteTarget(null)}
-            isPending={deleteDomain.isPending}
+            isPending={deleteMutation.isPending}
           />
         )}
       </AlertDialog>
+
+      {/* 일괄 추가 다이얼로그 */}
+      <DomainBulkAddDialog
+        open={showBulkAddDialog}
+        onOpenChange={setShowBulkAddDialog}
+      />
+
+      {/* 일괄 삭제 확인 다이얼로그 */}
+      <DomainBulkDeleteDialog
+        open={showBulkDeleteDialog}
+        onOpenChange={setShowBulkDeleteDialog}
+        hosts={[...selectedHosts]}
+        onSuccess={handleBulkDeleteSuccess}
+      />
     </div>
   );
 }
