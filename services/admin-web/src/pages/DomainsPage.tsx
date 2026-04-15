@@ -20,7 +20,7 @@ import { Input } from '../components/ui/input';
 import { Dialog, DialogContent, DialogTitle } from '../components/ui/dialog';
 import { AlertDialog, AlertDialogContent, AlertDialogTitle } from '../components/ui/alert-dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
-import { Card, CardContent } from '../components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Skeleton } from '../components/ui/skeleton';
 
 // ─── 추가 다이얼로그 ─────────────────────────────────────────────
@@ -287,6 +287,7 @@ export function DomainsPage() {
       <div className="flex flex-1 overflow-hidden gap-4">
         {/* 테이블 Card */}
         <Card className="flex-1 overflow-auto">
+          <CardHeader><CardTitle>도메인 목록</CardTitle></CardHeader>
           <CardContent className="p-0">
             {isLoading && (
               <div className="p-6 space-y-3">

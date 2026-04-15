@@ -1,7 +1,6 @@
 /** 실시간 로그 뷰어 — 서비스 선택, 레벨 필터, 자동 스크롤 */
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
-import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { ScrollArea } from '../ui/scroll-area';
 import {
@@ -26,34 +25,18 @@ const SERVICES = [
 /** 레벨 필터 옵션 */
 const LEVELS = ['all', 'ERROR', 'WARN', 'INFO', 'DEBUG'] as const;
 
-/** 레벨별 Badge 색상 매핑 */
-function levelBadge(level: LogLine['level']) {
-  switch (level) {
-    case 'ERROR':
-      return (
-        <Badge variant="destructive" className="text-xs font-mono shrink-0">
-          ERR
-        </Badge>
-      );
-    case 'WARN':
-      return (
-        <Badge variant="warning" className="text-xs font-mono shrink-0">
-          WRN
-        </Badge>
-      );
-    case 'DEBUG':
-      return (
-        <Badge variant="outline" className="text-xs font-mono shrink-0 text-muted-foreground">
-          DBG
-        </Badge>
-      );
-    default:
-      return (
-        <Badge variant="outline" className="text-xs font-mono shrink-0">
-          INF
-        </Badge>
-      );
-  }
+/** 레벨별 경량 라벨 — 로그 인라인용 */
+const LEVEL_STYLE: Record<string, string> = {
+  ERROR: 'text-destructive font-semibold',
+  WARN: 'text-warning font-semibold',
+  DEBUG: 'text-muted-foreground',
+  INFO: 'text-info',
+};
+
+function levelLabel(level: LogLine['level']) {
+  const style = LEVEL_STYLE[level] ?? LEVEL_STYLE.INFO;
+  const label = level === 'ERROR' ? 'ERR' : level === 'WARN' ? 'WRN' : level === 'DEBUG' ? 'DBG' : 'INF';
+  return <span className={`font-mono text-[10px] w-7 shrink-0 ${style}`}>{label}</span>;
 }
 
 /** 타임스탬프를 HH:MM:SS 형식으로 포맷 */
@@ -176,7 +159,7 @@ export function LogViewer() {
               filteredLines.map((line, i) => (
                 <div key={`${line.timestamp}-${i}`} className="flex gap-2 py-0.5 hover:bg-muted/50">
                   <span className="text-muted-foreground shrink-0">{formatTime(line.timestamp)}</span>
-                  {levelBadge(line.level)}
+                  {levelLabel(line.level)}
                   <span className="break-all">{line.message}</span>
                 </div>
               ))
