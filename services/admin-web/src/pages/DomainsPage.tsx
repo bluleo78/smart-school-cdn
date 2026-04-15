@@ -221,7 +221,7 @@ function SidePanel({ domain, onDelete, onClose }: { domain: Domain; onDelete: ()
           <div
             className={`rounded text-xs px-2 py-1.5 ${
               testResult.success && testResult.status_code < 400
-                ? 'bg-green-50 text-green-800'
+                ? 'bg-success-subtle text-success'
                 : 'bg-destructive/10 text-destructive'
             }`}
             data-testid="panel-test-result"
