@@ -32,7 +32,7 @@ export function StorageUsageCard() {
   const used = data?.total_size_bytes ?? 0;
   const max = data?.max_size_bytes ?? 1;
   const pct = max > 0 ? Math.min((used / max) * 100, 100) : 0;
-  const barColor = pct > 80 ? 'bg-destructive' : pct > 60 ? 'bg-amber-500' : 'bg-primary';
+  const barColor = pct > 80 ? 'bg-destructive' : pct > 60 ? 'bg-warning' : 'bg-primary';
 
   return (
     <Card data-testid="storage-usage-card">
