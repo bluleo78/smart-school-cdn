@@ -9,7 +9,7 @@ export function StorageUsageCard() {
 
   if (isLoading) {
     return (
-      <Card>
+      <Card className="h-full">
         <CardHeader><CardTitle>스토리지 사용량</CardTitle></CardHeader>
         <CardContent className="space-y-3">
           <Skeleton className="h-6 w-24" />
@@ -22,7 +22,7 @@ export function StorageUsageCard() {
 
   if (error) {
     return (
-      <Card>
+      <Card className="h-full">
         <CardHeader><CardTitle>스토리지 사용량</CardTitle></CardHeader>
         <CardContent><p className="text-sm text-destructive">연결 실패</p></CardContent>
       </Card>
@@ -35,7 +35,7 @@ export function StorageUsageCard() {
   const barColor = pct > 80 ? 'bg-destructive' : pct > 60 ? 'bg-warning' : 'bg-primary';
 
   return (
-    <Card data-testid="storage-usage-card">
+    <Card data-testid="storage-usage-card" className="h-full">
       <CardHeader><CardTitle>스토리지 사용량</CardTitle></CardHeader>
       <CardContent>
         <p className="text-lg font-bold mb-2">{formatBytes(used)}</p>

@@ -17,7 +17,7 @@ export function CacheHitRateChart() {
 
   if (isLoading) {
     return (
-      <Card>
+      <Card className="h-full">
         <CardHeader><CardTitle>캐시 히트율 추이</CardTitle></CardHeader>
         <CardContent>
           <Skeleton className="h-40 w-full" />
@@ -28,7 +28,7 @@ export function CacheHitRateChart() {
 
   if (error) {
     return (
-      <Card>
+      <Card className="h-full">
         <CardHeader><CardTitle>캐시 히트율 추이</CardTitle></CardHeader>
         <CardContent>
           <p className="text-sm text-destructive">연결 실패</p>
@@ -52,7 +52,7 @@ export function CacheHitRateChart() {
       : [{ time: '지금', hitRate: parseFloat((data?.hit_rate ?? 0).toFixed(1)) }];
 
   return (
-    <Card>
+    <Card className="h-full">
       <CardHeader><CardTitle>캐시 히트율 추이</CardTitle></CardHeader>
       <CardContent>
         <ResponsiveContainer width="100%" height={140}>

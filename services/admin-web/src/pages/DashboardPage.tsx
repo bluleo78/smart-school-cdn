@@ -26,11 +26,11 @@ export function DashboardPage() {
       </div>
 
       {/* 2행: 히트율 차트(2/3) + 스토리지(1/3) — 모바일 1열, 데스크탑 3열 */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-stretch">
+        <div className="lg:col-span-2 min-h-0">
           <CacheHitRateChart />
         </div>
-        <div>
+        <div className="min-h-0">
           <StorageUsageCard />
         </div>
       </div>
