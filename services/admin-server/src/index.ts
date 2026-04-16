@@ -18,6 +18,29 @@ import { logRoutes } from './routes/logs.js';
 // SQLite DB 초기화 — 앱 기동 시 1회 실행
 const db = new Database(process.env.DB_PATH || './data/admin.db');
 db.exec(DOMAIN_SCHEMA);
+
+// 마이그레이션: 기존 DB에 새 컬럼이 없으면 추가 (003-domain-enhanced)
+const existingCols = db.pragma('table_info(domains)').map((c: { name: string }) => c.name);
+if (!existingCols.includes('enabled')) db.exec('ALTER TABLE domains ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1');
+if (!existingCols.includes('description')) db.exec("ALTER TABLE domains ADD COLUMN description TEXT NOT NULL DEFAULT ''");
+if (!existingCols.includes('updated_at')) db.exec("ALTER TABLE domains ADD COLUMN updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))");
+
+// domain_stats 테이블 생성
+db.exec(`
+  CREATE TABLE IF NOT EXISTS domain_stats (
+    host TEXT NOT NULL,
+    timestamp INTEGER NOT NULL,
+    requests INTEGER NOT NULL DEFAULT 0,
+    cache_hits INTEGER NOT NULL DEFAULT 0,
+    cache_misses INTEGER NOT NULL DEFAULT 0,
+    bandwidth INTEGER NOT NULL DEFAULT 0,
+    avg_response_time INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (host, timestamp),
+    FOREIGN KEY (host) REFERENCES domains(host) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_domain_stats_ts ON domain_stats(timestamp);
+`);
+
 const domainRepo = new DomainRepository(db);
 
 // Rust 프록시 기본 도메인 시드 — 없으면 삽입, 있으면 무시
