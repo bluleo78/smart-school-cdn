@@ -50,6 +50,9 @@ const SORT_WHITELIST = new Set(['host', 'created_at', 'updated_at']);
 export class DomainRepository {
   constructor(private readonly db: Database) {}
 
+  /** DB 인스턴스 접근용 getter — 외부에서 직접 쿼리가 필요할 때 사용 */
+  get database(): Database { return this.db; }
+
   /** 도메인 등록 (이미 있으면 origin, description, updated_at 갱신) */
   upsert(host: string, origin: string, description?: string): void {
     this.db

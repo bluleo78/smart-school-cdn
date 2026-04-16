@@ -6,35 +6,10 @@ import { Skeleton } from '../../ui/skeleton';
 import { formatBytes } from '../../../lib/format';
 import { DomainInfoCards } from './DomainInfoCards';
 import { DomainQuickActions } from './DomainQuickActions';
+import { BarSparkline, DeltaBadge } from '../StatSparkline';
 
 interface Props {
   domain: Domain;
-}
-
-/** 바 스파크라인 — DomainSummaryCards와 동일한 스타일 */
-function BarSparkline({ values }: { values: number[] }) {
-  const max = Math.max(...values, 1);
-  return (
-    <div className="flex items-end gap-0.5 h-9">
-      {values.map((v, i) => (
-        <div
-          key={i}
-          className="w-[5px] rounded-sm bg-indigo-500 opacity-70"
-          style={{ height: `${Math.max(4, (v / max) * 36)}px` }}
-        />
-      ))}
-    </div>
-  );
-}
-
-/** 증감 배지 */
-function DeltaBadge({ delta, unit = '' }: { delta: number; unit?: string }) {
-  const positive = delta >= 0;
-  return (
-    <span className={`text-xs font-medium ${positive ? 'text-success' : 'text-destructive'}`}>
-      {positive ? '↑' : '↓'} {Math.abs(delta).toFixed(1)}{unit}
-    </span>
-  );
 }
 
 /** 요약 통계 카드 4개 */

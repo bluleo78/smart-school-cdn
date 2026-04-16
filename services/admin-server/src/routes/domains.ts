@@ -43,10 +43,8 @@ export async function domainRoutes(
   app: FastifyInstance,
   { domainRepo }: { domainRepo: DomainRepository },
 ) {
-  // DB 인스턴스는 DomainRepository 내부의 private db에서 꺼낼 수 없으므로
-  // domainRepo의 db에 직접 접근하기 위해 타입 캐스트를 사용한다
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const statsRepo = new DomainStatsRepository((domainRepo as any).db);
+  // DomainRepository.database getter를 통해 DB 인스턴스에 안전하게 접근
+  const statsRepo = new DomainStatsRepository(domainRepo.database);
 
   /** 전체 도메인 목록 조회 — q/enabled/sort 쿼리 파라미터 지원 */
   app.get<{ Querystring: { q?: string; enabled?: string; sort?: string } }>(
@@ -63,9 +61,45 @@ export async function domainRoutes(
 
   // NOTE: /summary, /bulk는 /:host 보다 먼저 등록해야 'summary'/'bulk'가 :host로 매칭되지 않음
 
-  /** 전체 도메인 요약 통계 (카드용) */
+  /** 전체 도메인 요약 통계 (카드용) — 프론트엔드 DomainSummary 타입에 맞게 집계 */
   app.get('/api/domains/summary', async () => {
-    return statsRepo.getSummaryAll();
+    const allDomains = domainRepo.findAll();
+    const total = allDomains.length;
+    const enabled = allDomains.filter((d) => d.enabled === 1).length;
+    const disabled = total - enabled;
+
+    // 전체 도메인의 per-host 통계를 집계하여 단일 요약 객체로 변환
+    const perHost = statsRepo.getSummaryAll();
+    const todayRequests = perHost.reduce((s, r) => s + r.today_requests, 0);
+    const todayCacheHits = perHost.reduce((s, r) => s + r.today_cache_hits, 0);
+    const todayBandwidth = perHost.reduce((s, r) => s + r.today_bandwidth, 0);
+    const cacheHitRate = todayRequests > 0 ? todayCacheHits / todayRequests : 0;
+
+    // hourly: 전체 도메인의 시간별 요청 합산 (최대 24개 버킷)
+    const maxBuckets = 24;
+    const hourlyRequests = Array<number>(maxBuckets).fill(0);
+    for (const r of perHost) {
+      const buckets = r.hourly.slice(-maxBuckets);
+      const offset = maxBuckets - buckets.length;
+      for (let i = 0; i < buckets.length; i++) {
+        hourlyRequests[offset + i] += buckets[i];
+      }
+    }
+
+    return {
+      total,
+      enabled,
+      disabled,
+      todayRequests,
+      todayRequestsDelta: 0,
+      cacheHitRate,
+      cacheHitRateDelta: 0,
+      todayBandwidth,
+      hourlyRequests,
+      hourlyCacheHitRate: Array<number>(maxBuckets).fill(0),
+      hourlyBandwidth: Array<number>(maxBuckets).fill(0),
+      alerts: [],
+    };
   });
 
   /** 도메인 일괄 추가 */
@@ -173,7 +207,8 @@ export async function domainRoutes(
       return reply.status(404).send({ error: '도메인을 찾을 수 없습니다.' });
     }
     try {
-      await axios.post(`${PROXY_ADMIN_URL}/cache/purge`, { host }, { timeout: 5000 });
+      // Proxy는 /domains/{host}/purge 엔드포인트를 노출함 (올바른 URL 사용)
+      await axios.post(`${PROXY_ADMIN_URL}/domains/${encodeURIComponent(host)}/purge`, {}, { timeout: 5000 });
       return reply.status(200).send({ ok: true });
     } catch (err) {
       return reply.status(502).send({
@@ -198,7 +233,33 @@ export async function domainRoutes(
         periodParam && (validPeriods as string[]).includes(periodParam)
           ? (periodParam as StatsPeriod)
           : '24h';
-      return statsRepo.getStats(host, period);
+      // getStats()의 snake_case + 배열 형태를 프론트엔드 DomainStats 타입으로 변환
+      const raw = statsRepo.getStats(host, period);
+      const labels = raw.timeseries.map((r) =>
+        period === '24h'
+          ? new Date(r.timestamp * 1000).toISOString().slice(11, 16) // "HH:MM"
+          : new Date(r.timestamp * 1000).toISOString().slice(0, 10),  // "YYYY-MM-DD"
+      );
+      return {
+        host,
+        period,
+        summary: {
+          totalRequests: raw.summary.total_requests,
+          requestsDelta: 0,
+          cacheHitRate: raw.summary.hit_rate,
+          cacheHitRateDelta: 0,
+          bandwidth: raw.summary.total_bandwidth,
+          avgResponseTime: raw.summary.avg_response_time,
+          responseTimeDelta: 0,
+        },
+        timeseries: {
+          labels,
+          hits: raw.timeseries.map((r) => r.cache_hits),
+          misses: raw.timeseries.map((r) => r.cache_misses),
+          bandwidth: raw.timeseries.map((r) => r.bandwidth),
+          responseTime: raw.timeseries.map((r) => r.avg_response_time),
+        },
+      };
     },
   );
 
@@ -218,8 +279,7 @@ export async function domainRoutes(
 
     // access_logs 테이블이 없을 수 있으므로 try/catch로 빈 배열 폴백
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const db = (domainRepo as any).db;
+      const db = domainRepo.database;
       const conditions: string[] = ['host = ?'];
       const params: (string | number)[] = [host];
 

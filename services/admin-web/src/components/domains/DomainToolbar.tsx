@@ -28,78 +28,73 @@ export function DomainToolbar({
   onBulkAddClick,
   onBulkDeleteClick,
 }: DomainToolbarProps) {
-  // 검색 입력값은 로컬 상태로 관리, 300ms debounce 후 부모에 전달
-  const [searchValue, setSearchValue] = useState(filter.q ?? '');
+  // debounce 중인지 추적 — debounce 중이면 로컬 입력값 사용, 아니면 filter.q 사용
+  const [localInput, setLocalInput] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // filter.q 가 외부에서 리셋될 경우 동기화
-  const filterQ = filter.q ?? '';
-  if (searchValue !== filterQ && filterQ === '') {
-    setSearchValue('');
-  }
+  // 표시할 값: debounce 중이면 로컬, 아니면 부모 filter에서 파생
+  const searchValue = localInput ?? (filter.q ?? '');
 
   const handleSearchChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const value = e.target.value;
-      setSearchValue(value);
+      setLocalInput(value);
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
         onFilterChange({ ...filter, q: value || undefined });
+        setLocalInput(null); // debounce 완료 → 부모 filter에 위임
       }, 300);
     },
     [filter, onFilterChange],
   );
 
-  const handleStatusChange = useCallback(
-    (value: string) => {
-      const enabled =
-        value === 'active' ? true : value === 'inactive' ? false : undefined;
-      onFilterChange({ ...filter, enabled });
-    },
-    [filter, onFilterChange],
-  );
-
-  // 현재 상태 Select 값 계산
-  const statusValue =
-    filter.enabled === true ? 'active' : filter.enabled === false ? 'inactive' : 'all';
+  /** 상태 필터 변경 */
+  function handleEnabledChange(value: string) {
+    onFilterChange({
+      ...filter,
+      enabled: value === 'all' ? undefined : value === 'true',
+    });
+  }
 
   return (
-    <div className="flex items-center justify-between gap-3 flex-wrap">
+    <div className="flex items-center justify-between gap-3">
       {/* 왼쪽: 액션 버튼 */}
       <div className="flex items-center gap-2">
         <Button onClick={onAddClick} data-testid="toolbar-add-btn">
           + 도메인 추가
         </Button>
-        <Button variant="outline" onClick={onBulkAddClick} data-testid="toolbar-bulk-add-btn">
+        <Button variant="outline" onClick={onBulkAddClick}>
           일괄 추가
         </Button>
         <Button
           variant="outline"
           onClick={onBulkDeleteClick}
           disabled={selectedCount === 0}
-          data-testid="toolbar-bulk-delete-btn"
         >
-          일괄 삭제{selectedCount > 0 ? ` (${selectedCount})` : ''}
+          일괄 삭제{selectedCount > 0 && ` (${selectedCount})`}
         </Button>
       </div>
 
-      {/* 오른쪽: 검색 + 상태 필터 */}
+      {/* 오른쪽: 검색 + 필터 */}
       <div className="flex items-center gap-2">
         <Input
+          placeholder="도메인 검색..."
           value={searchValue}
           onChange={handleSearchChange}
-          placeholder="도메인 검색…"
           className="w-52"
           data-testid="domain-search"
         />
-        <Select value={statusValue} onValueChange={handleStatusChange}>
-          <SelectTrigger className="w-28" data-testid="domain-status-select">
+        <Select
+          value={filter.enabled === undefined ? 'all' : String(filter.enabled)}
+          onValueChange={handleEnabledChange}
+        >
+          <SelectTrigger className="w-28">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">전체</SelectItem>
-            <SelectItem value="active">활성</SelectItem>
-            <SelectItem value="inactive">비활성</SelectItem>
+            <SelectItem value="true">활성</SelectItem>
+            <SelectItem value="false">비활성</SelectItem>
           </SelectContent>
         </Select>
       </div>

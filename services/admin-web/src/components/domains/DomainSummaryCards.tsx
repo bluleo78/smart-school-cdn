@@ -3,32 +3,7 @@ import { useDomainSummary } from '../../hooks/useDomainSummary';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Skeleton } from '../ui/skeleton';
 import { formatBytes } from '../../lib/format';
-
-/** 바 스파크라인 — 높이 36px, 바 너비 5px */
-function BarSparkline({ values }: { values: number[] }) {
-  const max = Math.max(...values, 1);
-  return (
-    <div className="flex items-end gap-0.5 h-9">
-      {values.map((v, i) => (
-        <div
-          key={i}
-          className="w-[5px] rounded-sm bg-indigo-500 opacity-70"
-          style={{ height: `${Math.max(4, (v / max) * 36)}px` }}
-        />
-      ))}
-    </div>
-  );
-}
-
-/** 증감 텍스트 (양수 초록, 음수 빨강) */
-function DeltaBadge({ delta, unit = '' }: { delta: number; unit?: string }) {
-  const positive = delta >= 0;
-  return (
-    <span className={`text-xs font-medium ${positive ? 'text-success' : 'text-destructive'}`}>
-      {positive ? '↑' : '↓'} {Math.abs(delta).toFixed(1)}{unit}
-    </span>
-  );
-}
+import { BarSparkline, DeltaBadge } from './StatSparkline';
 
 export function DomainSummaryCards() {
   const { data, isLoading } = useDomainSummary();
