@@ -13,6 +13,12 @@ members = [
 version = "0.1.0"
 edition = "2024"
 
+# 릴리즈 빌드 최적화 — 빌드 속도와 바이너리 성능 균형
+[profile.release]
+lto = "thin"          # thin LTO — fat LTO 대비 빌드 2~3배 빠르면서 대부분의 최적화 유지
+codegen-units = 16    # 병렬 코드 생성 유닛 — 빌드 속도 향상 (기본값)
+strip = true          # 디버그 심볼 제거 — 바이너리 크기 축소
+
 [workspace.dependencies]
 tokio = { version = "1", features = ["full"] }
 axum = "0.8"

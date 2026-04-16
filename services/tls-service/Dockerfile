@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # === Stage 1: Build ===
 FROM rust:1-alpine AS build
 # musl-dev: alpine에서 C 링킹에 필요
@@ -7,15 +8,18 @@ WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY crates/ ./crates/
 COPY services/ ./services/
-RUN cargo build --release --package tls-service
+# BuildKit 캐시 마운트 — cargo registry + target 디렉토리를 빌드간 캐시하여 재빌드 속도 대폭 향상
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/app/target \
+    cargo build --release --package tls-service \
+    && cp /app/target/release/tls-service /app/tls-service-bin
 
 # === Stage 2: Runtime ===
-FROM debian:bookworm-slim
+FROM alpine:3
 # curl: HEALTHCHECK 용
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
-    && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache ca-certificates curl
 WORKDIR /app
-COPY --from=build /app/target/release/tls-service ./tls-service
+COPY --from=build /app/tls-service-bin ./tls-service
 # 50052: gRPC, 8081: HTTP 헬스체크
 EXPOSE 50052 8081
 CMD ["./tls-service"]
