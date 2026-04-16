@@ -1,4 +1,4 @@
-/// 도메인 설정 탭 — Origin 편집, TLS 정보, 위험 영역(삭제)
+/// 도메인 설정 탭 — Origin 편집, 캐시 퍼지, 최적화 프로파일, TLS 정보, 위험 영역(삭제)
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import type { Domain } from '../../../api/domain-types';
@@ -9,6 +9,8 @@ import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
 import { Label } from '../../ui/label';
 import { Dialog, DialogContent, DialogTitle } from '../../ui/dialog';
+import { DomainCacheSection } from './DomainCacheSection';
+import { DomainOptimizerSection } from './DomainOptimizerSection';
 
 interface Props {
   domain: Domain;
@@ -22,7 +24,13 @@ export function DomainSettingsTab({ domain }: Props) {
       {/* 1. Origin 설정 */}
       <OriginSection domain={domain} />
 
-      {/* 2. TLS / 인증서 */}
+      {/* 2. 캐시 퍼지 */}
+      <DomainCacheSection host={domain.host} />
+
+      {/* 3. 최적화 프로파일 */}
+      <DomainOptimizerSection host={domain.host} />
+
+      {/* 4. TLS / 인증서 */}
       <TlsSection />
 
       {/* 3. 위험 영역 */}

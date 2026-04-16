@@ -1,4 +1,4 @@
-/// 도메인 통계 탭 — 기간 선택 + HIT/MISS 바 차트 + 대역폭/응답시간 에어리어 차트 + 로그 테이블
+/// 도메인 통계 탭 — 기간 선택 + HIT/MISS 바 차트 + 대역폭/응답시간 에어리어 차트 + 인기 콘텐츠 + 최적화 절감 + 로그 테이블
 import { useState } from 'react';
 import { useDomainStats } from '../../../hooks/useDomainStats';
 import { formatBytes } from '../../../lib/format';
@@ -6,6 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { Button } from '../../ui/button';
 import { Skeleton } from '../../ui/skeleton';
 import { DomainLogTable } from './DomainLogTable';
+import { DomainPopularContent } from './DomainPopularContent';
+import { DomainOptimizationStats } from './DomainOptimizationStats';
 
 type Period = '24h' | '7d' | '30d';
 
@@ -81,6 +83,12 @@ export function DomainStatsTab({ host }: Props) {
           </Card>
         </div>
       ) : null}
+
+      {/* 인기 콘텐츠 */}
+      <DomainPopularContent host={host} />
+
+      {/* 최적화 절감 통계 */}
+      <DomainOptimizationStats host={host} />
 
       {/* 하단: 요청 로그 테이블 */}
       <Card variant="glass">

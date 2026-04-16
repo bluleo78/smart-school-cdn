@@ -6,6 +6,8 @@ import { BandwidthSavedCard } from '../components/dashboard/BandwidthSavedCard';
 import { StorageUsageCard } from '../components/dashboard/StorageUsageCard';
 import { CacheHitRateChart } from '../components/dashboard/CacheHitRateChart';
 import { EntryCountCard } from '../components/dashboard/EntryCountCard';
+import { CacheStatsCard } from '../components/dashboard/CacheStatsCard';
+import { PopularContentCard } from '../components/dashboard/PopularContentCard';
 
 export function DashboardPage() {
   return (
@@ -35,7 +37,13 @@ export function DashboardPage() {
         </div>
       </div>
 
-      {/* 3행: 요청 로그 */}
+      {/* 3행: 캐시 통계 + 인기 콘텐츠 */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <CacheStatsCard />
+        <PopularContentCard />
+      </div>
+
+      {/* 4행: 요청 로그 */}
       <RequestLogTable />
     </div>
   );

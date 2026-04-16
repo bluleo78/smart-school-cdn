@@ -10,6 +10,7 @@ async function mockDashboardApis(page: Parameters<typeof mockApi>[0]) {
   await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
   await mockApi(page, 'GET', '/proxy/requests', []);
   await mockApi(page, 'GET', '/cache/stats', createCacheStats());
+  await mockApi(page, 'GET', '/cache/popular', createPopularContent());
 }
 
 // ─── 대시보드 캐시 카드 ────────────────────────────────────────
@@ -45,8 +46,8 @@ test.describe('대시보드 — 스토리지 사용량 카드', () => {
     await page.goto('/');
     await expect(page.getByTestId('storage-usage-card')).toBeVisible();
     await expect(page.getByTestId('storage-bar')).toBeVisible();
-    // 4_509_715_456 bytes = 4.2 GB
-    await expect(page.getByText('4.2 GB', { exact: false })).toBeVisible();
+    // 4_509_715_456 bytes = 4.2 GB — storage-usage-card 안에서 확인
+    await expect(page.getByTestId('storage-usage-card').getByText('4.2 GB', { exact: false })).toBeVisible();
   });
 
   test('사용률 퍼센트가 표시된다', async ({ page }) => {
@@ -76,9 +77,10 @@ test.describe('대시보드 — 캐시 항목 수 카드', () => {
   test('항목 수가 표시된다', async ({ page }) => {
     await mockDashboardApis(page);
     await page.goto('/');
-    // entry_count: 3842 → "3,842"
-    await expect(page.getByText('3,842')).toBeVisible();
-    await expect(page.getByText('저장된 URL')).toBeVisible();
+    // entry_count: 3842 → "3,842" — 기존 EntryCountCard에서 확인
+    const entryCard = page.getByText('저장된 URL').locator('..');
+    await expect(entryCard).toBeVisible();
+    await expect(entryCard.getByText('3,842')).toBeVisible();
   });
 });
 
