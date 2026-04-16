@@ -1,12 +1,19 @@
 /** 도메인 상세 탭 컨테이너
- * - overview: 개요 (기본)
+ * - overview: 개요
  * - stats: 통계
  * - settings: 설정
- * 각 탭 내용은 추후 구현 예정 — 현재는 플레이스홀더
  */
+import type { Domain } from '../../../api/domain-types';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../../ui/tabs';
+import { DomainOverviewTab } from './DomainOverviewTab';
+import { DomainStatsTab } from './DomainStatsTab';
+import { DomainSettingsTab } from './DomainSettingsTab';
 
-export function DomainDetailTabs() {
+interface Props {
+  domain: Domain;
+}
+
+export function DomainDetailTabs({ domain }: Props) {
   return (
     <Tabs defaultValue="overview" data-testid="domain-detail-tabs">
       <TabsList>
@@ -16,18 +23,15 @@ export function DomainDetailTabs() {
       </TabsList>
 
       <TabsContent value="overview">
-        {/* 개요 탭 — Task 12에서 구현 예정 */}
-        <div data-testid="domain-overview-tab">Overview 탭 (구현 예정)</div>
+        <DomainOverviewTab domain={domain} />
       </TabsContent>
 
       <TabsContent value="stats">
-        {/* 통계 탭 — Task 13에서 구현 예정 */}
-        <div data-testid="domain-stats-tab">통계 탭 (구현 예정)</div>
+        <DomainStatsTab host={domain.host} />
       </TabsContent>
 
       <TabsContent value="settings">
-        {/* 설정 탭 — Task 14에서 구현 예정 */}
-        <div data-testid="domain-settings-tab">설정 탭 (구현 예정)</div>
+        <DomainSettingsTab domain={domain} />
       </TabsContent>
     </Tabs>
   );

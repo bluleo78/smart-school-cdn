@@ -37,7 +37,7 @@ function DomainDetailPageInner({ host }: { host: string }) {
   return (
     <div className="flex flex-col h-full gap-4">
       <DomainDetailHeader domain={domain} />
-      <DomainDetailTabs />
+      <DomainDetailTabs domain={domain} />
     </div>
   );
 }
