@@ -86,7 +86,7 @@ export function DomainDetailHeader({ domain }: Props) {
         {/* 캐시 퍼지 */}
         <Button
           variant="default"
-          size="sm"
+
           onClick={handlePurge}
           disabled={purgeDomain.isPending}
           data-testid="domain-purge-button"
@@ -98,7 +98,7 @@ export function DomainDetailHeader({ domain }: Props) {
         {/* 활성화/비활성화 토글 */}
         <Button
           variant="outline"
-          size="sm"
+
           onClick={handleToggle}
           disabled={toggleDomain.isPending}
           className="border-warning/50 text-warning hover:bg-warning/10"
@@ -111,7 +111,7 @@ export function DomainDetailHeader({ domain }: Props) {
         {/* 삭제 */}
         <Button
           variant="destructive"
-          size="sm"
+
           onClick={() => setShowDeleteDialog(true)}
           data-testid="domain-delete-button"
         >
@@ -131,14 +131,14 @@ export function DomainDetailHeader({ domain }: Props) {
           <div className="flex justify-end gap-2 pt-2">
             <Button
               variant="outline"
-              size="sm"
+    
               onClick={() => setShowDeleteDialog(false)}
             >
               취소
             </Button>
             <Button
               variant="destructive"
-              size="sm"
+    
               onClick={handleDeleteConfirm}
               disabled={deleteDomain.isPending}
               data-testid="domain-delete-confirm"
