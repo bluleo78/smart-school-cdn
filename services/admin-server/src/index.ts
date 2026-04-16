@@ -20,7 +20,7 @@ const db = new Database(process.env.DB_PATH || './data/admin.db');
 db.exec(DOMAIN_SCHEMA);
 
 // 마이그레이션: 기존 DB에 새 컬럼이 없으면 추가 (003-domain-enhanced)
-const existingCols = db.pragma('table_info(domains)').map((c: { name: string }) => c.name);
+const existingCols = (db.pragma('table_info(domains)') as Array<{ name: string }>).map((c) => c.name);
 if (!existingCols.includes('enabled')) db.exec('ALTER TABLE domains ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1');
 if (!existingCols.includes('description')) db.exec("ALTER TABLE domains ADD COLUMN description TEXT NOT NULL DEFAULT ''");
 if (!existingCols.includes('updated_at')) db.exec("ALTER TABLE domains ADD COLUMN updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))");
