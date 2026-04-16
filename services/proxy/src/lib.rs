@@ -16,6 +16,7 @@ use axum::body::Body;
 use axum::extract::State;
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri};
 use axum::response::{IntoResponse, Json, Response};
+use axum::extract::Path;
 use axum::routing::{delete, get};
 use axum::Router;
 use state::{RequestLog, SharedState};
@@ -90,6 +91,7 @@ pub fn build_admin_router(
         .route("/tls/ca", get(tls_ca_handler))
         .route("/tls/certificates", get(tls_certificates_handler))
         .route("/domains", axum::routing::post(update_domains_handler))
+        .route("/domains/{host}/purge", axum::routing::post(domain_purge_handler))
         .with_state(admin_state)
 }
 
@@ -798,7 +800,13 @@ async fn tls_certificates_handler(State(admin): State<AdminState>) -> impl IntoR
 struct DomainEntry {
     host: String,
     origin: String,
+    /// 도메인 활성화 여부 (0=비활성, 1=활성, 기본값 1)
+    #[serde(default = "default_enabled")]
+    enabled: i32,
 }
+
+/// enabled 필드 기본값 — 명시하지 않으면 활성 상태
+fn default_enabled() -> i32 { 1 }
 
 /// POST /domains 요청 바디 — 전체 도메인 목록
 #[derive(serde::Deserialize)]
@@ -816,7 +824,10 @@ async fn update_domains_handler(
         let mut map = admin.domain_map.write().await;
         map.clear();
         for entry in &payload.domains {
-            map.insert(entry.host.clone(), entry.origin.clone());
+            // enabled=0인 도메인은 맵에서 제외
+            if entry.enabled == 1 {
+                map.insert(entry.host.clone(), entry.origin.clone());
+            }
         }
         tracing::info!(count = map.len(), "도메인 맵 갱신");
     }
@@ -826,6 +837,27 @@ async fn update_domains_handler(
         tls.prefetch_cert(&entry.host).await;
     }
     StatusCode::OK
+}
+
+/// POST /domains/:host/purge — 특정 도메인의 캐시 퍼지
+/// axum Path 추출기가 자동으로 URL 디코딩을 처리한다
+async fn domain_purge_handler(
+    State(admin): State<AdminState>,
+    Path(host): Path<String>,
+) -> Response {
+    // L1 메모리 캐시 전체 무효화 (도메인 단위 키 분리가 없으므로 invalidate_all)
+    admin.memory_cache.invalidate_all();
+
+    // L2 디스크 캐시 — gRPC 또는 인메모리 맵에서 도메인 퍼지
+    let mut storage = admin.storage.lock().await;
+    let (purged_count, freed_bytes) = storage.purge_domain(&host).await;
+
+    Json(serde_json::json!({
+        "success": true,
+        "host": host,
+        "purged_count": purged_count,
+        "freed_bytes": freed_bytes,
+    })).into_response()
 }
 
 #[cfg(test)]
