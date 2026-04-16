@@ -46,4 +46,18 @@ export async function tlsRoutes(app: FastifyInstance) {
       return reply.status(502).send({ error: 'tls-service에 연결할 수 없습니다.' });
     }
   });
+
+  /** 도메인 TLS 인증서 갱신 — tls-service gRPC에 동기화 요청 */
+  app.post<{ Params: { host: string } }>('/api/tls/renew/:host', async (request, reply) => {
+    const host = decodeURIComponent(request.params.host);
+    try {
+      await app.tlsClient.syncDomains([{ host, origin: '' }]);
+      return { success: true, host };
+    } catch (err) {
+      return reply.status(502).send({
+        error: 'TLS 갱신 실패',
+        detail: (err as Error).message,
+      });
+    }
+  });
 }

@@ -167,7 +167,13 @@ export async function domainRoutes(
         return reply.status(400).send({ error: 'host와 origin은 필수 항목입니다.' });
       }
       domainRepo.upsert(host, origin);
-      await syncToProxy(domainRepo);
+      const synced = await syncToProxy(domainRepo);
+      if (!synced) {
+        return reply.status(502).send({
+          error: 'Proxy 동기화 실패',
+          domain: domainRepo.findByHost(host),
+        });
+      }
       await fanOutGrpc(app, domainRepo);
       // 기본 최적화 프로파일 생성 — 실패해도 도메인 추가는 성공 처리
       try {
@@ -223,6 +229,32 @@ export async function domainRoutes(
     }
     await fanOutGrpc(app, domainRepo);
     return toggled;
+  });
+
+  /** 도메인 강제 동기화 — Proxy + TLS + DNS 서비스에 전체 목록 재전송 */
+  app.post<{ Params: { host: string } }>('/api/domains/:host/sync', async (request, reply) => {
+    const host = decodeURIComponent(request.params.host);
+    const domain = domainRepo.findByHost(host);
+    if (!domain) {
+      return reply.status(404).send({ error: '도메인을 찾을 수 없습니다.' });
+    }
+
+    const results = { proxy: false, tls: false, dns: false };
+    const proxyOk = await syncToProxy(domainRepo);
+    results.proxy = proxyOk;
+    try {
+      const domains = domainRepo.findAll({ enabled: true }).map(d => ({ host: d.host, origin: d.origin }));
+      await app.tlsClient.syncDomains(domains);
+      results.tls = true;
+    } catch { /* 실패 기록 */ }
+    try {
+      const domains = domainRepo.findAll({ enabled: true }).map(d => ({ host: d.host, origin: d.origin }));
+      await app.dnsClient.syncDomains(domains);
+      results.dns = true;
+    } catch { /* 실패 기록 */ }
+
+    const allOk = results.proxy && results.tls && results.dns;
+    return reply.status(allOk ? 200 : 207).send(results);
   });
 
   /** 도메인 캐시 퍼지 — Proxy에 POST 요청 */
@@ -327,7 +359,7 @@ export async function domainRoutes(
 
       const rows = db
         .prepare(
-          `SELECT * FROM access_logs ${where} ORDER BY created_at DESC LIMIT ?`,
+          `SELECT timestamp, status_code, cache_status, path, size FROM access_logs ${where} ORDER BY timestamp DESC LIMIT ?`,
         )
         .all(...params);
 
