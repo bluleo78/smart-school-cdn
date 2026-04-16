@@ -386,6 +386,41 @@
 
 ---
 
+## Phase 11: 기능 완성 + 운영 품질 향상 ✅
+
+> 목표: 통계 파이프라인 구축, TLS 실시간 상태, delta 계산, Quick Actions 활성화, E2E 커버리지 복원
+
+### 11-1. 통계 파이프라인 (Proxy → Admin pull)
+- [x] Proxy: 도메인별 AtomicU64 카운터 + GET /stats 엔드포인트 (swap 리셋)
+- [x] Admin: 1분 간격 폴링 타이머 (stats-collector.ts) → domain_stats 저장
+- [x] SQLite PRAGMA foreign_keys = ON 활성화
+
+### 11-2. Delta 계산
+- [x] getSummaryAll(): 전일 대비 요청 수/히트율 변화율 계산
+- [x] getStats(): 이전 동일 기간 대비 요청/히트율/응답시간 변화율 계산
+- [x] summary/stats API에서 하드코딩 0 → 실제 delta 값 반영
+
+### 11-3. TLS 실시간 상태 + Quick Actions
+- [x] POST /api/tls/renew/:host — TLS 갱신 API
+- [x] POST /api/domains/:host/sync — Proxy/TLS/DNS 강제 동기화 API
+- [x] DomainInfoCards: useDomainTls 훅으로 실시간 TLS 상태 (유효/임박/만료/미발급)
+- [x] DomainQuickActions: 이모지 → Lucide 아이콘 + TLS 갱신/강제 동기화 활성화
+
+### 11-4. 코드 품질 수정
+- [x] POST /api/domains: syncToProxy 실패 시 502 에러 전파
+- [x] GET /:host/logs: SELECT * → 명시적 컬럼 (timestamp, status_code, cache_status, path, size)
+- [x] DomainLogTable: 50건 기본 + "더 보기" 페이지네이션
+
+### 11-5. E2E 테스트 복원 (55 → 68)
+- [x] 도메인 상세 E2E 10건 (Overview/통계/설정 탭 + Quick Actions)
+- [x] 대시보드 캐시 카드 E2E 3건 (통계 + 인기 콘텐츠 + 전체 퍼지)
+
+### 검증
+> lint 0 errors, build 성공, proxy test 47개 통과
+> E2E 68개 통과, Lines 커버리지 63% → 83% ✅
+
+---
+
 ## 마일스톤 요약
 
 | Phase | 이름 | 누적 기능 | 대시보드 검증 |
@@ -402,3 +437,4 @@
 | 8 | + 고급 기능 | 요청 병합, 로그 | 메모리 캐시 비율 + 로그 뷰어 |
 | 9 | E2E 테스트 | 자동화 검증 | Playwright 전 시나리오 통과 |
 | 10 | 도메인 재설계 + 메뉴 통합 | 풍부한 도메인 관리 + 3개 메뉴 | 목록+상세(3탭) + 캐시/최적화 흡수 |
+| 11 | 기능 완성 + 운영 품질 | 통계 파이프라인 + TLS 실시간 | E2E 68개 + 커버리지 83% |
