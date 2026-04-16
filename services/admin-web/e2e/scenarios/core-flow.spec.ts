@@ -62,30 +62,18 @@ test.describe('핵심 플로우 시나리오', () => {
     // 추가한 도메인이 목록 테이블에 나타나는지 확인
     await expect(page.getByTestId(`domain-row-${DOMAIN}`)).toBeVisible({ timeout: 10000 });
 
-    // ─── 3단계: 캐시 페이지에서 캐시 항목 확인 ─────────────────────
-    // 도메인에 콘텐츠가 축적된 상태로 캐시 통계 갱신
+    // ─── 3단계: 대시보드에서 캐시 통계 확인 ────────────────────────
+    // 캐시 관리 페이지 제거로 대시보드에서 캐시 통계 확인
     await mockApi(page, 'GET', '/cache/stats', createCacheStatsWithDomain());
     await mockApi(page, 'GET', '/cache/popular', createPopularContent());
 
+    await page.goto('/');
+
+    // 대시보드 캐시 히트율 카드 표시 확인 (71.4%)
+    await expect(page.getByTestId('cache-hit-rate-card')).toBeVisible({ timeout: 10000 });
+
+    // ─── 4단계: /cache 접근 시 /domains로 리다이렉트 확인 ───────────
     await page.goto('/cache');
-
-    // 42건 캐시 항목과 도메인별 통계 표시 확인
-    await expect(page.getByText('42')).toBeVisible({ timeout: 10000 });
-
-    // ─── 4단계: 도메인 퍼지 실행 ────────────────────────────────────
-    await mockApi(page, 'DELETE', '/cache/purge', { purged_count: 42, freed_bytes: 10_000_000 });
-
-    await page.getByText('도메인 퍼지').click();
-    await page.getByTestId('domain-input').fill(DOMAIN);
-    await page.getByTestId('purge-btn').click();
-
-    // 퍼지 확인 다이얼로그에 도메인명이 표시되는지 확인
-    await expect(page.getByText(`"${DOMAIN}" 도메인 캐시를 모두 삭제합니다`, { exact: false })).toBeVisible();
-    await page.getByTestId('confirm-purge-btn').click();
-
-    // ─── 5단계: 퍼지 완료 및 통계 확인 ─────────────────────────────
-    // 퍼지 완료 토스트에 삭제 건수가 표시되는지 확인
-    await expect(page.getByTestId('purge-toast')).toContainText('퍼지 완료');
-    await expect(page.getByTestId('purge-toast')).toContainText('42건 삭제');
+    await expect(page).toHaveURL('/domains');
   });
 });

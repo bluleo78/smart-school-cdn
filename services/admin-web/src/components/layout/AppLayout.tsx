@@ -2,17 +2,13 @@ import { NavLink, Outlet } from 'react-router';
 import {
   LayoutDashboard,
   Globe,
-  Database,
-  Zap,
   Settings,
 } from 'lucide-react';
 
-/** 사이드바 네비게이션 항목 */
+/** 사이드바 네비게이션 항목 — 캐시/최적화 메뉴 제거 후 3개 */
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: '대시보드' },
   { to: '/domains', icon: Globe, label: '도메인 관리' },
-  { to: '/cache', icon: Database, label: '캐시 관리' },
-  { to: '/optimizer', icon: Zap, label: '최적화' },
   { to: '/system', icon: Settings, label: '시스템' },
 ];
 
