@@ -86,14 +86,22 @@ export async function domainRoutes(
       }
     }
 
+    // perHost에서 delta 집계 — 전체 도메인의 평균 변화율
+    const totalTodayRequestsDelta = perHost.length > 0
+      ? perHost.reduce((sum, r) => sum + r.today_requests_delta, 0) / perHost.length
+      : 0;
+    const totalHitRateDelta = perHost.length > 0
+      ? perHost.reduce((sum, r) => sum + r.hit_rate_delta, 0) / perHost.length
+      : 0;
+
     return {
       total,
       enabled,
       disabled,
       todayRequests,
-      todayRequestsDelta: 0,
+      todayRequestsDelta: Math.round(totalTodayRequestsDelta * 10) / 10,
       cacheHitRate,
-      cacheHitRateDelta: 0,
+      cacheHitRateDelta: Math.round(totalHitRateDelta * 10) / 10,
       todayBandwidth,
       hourlyRequests,
       hourlyCacheHitRate: Array<number>(maxBuckets).fill(0),
@@ -263,12 +271,12 @@ export async function domainRoutes(
         period,
         summary: {
           totalRequests: raw.summary.total_requests,
-          requestsDelta: 0,
+          requestsDelta: raw.summary.requests_delta,
           cacheHitRate: raw.summary.hit_rate,
-          cacheHitRateDelta: 0,
+          cacheHitRateDelta: raw.summary.hit_rate_delta,
           bandwidth: raw.summary.total_bandwidth,
           avgResponseTime: raw.summary.avg_response_time,
-          responseTimeDelta: 0,
+          responseTimeDelta: raw.summary.response_time_delta,
         },
         timeseries: {
           labels,

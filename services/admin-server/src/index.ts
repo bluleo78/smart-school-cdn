@@ -8,6 +8,8 @@ import { tlsRoutes } from './routes/tls.js';
 import { domainRoutes } from './routes/domains.js';
 import { systemRoutes } from './routes/system.js';
 import { DomainRepository, DOMAIN_SCHEMA } from './db/domain-repo.js';
+import { DomainStatsRepository } from './db/domain-stats-repo.js';
+import { startStatsCollector } from './stats-collector.js';
 import { createStorageClient } from './grpc/storage_client.js';
 import { createTlsClient } from './grpc/tls_client.js';
 import { createDnsClient } from './grpc/dns_client.js';
@@ -40,6 +42,9 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_domain_stats_ts ON domain_stats(timestamp);
 `);
+
+// 외래 키 제약 활성화 — 도메인 삭제 시 cascade 동작에 필요
+db.pragma('foreign_keys = ON');
 
 const domainRepo = new DomainRepository(db);
 
@@ -108,6 +113,9 @@ try {
   app.log.info(`Admin Server listening on port ${port}`);
   // 전체 서비스 헬스 모니터 시작 — 5초마다 상태 수집·캐시, proxy 전환 시 sync
   app.healthMonitor.start();
+  // Proxy 통계 폴링 시작 — 1분마다 /stats 엔드포인트에서 수집하여 DB에 저장
+  const statsRepo = new DomainStatsRepository(db);
+  startStatsCollector(proxyAdminUrl, statsRepo, app.log);
 } catch (err) {
   app.log.error(err);
   process.exit(1);

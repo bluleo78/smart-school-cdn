@@ -29,6 +29,12 @@ export interface DomainStatsResult {
     total_bandwidth: number;
     avg_response_time: number;
     hit_rate: number;
+    /** 이전 동일 기간 대비 요청 수 변화율(%) */
+    requests_delta: number;
+    /** 이전 동일 기간 대비 히트율 변화율(%) */
+    hit_rate_delta: number;
+    /** 이전 동일 기간 대비 응답 시간 변화율(%) */
+    response_time_delta: number;
   };
   timeseries: Array<{
     timestamp: number;
@@ -49,6 +55,10 @@ export interface DomainSummary {
   hit_rate: number;
   /** 최근 24시간 시간별 요청 수 배열 (최대 24개) */
   hourly: number[];
+  /** 전일 대비 요청 수 변화율(%) */
+  today_requests_delta: number;
+  /** 전일 대비 히트율 변화율(%) */
+  hit_rate_delta: number;
 }
 
 /** period 허용 값 */
@@ -60,6 +70,12 @@ export type StatsPeriod = '24h' | '7d' | '30d';
  */
 export class DomainStatsRepository {
   constructor(private readonly db: Database) {}
+
+  /** 전일 대비 변화율(%) 계산 — 이전 값이 0이면 0 반환 */
+  private getDelta(todayValue: number, yesterdayValue: number): number {
+    if (yesterdayValue === 0) return 0;
+    return Math.round(((todayValue - yesterdayValue) / yesterdayValue) * 1000) / 10;
+  }
 
   /**
    * 통계 행 삽입
@@ -140,6 +156,26 @@ export class DomainStatsRepository {
         : 0;
     const hitRate = totalRequests > 0 ? totalCacheHits / totalRequests : 0;
 
+    // 이전 동일 기간 쿼리 (예: 24h면 48h~24h 전 구간)
+    const duration = now - since;
+    const prevSince = since - duration;
+
+    const prevRows = this.db
+      .prepare(
+        `SELECT
+           SUM(requests)          AS requests,
+           SUM(cache_hits)        AS cache_hits,
+           SUM(bandwidth)         AS bandwidth,
+           AVG(avg_response_time) AS avg_response_time
+         FROM domain_stats
+         WHERE host = ? AND timestamp >= ? AND timestamp < ?`,
+      )
+      .get(host, prevSince, since) as { requests: number; cache_hits: number; bandwidth: number; avg_response_time: number } | undefined;
+
+    const prevRequests = prevRows?.requests ?? 0;
+    const prevHitRate = prevRequests > 0 ? (prevRows?.cache_hits ?? 0) / prevRequests : 0;
+    const prevResponseTime = prevRows?.avg_response_time ?? 0;
+
     return {
       summary: {
         total_requests: totalRequests,
@@ -148,6 +184,9 @@ export class DomainStatsRepository {
         total_bandwidth: totalBandwidth,
         avg_response_time: avgResponseTime,
         hit_rate: hitRate,
+        requests_delta: this.getDelta(totalRequests, prevRequests),
+        hit_rate_delta: this.getDelta(hitRate, prevHitRate),
+        response_time_delta: this.getDelta(avgResponseTime, prevResponseTime),
       },
       timeseries: rows.map((r) => ({
         timestamp: r.bucket,
@@ -192,6 +231,26 @@ export class DomainStatsRepository {
       )
       .all(todayStart) as TodayRow[];
 
+    // 어제 통계 집계 — 전일 대비 변화율 계산용
+    const yesterdayStart = todayStart - 86400;
+    const yesterdayRows = this.db
+      .prepare(
+        `SELECT
+           host,
+           SUM(requests)   AS today_requests,
+           SUM(cache_hits) AS today_cache_hits,
+           SUM(bandwidth)  AS today_bandwidth
+         FROM domain_stats
+         WHERE timestamp >= ? AND timestamp < ?
+         GROUP BY host`,
+      )
+      .all(yesterdayStart, todayStart) as TodayRow[];
+
+    const yesterdayMap = new Map<string, TodayRow>();
+    for (const row of yesterdayRows) {
+      yesterdayMap.set(row.host, row);
+    }
+
     // 최근 24시간 시간별 집계 (1시간 버킷)
     type HourlyRow = {
       host: string;
@@ -219,14 +278,22 @@ export class DomainStatsRepository {
       hourlyMap.get(row.host)!.push(row.requests);
     }
 
-    return todayRows.map((r) => ({
-      host: r.host,
-      today_requests: r.today_requests,
-      today_cache_hits: r.today_cache_hits,
-      today_bandwidth: r.today_bandwidth,
-      hit_rate: r.today_requests > 0 ? r.today_cache_hits / r.today_requests : 0,
-      hourly: hourlyMap.get(r.host) ?? [],
-    }));
+    return todayRows.map((r) => {
+      const yesterday = yesterdayMap.get(r.host);
+      const yesterdayRequests = yesterday?.today_requests ?? 0;
+      const yesterdayHitRate = yesterdayRequests > 0 ? (yesterday?.today_cache_hits ?? 0) / yesterdayRequests : 0;
+      const todayHitRate = r.today_requests > 0 ? r.today_cache_hits / r.today_requests : 0;
+      return {
+        host: r.host,
+        today_requests: r.today_requests,
+        today_cache_hits: r.today_cache_hits,
+        today_bandwidth: r.today_bandwidth,
+        hit_rate: todayHitRate,
+        hourly: hourlyMap.get(r.host) ?? [],
+        today_requests_delta: this.getDelta(r.today_requests, yesterdayRequests),
+        hit_rate_delta: this.getDelta(todayHitRate, yesterdayHitRate),
+      };
+    });
   }
 
   /**
