@@ -107,6 +107,8 @@ async fn main() {
         "L1 메모리 캐시 초기화"
     );
 
+    let counters: proxy::DomainCounters = Arc::new(std::sync::RwLock::new(HashMap::new()));
+
     let ps = ProxyState {
         shared: shared_state.clone(),
         http_client,
@@ -117,11 +119,12 @@ async fn main() {
         cert_cache: cert_cache.clone(),
         coalescer: Arc::new(Coalescer::new()),
         memory_cache: memory_cache.clone(),
+        counters: counters.clone(),
     };
 
     let proxy_router = build_proxy_router(ps);
     let admin_router = build_admin_router(
-        shared_state, storage, tls_client, domain_map, cert_cache.clone(), memory_cache,
+        shared_state, storage, tls_client, domain_map, cert_cache.clone(), memory_cache, counters,
     );
 
     let server_config = ServerConfig::builder()
