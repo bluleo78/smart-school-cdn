@@ -42,10 +42,14 @@ export async function optimizerRoutes(app: FastifyInstance) {
     return reply.status(204).send();
   });
 
-  /** 도메인별 최적화 절감 통계 조회 */
-  app.get('/api/stats/optimization', async (_req, reply) => {
+  /** 도메인별 최적화 절감 통계 조회 — domain 쿼리로 특정 도메인만 필터링 가능 */
+  app.get<{ Querystring: { domain?: string } }>('/api/stats/optimization', async (req, reply) => {
     try {
       const result = await app.optimizerClient.getStats();
+      const { domain } = req.query;
+      if (domain && Array.isArray(result.stats)) {
+        return reply.send({ stats: result.stats.filter((s: { domain?: string }) => s.domain === domain) });
+      }
       return reply.send(result);
     } catch {
       return reply.send({ stats: [] });

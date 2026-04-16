@@ -5,7 +5,7 @@ import { fetchCachePopular } from '../api/cache';
 export function useCachePopular() {
   return useQuery({
     queryKey: ['cache', 'popular'],
-    queryFn: fetchCachePopular,
+    queryFn: () => fetchCachePopular(),
     refetchInterval: 10000,
   });
 }

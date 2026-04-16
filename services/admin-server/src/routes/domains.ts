@@ -102,7 +102,7 @@ export async function domainRoutes(
     };
   });
 
-  /** 도메인 일괄 추가 */
+  /** 도메인 일괄 추가 — 성공한 각 도메인에 기본 최적화 프로파일 자동 생성 */
   app.post<{ Body: { domains?: Array<{ host: string; origin: string }> } }>(
     '/api/domains/bulk',
     async (request, reply) => {
@@ -116,6 +116,18 @@ export async function domainRoutes(
         return reply.status(502).send({ error: 'Proxy 동기화 실패', result });
       }
       await fanOutGrpc(app, domainRepo);
+      // 성공한 각 도메인에 기본 최적화 프로파일 생성 — 실패해도 전체 응답은 성공 처리
+      const failedHosts = new Set(result.failed.map((f) => f.host));
+      const successHosts = domains.map((d) => d.host).filter((h) => !failedHosts.has(h));
+      await Promise.allSettled(
+        successHosts.map(async (host) => {
+          try {
+            await app.optimizerClient.setProfile({ domain: host, quality: 85, max_width: 0, enabled: true });
+          } catch (err) {
+            app.log.warn({ err }, `[optimizer] 기본 프로파일 생성 실패: ${host}`);
+          }
+        }),
+      );
       return reply.status(201).send(result);
     },
   );
@@ -138,7 +150,7 @@ export async function domainRoutes(
     },
   );
 
-  /** 도메인 추가 (이미 있으면 origin 갱신) */
+  /** 도메인 추가 (이미 있으면 origin 갱신) — 추가 성공 후 기본 최적화 프로파일 자동 생성 */
   app.post<{ Body: { host?: string; origin?: string } }>(
     '/api/domains',
     async (request, reply) => {
@@ -149,6 +161,12 @@ export async function domainRoutes(
       domainRepo.upsert(host, origin);
       await syncToProxy(domainRepo);
       await fanOutGrpc(app, domainRepo);
+      // 기본 최적화 프로파일 생성 — 실패해도 도메인 추가는 성공 처리
+      try {
+        await app.optimizerClient.setProfile({ domain: host, quality: 85, max_width: 0, enabled: true });
+      } catch (err) {
+        app.log.warn({ err }, `[optimizer] 기본 프로파일 생성 실패: ${host}`);
+      }
       return reply.status(201).send(domainRepo.findByHost(host));
     },
   );

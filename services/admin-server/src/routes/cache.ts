@@ -23,12 +23,23 @@ export async function cacheRoutes(app: FastifyInstance) {
     }
   });
 
-  /** 인기 콘텐츠 목록 — hit_count 내림차순 상위 20개 */
-  app.get<{ Querystring: { limit?: string } }>('/api/cache/popular', async (request) => {
+  /** 인기 콘텐츠 목록 — hit_count 내림차순 상위 20개, domain 쿼리로 특정 도메인만 필터링 가능 */
+  app.get<{ Querystring: { limit?: string; domain?: string } }>('/api/cache/popular', async (request) => {
     try {
       const limit = Number(request.query.limit ?? 20);
+      const { domain } = request.query;
       const res = await app.storageClient.popular(limit);
-      return res.entries ?? [];
+      const entries = res.entries ?? [];
+      if (domain) {
+        return entries.filter((e: { url?: string }) => {
+          try {
+            return new URL(e.url ?? '').hostname === domain;
+          } catch {
+            return false;
+          }
+        });
+      }
+      return entries;
     } catch {
       return [];
     }

@@ -56,8 +56,10 @@ export async function fetchCacheStats(): Promise<CacheStats> {
   return res.data;
 }
 
-export async function fetchCachePopular(): Promise<CacheEntry[]> {
-  const res = await axios.get<CacheEntry[]>('/api/cache/popular');
+export async function fetchCachePopular(domain?: string): Promise<CacheEntry[]> {
+  const res = await axios.get<CacheEntry[]>('/api/cache/popular', {
+    params: domain ? { domain } : undefined,
+  });
   return res.data;
 }
 

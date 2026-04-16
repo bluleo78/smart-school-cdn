@@ -28,7 +28,9 @@ export async function updateOptimizerProfile(profile: OptimizerProfile): Promise
   });
 }
 
-export async function fetchOptimizationStats(): Promise<{ stats: DomainStats[] }> {
-  const res = await axios.get<{ stats: DomainStats[] }>('/api/stats/optimization');
+export async function fetchOptimizationStats(domain?: string): Promise<{ stats: DomainStats[] }> {
+  const res = await axios.get<{ stats: DomainStats[] }>('/api/stats/optimization', {
+    params: domain ? { domain } : undefined,
+  });
   return res.data;
 }

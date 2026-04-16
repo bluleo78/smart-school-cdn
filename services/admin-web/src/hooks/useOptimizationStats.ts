@@ -5,7 +5,7 @@ import { fetchOptimizationStats } from '../api/optimizer';
 export function useOptimizationStats() {
   return useQuery({
     queryKey: ['optimizer', 'stats'],
-    queryFn: fetchOptimizationStats,
+    queryFn: () => fetchOptimizationStats(),
     refetchInterval: 30_000,
   });
 }
