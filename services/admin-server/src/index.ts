@@ -23,7 +23,7 @@ db.exec(DOMAIN_SCHEMA);
 const existingCols = (db.pragma('table_info(domains)') as Array<{ name: string }>).map((c) => c.name);
 if (!existingCols.includes('enabled')) db.exec('ALTER TABLE domains ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1');
 if (!existingCols.includes('description')) db.exec("ALTER TABLE domains ADD COLUMN description TEXT NOT NULL DEFAULT ''");
-if (!existingCols.includes('updated_at')) db.exec("ALTER TABLE domains ADD COLUMN updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))");
+if (!existingCols.includes('updated_at')) db.exec('ALTER TABLE domains ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0');
 
 // domain_stats 테이블 생성
 db.exec(`
