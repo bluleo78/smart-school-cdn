@@ -1,6 +1,8 @@
 /// 도메인 기본 정보 + 동기화/TLS 상태 카드 — 2컬럼 레이아웃
+import { useMemo } from 'react';
 import type { Domain } from '../../../api/domain-types';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
+import { useDomainTls } from '../../../hooks/useDomainTls';
 
 interface Props {
   domain: Domain;
@@ -24,6 +26,24 @@ function StatusDot({ ok }: { ok: boolean }) {
 }
 
 export function DomainInfoCards({ domain }: Props) {
+  const { data: cert } = useDomainTls(domain.host);
+
+  /** TLS 만료까지 남은 일수 계산 — cert가 갱신될 때만 재계산 */
+  const daysUntilExpiry = useMemo(() => {
+    if (!cert) return null;
+    const expires = new Date(cert.expires_at).getTime();
+    // eslint-disable-next-line react-hooks/purity -- 만료일 계산에 현재 시간 필요
+    return Math.floor((expires - Date.now()) / 86_400_000);
+  }, [cert]);
+
+  /** TLS 상태 판별 — 만료/임박/유효/미발급 */
+  const tlsStatus = (() => {
+    if (daysUntilExpiry === null) return { label: '미발급', ok: false, color: 'text-muted-foreground' };
+    if (daysUntilExpiry <= 0) return { label: '만료됨', ok: false, color: 'text-destructive' };
+    if (daysUntilExpiry <= 30) return { label: `만료 ${daysUntilExpiry}일 전`, ok: true, color: 'text-yellow-400' };
+    return { label: '유효', ok: true, color: 'text-success' };
+  })();
+
   /** 타임스탬프(초) → 한국어 날짜 문자열 */
   const toKoDate = (ts: number) =>
     new Date(ts * 1000).toLocaleDateString('ko-KR');
@@ -44,7 +64,7 @@ export function DomainInfoCards({ domain }: Props) {
         </CardContent>
       </Card>
 
-      {/* 오른쪽: 동기화 & TLS */}
+      {/* 오른쪽: 동기화 & TLS — 실시간 상태 */}
       <Card variant="glass">
         <CardHeader>
           <CardTitle>동기화 &amp; TLS</CardTitle>
@@ -54,12 +74,15 @@ export function DomainInfoCards({ domain }: Props) {
             <StatusDot ok={true} />동기화됨
           </InfoRow>
           <InfoRow label="TLS 상태">
-            <StatusDot ok={true} />정상
+            <span className={tlsStatus.color}>● </span>
+            {tlsStatus.label}
+          </InfoRow>
+          <InfoRow label="TLS 만료일">
+            {cert ? new Date(cert.expires_at).toLocaleDateString('ko-KR') : '—'}
           </InfoRow>
           <InfoRow label="DNS 동기화">
             <StatusDot ok={true} />동기화됨
           </InfoRow>
-          <InfoRow label="마지막 동기화">방금 전</InfoRow>
         </CardContent>
       </Card>
     </div>

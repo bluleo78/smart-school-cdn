@@ -33,3 +33,17 @@ export async function fetchCertificates(): Promise<CertInfo[]> {
   if (!res.ok) throw new Error('인증서 목록 조회 실패');
   return res.json() as Promise<CertInfo[]>;
 }
+
+/** TLS 인증서 갱신 요청 */
+export async function renewCert(host: string): Promise<{ success: boolean; host: string }> {
+  const res = await fetch(`/api/tls/renew/${encodeURIComponent(host)}`, { method: 'POST' });
+  if (!res.ok) throw new Error('TLS 갱신 실패');
+  return res.json() as Promise<{ success: boolean; host: string }>;
+}
+
+/** 도메인 강제 동기화 */
+export async function syncDomain(host: string): Promise<{ proxy: boolean; tls: boolean; dns: boolean }> {
+  const res = await fetch(`/api/domains/${encodeURIComponent(host)}/sync`, { method: 'POST' });
+  if (!res.ok) throw new Error('동기화 실패');
+  return res.json() as Promise<{ proxy: boolean; tls: boolean; dns: boolean }>;
+}

@@ -27,8 +27,10 @@ export function DomainLogTable({ host }: Props) {
   const [search, setSearch] = useState('');
   /** 에러만 표시 토글 state */
   const [errorsOnly, setErrorsOnly] = useState(false);
+  /** 로그 표시 건수 — 기본 50, "더 보기"로 50씩 증가 */
+  const [limit, setLimit] = useState(50);
 
-  const { data, isLoading, error } = useDomainLogs(host, { limit: 200 });
+  const { data, isLoading, error } = useDomainLogs(host, { limit });
 
   if (isLoading) {
     return <Skeleton className="h-40 w-full" />;
@@ -113,6 +115,15 @@ export function DomainLogTable({ host }: Props) {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* 더 보기 버튼 — 로그가 limit 이상이면 추가 로드 가능 */}
+      {data && data.length >= limit && (
+        <div className="flex justify-center pt-2">
+          <Button variant="outline" onClick={() => setLimit(prev => prev + 50)}>
+            더 보기
+          </Button>
         </div>
       )}
     </div>

@@ -1,11 +1,14 @@
 /// 도메인 빠른 액션 카드 4개 — 프록시 테스트 / 캐시 퍼지 / TLS 갱신 / 강제 동기화
 import { useState } from 'react';
+import { Plug, Trash2, ShieldCheck, RefreshCw } from 'lucide-react';
 import type { Domain } from '../../../api/domain-types';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { Button } from '../../ui/button';
 import { AlertDialog, AlertDialogContent, AlertDialogTitle } from '../../ui/alert-dialog';
 import { testProxy } from '../../../api/proxy';
 import { usePurgeDomain } from '../../../hooks/usePurgeDomain';
+import { useTlsRenew } from '../../../hooks/useTlsRenew';
+import { useSyncDomain } from '../../../hooks/useSyncDomain';
 
 interface Props {
   domain: Domain;
@@ -168,7 +171,7 @@ function ActionCard({
   description,
   children,
 }: {
-  icon: string;
+  icon: React.ReactNode;
   title: string;
   description: string;
   children: React.ReactNode;
@@ -177,7 +180,7 @@ function ActionCard({
     <Card variant="glass" className="flex flex-col gap-3">
       <CardHeader className="pb-0">
         <CardTitle className="flex items-center gap-2 text-sm">
-          <span className="text-lg">{icon}</span>
+          <span className="text-lg [&>svg]:h-4 [&>svg]:w-4">{icon}</span>
           {title}
         </CardTitle>
       </CardHeader>
@@ -196,6 +199,8 @@ export function DomainQuickActions({ domain }: Props) {
   const [proxyTestOpen, setProxyTestOpen] = useState(false);
   const [purgeOpen, setPurgeOpen] = useState(false);
   const purgeMutation = usePurgeDomain();
+  const tlsRenewMutation = useTlsRenew();
+  const syncMutation = useSyncDomain();
 
   async function handlePurgeConfirm() {
     try {
@@ -211,7 +216,7 @@ export function DomainQuickActions({ domain }: Props) {
       <div className="grid grid-cols-4 gap-4" data-testid="domain-quick-actions">
         {/* 프록시 테스트 */}
         <ActionCard
-          icon="🔌"
+          icon={<Plug />}
           title="프록시 테스트"
           description="지정 경로로 실제 프록시 요청을 전송하고 응답을 확인합니다."
         >
@@ -225,7 +230,7 @@ export function DomainQuickActions({ domain }: Props) {
 
         {/* 캐시 퍼지 */}
         <ActionCard
-          icon="🗑️"
+          icon={<Trash2 />}
           title="캐시 퍼지"
           description="이 도메인의 전체 캐시를 즉시 삭제합니다."
         >
@@ -238,25 +243,33 @@ export function DomainQuickActions({ domain }: Props) {
           </Button>
         </ActionCard>
 
-        {/* TLS 갱신 — 1차 비활성 */}
+        {/* TLS 갱신 — 활성화 */}
         <ActionCard
-          icon="🔒"
+          icon={<ShieldCheck />}
           title="TLS 갱신"
           description="TLS 인증서를 수동으로 갱신합니다."
         >
-          <Button disabled>
-            추후 지원
+          <Button
+            onClick={() => tlsRenewMutation.mutate(domain.host)}
+            disabled={tlsRenewMutation.isPending}
+            data-testid="tls-renew"
+          >
+            {tlsRenewMutation.isPending ? '갱신 중…' : '갱신'}
           </Button>
         </ActionCard>
 
-        {/* 강제 동기화 — 1차 비활성 */}
+        {/* 강제 동기화 — 활성화 */}
         <ActionCard
-          icon="🔄"
+          icon={<RefreshCw />}
           title="강제 동기화"
-          description="Proxy 서버에 설정을 즉시 동기화합니다."
+          description="Proxy/TLS/DNS 서버에 설정을 즉시 동기화합니다."
         >
-          <Button disabled>
-            추후 지원
+          <Button
+            onClick={() => syncMutation.mutate(domain.host)}
+            disabled={syncMutation.isPending}
+            data-testid="force-sync"
+          >
+            {syncMutation.isPending ? '동기화 중…' : '동기화'}
           </Button>
         </ActionCard>
       </div>
