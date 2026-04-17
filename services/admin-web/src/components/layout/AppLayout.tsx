@@ -3,12 +3,14 @@ import {
   LayoutDashboard,
   Globe,
   Settings,
+  Network,
 } from 'lucide-react';
 
-/** 사이드바 네비게이션 항목 — 캐시/최적화 메뉴 제거 후 3개 */
+/** 사이드바 네비게이션 항목 — 대시보드/도메인/DNS/시스템 */
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: '대시보드' },
   { to: '/domains', icon: Globe, label: '도메인 관리' },
+  { to: '/dns', icon: Network, label: 'DNS' },
   { to: '/system', icon: Settings, label: '시스템' },
 ];
 
