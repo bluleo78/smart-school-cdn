@@ -130,10 +130,11 @@ async fn handle_dns_query(
     };
 
     // qname/qtype 추출 — 쿼리가 없으면 빈 문자열 + "?" 로 기록
+    // qtype은 Display(to_string)를 사용해 "A"/"AAAA" 등 표준 문자열로 기록 (Unknown(NN) Debug 출력 방지)
     let (qname_for_log, qtype_for_log, first_q) = match query.queries().first() {
         Some(q) => (
             q.name().to_string(),
-            format!("{:?}", q.query_type()),
+            q.query_type().to_string(),
             Some(q.clone()),
         ),
         None => (String::new(), "?".to_string(), None),
@@ -160,14 +161,27 @@ async fn handle_dns_query(
 
     if registered {
         // A 매칭 — CDN IP 응답
-        let response = build_a_response(&query, q.name().clone(), cdn_ip)?;
-        let mut out = Vec::with_capacity(512);
-        let mut encoder = BinEncoder::new(&mut out);
-        response.emit(&mut encoder)?;
-        socket.send_to(&out, src).await?;
-        tracing::debug!(host = %host, ip = %cdn_ip, "DNS: CDN IP 반환");
-        let result = classify(true, true, None);
+        // 인코드/송신 실패 시에도 log_query는 반드시 1회 호출되어야 하므로 async block으로 묶는다.
+        // 로컬 실패는 Nxdomain으로 기록하고 원래 에러를 그대로 전파한다.
+        let send_outcome: Result<(), Box<dyn std::error::Error + Send + Sync>> = async {
+            let response = build_a_response(&query, q.name().clone(), cdn_ip)?;
+            let mut out = Vec::with_capacity(512);
+            let mut encoder = BinEncoder::new(&mut out);
+            response.emit(&mut encoder)?;
+            socket.send_to(&out, src).await?;
+            Ok(())
+        }
+        .await;
+
+        let result = if send_outcome.is_ok() {
+            tracing::debug!(host = %host, ip = %cdn_ip, "DNS: CDN IP 반환");
+            classify(true, true, None)
+        } else {
+            // 로컬 encode/send 실패도 Nxdomain으로 기록
+            QueryResult::Nxdomain
+        };
         log_query(metrics, recent, ts_ms, src.ip(), &qname_for_log, &qtype_for_log, result, start);
+        send_outcome?;
         Ok(())
     } else {
         // 미등록 — upstream 포워딩
