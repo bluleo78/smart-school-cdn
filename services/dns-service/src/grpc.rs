@@ -261,6 +261,22 @@ mod tests {
         let res = g.get_recent_queries(Request::new(RecentQueriesRequest { limit: 0 }))
             .await.unwrap().into_inner();
         assert_eq!(res.entries.len(), 1);
+
+        // 업퍼 바운드 클램프 검증 — 링버퍼는 512 cap이므로 이미 512개만 보유
+        let g2 = make_grpc();
+        for i in 0..513 {
+            g2.recent.push(crate::metrics::QueryEntry {
+                ts_unix_ms: i as i64,
+                client_ip: "1.1.1.1".into(),
+                qname: format!("q{i}.test"),
+                qtype: "A".into(),
+                result: QueryResult::Matched,
+                latency_us: 0,
+            });
+        }
+        let res = g2.get_recent_queries(Request::new(RecentQueriesRequest { limit: 10_000 }))
+            .await.unwrap().into_inner();
+        assert_eq!(res.entries.len(), 512, "limit은 512로 클램프되어야 한다");
     }
 
     #[tokio::test]
