@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use hickory_proto::op::{Header, Message, MessageType, OpCode, ResponseCode};
 use hickory_proto::rr::{Name, RData, Record, RecordType};
@@ -13,22 +14,31 @@ use hickory_proto::serialize::binary::{BinDecodable, BinDecoder, BinEncodable, B
 use tokio::net::UdpSocket;
 
 use crate::grpc::DomainMap;
+use crate::metrics::{QueryEntry, QueryResult, SharedMetrics, SharedRecent};
 
 /// DNS 서버 실행 — tokio task로 spawn하여 사용
-pub async fn run_dns_server(domain_map: DomainMap, cdn_ip: Ipv4Addr, upstream: SocketAddr) {
+pub async fn run_dns_server(
+    domain_map: DomainMap,
+    metrics: SharedMetrics,
+    recent: SharedRecent,
+    cdn_ip: Ipv4Addr,
+    upstream: SocketAddr,
+) {
     let socket = Arc::new(
         UdpSocket::bind("0.0.0.0:53")
             .await
             .expect("DNS 포트 53 바인딩 실패 (root 권한 또는 CAP_NET_BIND_SERVICE 필요)"),
     );
     tracing::info!("DNS 서버 시작 — UDP :53, CDN_IP={cdn_ip}, upstream={upstream}");
-    run_dns_loop(socket, domain_map, cdn_ip, upstream).await;
+    run_dns_loop(socket, domain_map, metrics, recent, cdn_ip, upstream).await;
 }
 
 /// DNS 수신 루프 — 미리 바인딩된 소켓으로 쿼리를 처리한다 (테스트 가능)
 pub(crate) async fn run_dns_loop(
     socket: Arc<UdpSocket>,
     domain_map: DomainMap,
+    metrics: SharedMetrics,
+    recent: SharedRecent,
     cdn_ip: Ipv4Addr,
     upstream: SocketAddr,
 ) {
@@ -39,11 +49,15 @@ pub(crate) async fn run_dns_loop(
         };
         let socket = socket.clone();
         let domain_map = domain_map.clone();
+        let metrics = metrics.clone();
+        let recent = recent.clone();
         let data = buf[..len].to_vec();
 
         tokio::spawn(async move {
-            if let Err(e) =
-                handle_dns_query(&data, src, &socket, &domain_map, cdn_ip, upstream).await
+            if let Err(e) = handle_dns_query(
+                &data, src, &socket, &domain_map, &metrics, &recent, cdn_ip, upstream,
+            )
+            .await
             {
                 tracing::warn!("DNS 쿼리 처리 오류: {e}");
             }
@@ -51,21 +65,89 @@ pub(crate) async fn run_dns_loop(
     }
 }
 
+/// 단일 쿼리 결과를 분류하는 순수 함수.
+/// - qtype이 A이고 도메인 맵에 매칭되면 Matched
+/// - 그 외에는 upstream 포워딩 결과(성공/실패)에 따라 Forwarded / Nxdomain
+/// upstream_ok는 비-A 쿼리일 때도 Some(bool)이어야 하며, A 쿼리지만 매칭 실패 시에도 동일하다.
+pub(crate) fn classify(qtype_is_a: bool, map_hit: bool, upstream_ok: Option<bool>) -> QueryResult {
+    if qtype_is_a && map_hit {
+        return QueryResult::Matched;
+    }
+    match upstream_ok {
+        Some(true) => QueryResult::Forwarded,
+        _ => QueryResult::Nxdomain,
+    }
+}
+
+/// 메트릭 + 최근 쿼리 링버퍼에 결과를 1회만 기록
+fn log_query(
+    metrics: &SharedMetrics,
+    recent: &SharedRecent,
+    ts_ms: i64,
+    client_ip: std::net::IpAddr,
+    qname: &str,
+    qtype: &str,
+    result: QueryResult,
+    start: Instant,
+) {
+    metrics.record(result);
+    recent.push(QueryEntry {
+        ts_unix_ms: ts_ms,
+        client_ip: client_ip.to_string(),
+        qname: qname.trim_end_matches('.').to_string(),
+        qtype: qtype.to_string(),
+        result,
+        latency_us: start.elapsed().as_micros().min(u32::MAX as u128) as u32,
+    });
+}
+
 /// DNS 쿼리 파싱 → 응답 생성/전송
+#[allow(clippy::too_many_arguments)]
 async fn handle_dns_query(
     buf: &[u8],
     src: SocketAddr,
     socket: &UdpSocket,
     domain_map: &DomainMap,
+    metrics: &SharedMetrics,
+    recent: &SharedRecent,
     cdn_ip: Ipv4Addr,
     upstream: SocketAddr,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let mut decoder = BinDecoder::new(buf);
-    let query = Message::read(&mut decoder)?;
+    let start = Instant::now();
+    let ts_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
 
-    let q: hickory_proto::op::Query = match query.queries().first() {
-        Some(q) if q.query_type() == RecordType::A => q.clone(),
-        _ => return forward_to_upstream(buf, src, socket, upstream).await,
+    let mut decoder = BinDecoder::new(buf);
+    let query = match Message::read(&mut decoder) {
+        Ok(q) => q,
+        Err(e) => {
+            // 디코드 실패: qname/qtype 미상 → Nxdomain으로 기록 후 오류 전파
+            log_query(metrics, recent, ts_ms, src.ip(), "", "?", QueryResult::Nxdomain, start);
+            return Err(Box::new(e));
+        }
+    };
+
+    // qname/qtype 추출 — 쿼리가 없으면 빈 문자열 + "?" 로 기록
+    let (qname_for_log, qtype_for_log, first_q) = match query.queries().first() {
+        Some(q) => (
+            q.name().to_string(),
+            format!("{:?}", q.query_type()),
+            Some(q.clone()),
+        ),
+        None => (String::new(), "?".to_string(), None),
+    };
+
+    // A 쿼리가 아니면 곧바로 upstream 포워딩
+    let q = match first_q {
+        Some(q) if q.query_type() == RecordType::A => q,
+        _ => {
+            let fwd_ok = forward_to_upstream(buf, src, socket, upstream).await.is_ok();
+            let result = classify(false, false, Some(fwd_ok));
+            log_query(metrics, recent, ts_ms, src.ip(), &qname_for_log, &qtype_for_log, result, start);
+            return if fwd_ok { Ok(()) } else { Err("upstream forward 실패".into()) };
+        }
     };
 
     let name_str = q.name().to_string();
@@ -77,17 +159,24 @@ async fn handle_dns_query(
     };
 
     if registered {
+        // A 매칭 — CDN IP 응답
         let response = build_a_response(&query, q.name().clone(), cdn_ip)?;
         let mut out = Vec::with_capacity(512);
         let mut encoder = BinEncoder::new(&mut out);
         response.emit(&mut encoder)?;
         socket.send_to(&out, src).await?;
         tracing::debug!(host = %host, ip = %cdn_ip, "DNS: CDN IP 반환");
+        let result = classify(true, true, None);
+        log_query(metrics, recent, ts_ms, src.ip(), &qname_for_log, &qtype_for_log, result, start);
+        Ok(())
     } else {
-        forward_to_upstream(buf, src, socket, upstream).await?;
-        tracing::debug!(host = %host, upstream = %upstream, "DNS: upstream 포워딩");
+        // 미등록 — upstream 포워딩
+        let fwd_ok = forward_to_upstream(buf, src, socket, upstream).await.is_ok();
+        tracing::debug!(host = %host, upstream = %upstream, ok = fwd_ok, "DNS: upstream 포워딩");
+        let result = classify(true, false, Some(fwd_ok));
+        log_query(metrics, recent, ts_ms, src.ip(), &qname_for_log, &qtype_for_log, result, start);
+        if fwd_ok { Ok(()) } else { Err("upstream forward 실패".into()) }
     }
-    Ok(())
 }
 
 /// 등록된 도메인 여부 확인 (와일드카드 포함)
@@ -156,12 +245,43 @@ async fn forward_to_upstream(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::metrics::{DnsMetrics, RecentQueries};
 
     fn make_map(entries: &[(&str, &str)]) -> HashMap<String, String> {
         entries
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect()
+    }
+
+    /// 테스트용 throwaway 메트릭/링버퍼 쌍 생성
+    fn make_state() -> (SharedMetrics, SharedRecent) {
+        (Arc::new(DnsMetrics::new()), Arc::new(RecentQueries::new(512)))
+    }
+
+    // ── classify 분류 헬퍼 단위 테스트 ───────────────────────────────
+
+    #[test]
+    fn classify_a_쿼리_매칭은_matched() {
+        assert_eq!(classify(true, true, None), QueryResult::Matched);
+    }
+
+    #[test]
+    fn classify_upstream_성공은_forwarded() {
+        // A 쿼리지만 매칭 실패 + upstream 성공
+        assert_eq!(classify(true, false, Some(true)), QueryResult::Forwarded);
+        // 비-A 쿼리 + upstream 성공
+        assert_eq!(classify(false, false, Some(true)), QueryResult::Forwarded);
+    }
+
+    #[test]
+    fn classify_upstream_실패는_nxdomain() {
+        // A 매칭 실패 + upstream 실패
+        assert_eq!(classify(true, false, Some(false)), QueryResult::Nxdomain);
+        // 비-A 쿼리 + upstream 실패
+        assert_eq!(classify(false, false, Some(false)), QueryResult::Nxdomain);
+        // upstream_ok가 None(측정 전)이고 매칭도 없으면 Nxdomain
+        assert_eq!(classify(false, false, None), QueryResult::Nxdomain);
     }
 
     #[test]
@@ -314,9 +434,18 @@ mod tests {
         let buf = make_a_query(7, "textbook.com.");
 
         // handle_dns_query 직접 호출 — src=client_addr 로 응답 전송
-        handle_dns_query(&buf, client_addr, &server_sock, &domain_map, cdn_ip, upstream)
-            .await
-            .unwrap();
+        let (metrics, recent) = make_state();
+        handle_dns_query(
+            &buf, client_addr, &server_sock, &domain_map, &metrics, &recent, cdn_ip, upstream,
+        )
+        .await
+        .unwrap();
+
+        // Matched 1건이 기록되어야 한다
+        let snap = metrics.snapshot();
+        assert_eq!(snap.total, 1);
+        assert_eq!(snap.matched, 1);
+        assert_eq!(recent.snapshot(10).len(), 1);
 
         // 클라이언트 소켓에서 응답 수신
         let mut resp = [0u8; 512];
@@ -361,9 +490,17 @@ mod tests {
 
         let buf = make_a_query(99, "unknown.com.");
 
-        handle_dns_query(&buf, client_addr, &server_sock, &domain_map, cdn_ip, upstream_addr)
-            .await
-            .unwrap();
+        let (metrics, recent) = make_state();
+        handle_dns_query(
+            &buf, client_addr, &server_sock, &domain_map, &metrics, &recent, cdn_ip, upstream_addr,
+        )
+        .await
+        .unwrap();
+
+        // Forwarded 1건이 기록되어야 한다
+        let snap = metrics.snapshot();
+        assert_eq!(snap.total, 1);
+        assert_eq!(snap.forwarded, 1);
 
         // 클라이언트에서 응답 수신 (에코이므로 쿼리와 동일)
         let mut resp = [0u8; 512];
@@ -401,9 +538,18 @@ mod tests {
         // AAAA 쿼리 생성
         let buf = make_aaaa_query(55, "textbook.com.");
 
-        handle_dns_query(&buf, client_addr, &server_sock, &domain_map, cdn_ip, upstream_addr)
-            .await
-            .unwrap();
+        let (metrics, recent) = make_state();
+        handle_dns_query(
+            &buf, client_addr, &server_sock, &domain_map, &metrics, &recent, cdn_ip, upstream_addr,
+        )
+        .await
+        .unwrap();
+
+        // 비-A 쿼리도 포워딩 성공 → Forwarded 1건
+        let snap = metrics.snapshot();
+        assert_eq!(snap.total, 1);
+        assert_eq!(snap.forwarded, 1);
+        let _ = recent.snapshot(1);
 
         let mut resp = [0u8; 512];
         client_sock.recv_from(&mut resp).await.unwrap();
@@ -428,8 +574,11 @@ mod tests {
 
         let loop_sock = server_sock.clone();
         let loop_map = domain_map.clone();
+        let (metrics, recent) = make_state();
+        let loop_metrics = metrics.clone();
+        let loop_recent = recent.clone();
         let loop_handle = tokio::spawn(async move {
-            run_dns_loop(loop_sock, loop_map, cdn_ip, upstream).await;
+            run_dns_loop(loop_sock, loop_map, loop_metrics, loop_recent, cdn_ip, upstream).await;
         });
 
         // 등록 도메인 A 쿼리 전송

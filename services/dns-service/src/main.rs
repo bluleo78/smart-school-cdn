@@ -16,6 +16,7 @@ use tracing_subscriber::EnvFilter;
 
 use cdn_proto::dns::dns_service_server::DnsServiceServer;
 use grpc::{DnsGrpc, DomainMap};
+use metrics::{DnsMetrics, RecentQueries};
 
 /// Docker healthcheck 및 로드밸런서용 헬스 엔드포인트
 async fn health() -> &'static str { "ok" }
@@ -53,9 +54,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // DNS UDP 서버를 태스크로 실행하고 핸들을 보관 — 종료 시 감지
     // domain_map 이동 전에 클론
     let dns_map = domain_map.clone();
+    // Task 3 최소 와이어링: throwaway 메트릭/링버퍼 생성 — Task 5에서 gRPC와 공유하도록 리팩토링 예정
+    let dns_metrics = Arc::new(DnsMetrics::new());
+    let dns_recent = Arc::new(RecentQueries::new(512));
     let svc = DnsServiceServer::new(DnsGrpc { domain_map });
     let dns_handle = tokio::spawn(async move {
-        dns::run_dns_server(dns_map, cdn_ip, dns_upstream).await;
+        dns::run_dns_server(dns_map, dns_metrics, dns_recent, cdn_ip, dns_upstream).await;
     });
 
     // HTTP 헬스체크 서버 — Docker healthcheck용 (:8082)
