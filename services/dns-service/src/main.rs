@@ -54,14 +54,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // DNS UDP 서버를 태스크로 실행하고 핸들을 보관 — 종료 시 감지
     // domain_map 이동 전에 클론
     let dns_map = domain_map.clone();
-    // Task 4 경계 최소 와이어링: 컴파일러를 만족시키기 위해 로컬 Arc만 DnsGrpc에 주입
-    // Task 5에서 DNS 서버와 gRPC가 동일 Arc를 공유하도록 리팩토링 예정
+    // gRPC와 UDP 서버가 동일한 Arc를 공유해야 /api/dns/status가 실제 트래픽을 반영함
+    // (별도 Arc를 사용하면 gRPC는 0만 보고하고 실제 카운트는 UDP 쪽에만 쌓임)
     let dns_metrics = Arc::new(DnsMetrics::new());
     let dns_recent = Arc::new(RecentQueries::new(512));
     let svc = DnsServiceServer::new(DnsGrpc {
         domain_map,
-        metrics: Arc::new(DnsMetrics::new()),
-        recent:  Arc::new(RecentQueries::new(512)),
+        metrics: dns_metrics.clone(),
+        recent:  dns_recent.clone(),
         cdn_ip:  cdn_ip.to_string(),
     });
     let dns_handle = tokio::spawn(async move {
