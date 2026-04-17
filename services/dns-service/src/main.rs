@@ -2,6 +2,7 @@
 /// - DNS UDP 서버(:53), gRPC 서버(:50053), HTTP 헬스체크(:8082)를 병행 기동한다
 mod dns;
 mod grpc;
+mod metrics;
 
 use std::{
     collections::HashMap,

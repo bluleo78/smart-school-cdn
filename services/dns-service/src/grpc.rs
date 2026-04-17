@@ -6,6 +6,9 @@ use cdn_proto::dns::{
     dns_service_server::DnsService,
     HealthRequest, HealthResponse,
     SyncDomainsRequest, SyncDomainsResponse,
+    StatsRequest, StatsResponse,
+    RecentQueriesRequest, RecentQueriesResponse,
+    RecordsRequest, RecordsResponse,
 };
 
 // DomainMap 타입 — dns.rs와 동일하게 유지
@@ -43,6 +46,30 @@ impl DnsService for DnsGrpc {
             online: true,
             latency_ms: 0,
         }))
+    }
+
+    /// DNS 통계 조회 — Task 4에서 구현 예정
+    async fn get_stats(
+        &self,
+        _: Request<StatsRequest>,
+    ) -> Result<Response<StatsResponse>, Status> {
+        Err(Status::unimplemented("Task 4에서 구현 예정"))
+    }
+
+    /// 최근 쿼리 목록 조회 — Task 4에서 구현 예정
+    async fn get_recent_queries(
+        &self,
+        _: Request<RecentQueriesRequest>,
+    ) -> Result<Response<RecentQueriesResponse>, Status> {
+        Err(Status::unimplemented("Task 4에서 구현 예정"))
+    }
+
+    /// DNS 레코드 목록 조회 — Task 4에서 구현 예정
+    async fn get_records(
+        &self,
+        _: Request<RecordsRequest>,
+    ) -> Result<Response<RecordsResponse>, Status> {
+        Err(Status::unimplemented("Task 4에서 구현 예정"))
     }
 }
 
