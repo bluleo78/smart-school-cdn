@@ -1,9 +1,12 @@
-# 로컬 통합 테스트용 Docker Compose (이미지 빌드 포함)
-# prod와 포트 충돌 없도록 dev 전용 포트 사용:
-#   proxy      → 8082 (HTTP), 4443 (HTTPS)
-#   dns-service → 5353/udp
-#   admin-web  → 7778
-# 사용법: pnpm docker:build && pnpm docker:up
+# 로컬 통합/홈 네트워크 테스트용 Docker Compose (이미지 빌드 포함)
+# 표준 포트 사용 — LAN 상의 iPad·폰에서 직접 DNS/HTTP/HTTPS 접근 가능:
+#   proxy      → 80 (HTTP), 443 (HTTPS)
+#   dns-service → 53/udp
+#   admin-web  → 7778 (관리 UI는 포트 지정 가능하므로 비표준 유지)
+# 주의: 같은 호스트에 별도 prod 스택이 돌고 있으면 443·53 충돌 → prod 먼저 중단 필요
+# CDN_IP 환경변수로 iPad가 받을 A 레코드값 지정:
+#   CDN_IP=192.168.0.2 pnpm docker:up    # Mac의 LAN IP
+# 사용법: pnpm docker:build && CDN_IP=<Mac-LAN-IP> pnpm docker:up
 name: smart-school-cdn-local
 
 services:
@@ -52,7 +55,7 @@ services:
       dockerfile: services/dns-service/Dockerfile
     restart: unless-stopped
     ports:
-      - "5353:53/udp"    # DNS 쿼리 (로컬 테스트 전용)
+      - "53:53/udp"    # DNS 쿼리 (홈 네트워크 iPad/폰 직접 접근용)
     environment:
       - CDN_IP=${CDN_IP:-127.0.0.1}
       - DNS_UPSTREAM=${DNS_UPSTREAM:-8.8.8.8}
@@ -72,8 +75,8 @@ services:
       dockerfile: services/proxy/Dockerfile
     restart: unless-stopped
     ports:
-      - "8082:8080"   # HTTP 프록시 (로컬 테스트 전용)
-      - "4443:443"    # HTTPS 프록시 (로컬 테스트 전용)
+      - "80:8080"     # HTTP 프록시 (홈 네트워크 iPad/폰 직접 접근용)
+      - "443:443"     # HTTPS 프록시 (홈 네트워크 iPad/폰 직접 접근용)
     environment:
       - STORAGE_GRPC_URL=http://storage-service:50051
       - TLS_GRPC_URL=http://tls-service:50052
