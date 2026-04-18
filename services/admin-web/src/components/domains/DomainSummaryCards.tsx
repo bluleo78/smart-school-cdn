@@ -58,7 +58,7 @@ export function DomainSummaryCards() {
         <CardContent>
           <div className="flex items-end justify-between">
             <div>
-              <p className="text-3xl font-bold">{(data?.cacheHitRate ?? 0).toFixed(1)}%</p>
+              <p className="text-3xl font-bold">{((data?.cacheHitRate ?? 0) * 100).toFixed(1)}%</p>
               <DeltaBadge delta={data?.cacheHitRateDelta ?? 0} unit="%" />
             </div>
             <BarSparkline values={data?.hourlyCacheHitRate ?? Array(24).fill(0)} />

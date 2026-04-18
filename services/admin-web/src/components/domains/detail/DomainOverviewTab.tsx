@@ -64,7 +64,7 @@ function SummaryCards({ host }: { host: string }) {
         <CardContent>
           <div className="flex items-end justify-between">
             <div>
-              <p className="text-3xl font-bold">{(s?.cacheHitRate ?? 0).toFixed(1)}%</p>
+              <p className="text-3xl font-bold">{((s?.cacheHitRate ?? 0) * 100).toFixed(1)}%</p>
               <DeltaBadge delta={s?.cacheHitRateDelta ?? 0} unit="%" />
             </div>
             <BarSparkline values={ts?.hits ?? Array(24).fill(0)} />
