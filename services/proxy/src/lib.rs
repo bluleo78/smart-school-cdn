@@ -952,6 +952,71 @@ async fn domain_purge_handler(
     })).into_response()
 }
 
+/// 요청 1건당 정확히 하나의 캐시 결과 분류.
+/// 우선순위: method → L1 → L2 → NoCache → Size → Miss → Other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CacheOutcome {
+    L1Hit,
+    L2Hit,
+    Miss,
+    BypassMethod,
+    BypassNoCache,
+    BypassSize,
+    BypassOther,
+}
+
+impl CacheOutcome {
+    /// `X-Cache-Reason` 헤더 값
+    pub fn as_header(&self) -> &'static str {
+        match self {
+            Self::L1Hit         => "L1-HIT",
+            Self::L2Hit         => "L2-HIT",
+            Self::Miss          => "MISS",
+            Self::BypassMethod  => "BYPASS-METHOD",
+            Self::BypassNoCache => "BYPASS-NOCACHE",
+            Self::BypassSize    => "BYPASS-SIZE",
+            Self::BypassOther   => "BYPASS-OTHER",
+        }
+    }
+}
+
+/// 순수 함수 — 입력 상태로부터 outcome을 결정한다.
+/// 우선순위: method → L1 → L2 → NoCache → Size → origin_ok → Other.
+/// - `method_is_get_or_head`: GET/HEAD 요청이면 true
+/// - `l1_hit`: L1 메모리 캐시 HIT 여부
+/// - `l2_hit`: L2 디스크 캐시 HIT 여부 (L1 miss 후에만 의미)
+/// - `origin_no_cache`: origin 응답 Cache-Control이 no-cache/no-store
+/// - `size_exceeded`: 응답 크기가 MAX_CACHE_ENTRY_BYTES 초과
+/// - `origin_ok_and_cacheable`: origin 200 OK + 캐시 저장 성공
+pub fn classify_outcome(
+    method_is_get_or_head: bool,
+    l1_hit: bool,
+    l2_hit: bool,
+    origin_no_cache: bool,
+    size_exceeded: bool,
+    origin_ok_and_cacheable: bool,
+) -> CacheOutcome {
+    if !method_is_get_or_head {
+        return CacheOutcome::BypassMethod;
+    }
+    if l1_hit {
+        return CacheOutcome::L1Hit;
+    }
+    if l2_hit {
+        return CacheOutcome::L2Hit;
+    }
+    if origin_no_cache {
+        return CacheOutcome::BypassNoCache;
+    }
+    if size_exceeded {
+        return CacheOutcome::BypassSize;
+    }
+    if origin_ok_and_cacheable {
+        return CacheOutcome::Miss;
+    }
+    CacheOutcome::BypassOther
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2460,5 +2525,82 @@ mod tests {
         let entry = memory_cache_check.get(&key).await;
         assert!(entry.is_some(), "L2 HIT 후 L1 메모리 캐시에 승격되어야 한다");
         assert_eq!(&entry.unwrap().body[..], &[60, 104, 49, 62]);
+    }
+
+    // ─── CacheOutcome / classify_outcome 단위 테스트 ──────────────────
+
+    #[test]
+    fn classify_outcome_비GET은_method_bypass() {
+        assert_eq!(
+            classify_outcome(false, false, false, false, false, false),
+            CacheOutcome::BypassMethod
+        );
+    }
+
+    #[test]
+    fn classify_outcome_l1_히트() {
+        assert_eq!(
+            classify_outcome(true, true, false, false, false, false),
+            CacheOutcome::L1Hit
+        );
+    }
+
+    #[test]
+    fn classify_outcome_l1_미스_l2_히트() {
+        assert_eq!(
+            classify_outcome(true, false, true, false, false, false),
+            CacheOutcome::L2Hit
+        );
+    }
+
+    #[test]
+    fn classify_outcome_origin_nocache() {
+        assert_eq!(
+            classify_outcome(true, false, false, true, false, false),
+            CacheOutcome::BypassNoCache
+        );
+    }
+
+    #[test]
+    fn classify_outcome_size_초과() {
+        assert_eq!(
+            classify_outcome(true, false, false, false, true, false),
+            CacheOutcome::BypassSize
+        );
+    }
+
+    #[test]
+    fn classify_outcome_origin_ok_캐시_저장() {
+        assert_eq!(
+            classify_outcome(true, false, false, false, false, true),
+            CacheOutcome::Miss
+        );
+    }
+
+    #[test]
+    fn classify_outcome_기타는_other() {
+        assert_eq!(
+            classify_outcome(true, false, false, false, false, false),
+            CacheOutcome::BypassOther
+        );
+    }
+
+    #[test]
+    fn classify_outcome_nocache가_size보다_우선() {
+        assert_eq!(
+            classify_outcome(true, false, false, true, true, false),
+            CacheOutcome::BypassNoCache
+        );
+    }
+
+    #[test]
+    fn cache_outcome_as_header_매핑() {
+        assert_eq!(CacheOutcome::L1Hit.as_header(),         "L1-HIT");
+        assert_eq!(CacheOutcome::L2Hit.as_header(),         "L2-HIT");
+        assert_eq!(CacheOutcome::Miss.as_header(),          "MISS");
+        assert_eq!(CacheOutcome::BypassMethod.as_header(),  "BYPASS-METHOD");
+        assert_eq!(CacheOutcome::BypassNoCache.as_header(), "BYPASS-NOCACHE");
+        assert_eq!(CacheOutcome::BypassSize.as_header(),    "BYPASS-SIZE");
+        assert_eq!(CacheOutcome::BypassOther.as_header(),   "BYPASS-OTHER");
     }
 }
