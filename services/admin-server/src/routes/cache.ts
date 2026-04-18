@@ -3,24 +3,86 @@
 import type { FastifyInstance } from 'fastify';
 
 export async function cacheRoutes(app: FastifyInstance) {
-  /** 캐시 통계 — 히트율, 총 용량, 도메인별 통계 */
+  /** 캐시 통계 — domain_stats에서 L1/L2/bypass 집계 + storage-service에서 disk 정보 */
   app.get('/api/cache/stats', async () => {
+    // 최근 24시간 데이터만 집계
+    const sinceSec = Math.floor(Date.now() / 1000) - 24 * 3600;
+
+    const total = app.db.prepare(`
+      SELECT
+        COALESCE(SUM(requests), 0)        AS requests,
+        COALESCE(SUM(l1_hits), 0)         AS l1_hits,
+        COALESCE(SUM(l2_hits), 0)         AS l2_hits,
+        COALESCE(SUM(cache_misses), 0)    AS miss,
+        COALESCE(SUM(bypass_method), 0)   AS bm,
+        COALESCE(SUM(bypass_nocache), 0)  AS bn,
+        COALESCE(SUM(bypass_size), 0)     AS bs,
+        COALESCE(SUM(bypass_other), 0)    AS bo
+      FROM domain_stats WHERE timestamp >= ?
+    `).get(sinceSec) as {
+      requests: number; l1_hits: number; l2_hits: number; miss: number;
+      bm: number; bn: number; bs: number; bo: number;
+    };
+
+    // 도메인별 집계 — 요청수 내림차순 상위 20개
+    const byDomain = app.db.prepare(`
+      SELECT
+        host,
+        SUM(requests)                                             AS requests,
+        SUM(l1_hits)                                              AS l1_hits,
+        SUM(l2_hits)                                              AS l2_hits,
+        SUM(bypass_method + bypass_nocache + bypass_size + bypass_other) AS bypass_total
+      FROM domain_stats WHERE timestamp >= ?
+      GROUP BY host
+      ORDER BY requests DESC
+      LIMIT 20
+    `).all(sinceSec) as Array<{
+      host: string; requests: number; l1_hits: number; l2_hits: number; bypass_total: number;
+    }>;
+
+    // storage-service offline이면 disk는 0으로 폴백
+    let disk = { used_bytes: 0, max_bytes: 0, entry_count: 0 };
     try {
-      const res = await app.storageClient.stats();
-      return res;
-    } catch {
-      return {
-        hit_count: 0,
-        miss_count: 0,
-        bypass_count: 0,
-        hit_rate: 0,
-        total_size_bytes: 0,
-        max_size_bytes: 0,
+      const s = await app.storageClient.stats();
+      disk = {
+        used_bytes:  Number(s.used_bytes   ?? 0),
+        max_bytes:   Number(s.total_bytes  ?? 0),
         entry_count: 0,
-        by_domain: [],
-        hit_rate_history: [],
       };
+    } catch {
+      // storage offline → 0 폴백
     }
+
+    const bypassTotal = total.bm + total.bn + total.bs + total.bo;
+    const req = total.requests;
+    const rate = (n: number) => (req > 0 ? n / req : 0);
+
+    return {
+      requests: req,
+      l1_hits: total.l1_hits,
+      l2_hits: total.l2_hits,
+      miss: total.miss,
+      bypass: {
+        method:  total.bm,
+        nocache: total.bn,
+        size:    total.bs,
+        other:   total.bo,
+        total:   bypassTotal,
+      },
+      l1_hit_rate:   rate(total.l1_hits),
+      edge_hit_rate: rate(total.l1_hits + total.l2_hits),
+      bypass_rate:   rate(bypassTotal),
+      disk,
+      by_domain: byDomain.map(d => ({
+        host:          d.host,
+        requests:      d.requests,
+        l1_hits:       d.l1_hits,
+        l2_hits:       d.l2_hits,
+        bypass_total:  d.bypass_total,
+        l1_hit_rate:   d.requests > 0 ? d.l1_hits / d.requests : 0,
+        edge_hit_rate: d.requests > 0 ? (d.l1_hits + d.l2_hits) / d.requests : 0,
+      })),
+    };
   });
 
   /** 인기 콘텐츠 목록 — hit_count 내림차순 상위 20개, domain 쿼리로 특정 도메인만 필터링 가능 */

@@ -81,7 +81,8 @@ const dnsClient = createDnsClient(grpcAddr(process.env.DNS_GRPC_URL ?? 'localhos
 const optimizerClient = createOptimizerClient(grpcAddr(process.env.OPTIMIZER_GRPC_URL ?? 'localhost:50054'));
 const proxyAdminUrl = process.env.PROXY_ADMIN_URL ?? 'http://localhost:8081';
 
-// Fastify 인스턴스에 gRPC 클라이언트 데코레이터 등록
+// Fastify 인스턴스에 gRPC 클라이언트 및 DB 데코레이터 등록
+app.decorate('db', db);
 app.decorate('storageClient', storageClient);
 app.decorate('tlsClient', tlsClient);
 app.decorate('dnsClient', dnsClient);
