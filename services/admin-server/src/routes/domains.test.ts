@@ -2,7 +2,28 @@ import { describe, it, expect, vi } from 'vitest';
 import Fastify from 'fastify';
 import Database from 'better-sqlite3';
 import { DomainRepository, DOMAIN_SCHEMA } from '../db/domain-repo.js';
+import { DomainStatsRepository } from '../db/domain-stats-repo.js';
 import { domainRoutes } from './domains.js';
+
+/** domain_stats 스키마 — 6개 신규 컬럼 포함 */
+const DOMAIN_STATS_SCHEMA = `
+  CREATE TABLE domain_stats (
+    host TEXT NOT NULL, timestamp INTEGER NOT NULL,
+    requests INTEGER NOT NULL DEFAULT 0,
+    cache_hits INTEGER NOT NULL DEFAULT 0,
+    cache_misses INTEGER NOT NULL DEFAULT 0,
+    bandwidth INTEGER NOT NULL DEFAULT 0,
+    avg_response_time INTEGER NOT NULL DEFAULT 0,
+    l1_hits INTEGER NOT NULL DEFAULT 0,
+    l2_hits INTEGER NOT NULL DEFAULT 0,
+    bypass_method INTEGER NOT NULL DEFAULT 0,
+    bypass_nocache INTEGER NOT NULL DEFAULT 0,
+    bypass_size INTEGER NOT NULL DEFAULT 0,
+    bypass_other INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (host, timestamp)
+  );
+  CREATE INDEX idx_domain_stats_ts ON domain_stats(timestamp);
+`;
 
 // Proxy admin API push 모킹
 vi.mock('axios', () => ({
@@ -27,6 +48,7 @@ function buildApp(domainRepo: DomainRepository) {
 function makeRepo() {
   const db = new Database(':memory:');
   db.exec(DOMAIN_SCHEMA);
+  db.exec(DOMAIN_STATS_SCHEMA);
   return new DomainRepository(db);
 }
 
@@ -197,5 +219,71 @@ describe('DELETE /api/domains/:host', () => {
     const res = await app.inject({ method: 'DELETE', url: '/api/domains/%2A.textbook.com' });
     expect(res.statusCode).toBe(204);
     expect(repo.findByHost('*.textbook.com')).toBeUndefined();
+  });
+});
+
+describe('GET /api/domains/summary — L1/L2/bypass 비율', () => {
+  /**
+   * today_l1_hit_rate / today_edge_hit_rate / today_bypass_rate 계산 검증
+   * seed: requests=100, l1_hits=60, l2_hits=10, bypass_*=20(5+5+5+5)
+   */
+  it('today_l1_hit_rate / today_edge_hit_rate / today_bypass_rate 계산', async () => {
+    const repo = makeRepo();
+    repo.upsert('a.test', 'https://a.test');
+    const statsRepo = new DomainStatsRepository(repo.database);
+    // 오늘 자정 버킷에 데이터 삽입
+    const todayStart = Math.floor(Date.now() / 1000);
+    statsRepo.insert({
+      host: 'a.test',
+      timestamp: todayStart,
+      requests: 100,
+      cache_hits: 70,
+      cache_misses: 30,
+      bandwidth: 1024,
+      avg_response_time: 50,
+      l1_hits: 60,
+      l2_hits: 10,
+      bypass_method: 5,
+      bypass_nocache: 5,
+      bypass_size: 5,
+      bypass_other: 5,
+    });
+
+    // per-host 직접 검증을 위해 getSummaryAll() 결과를 사용한다
+    // (buildApp 호출 없이 repo 메서드 직접 단위 검증)
+    const summaries = statsRepo.getSummaryAll();
+    const s = summaries.find((x) => x.host === 'a.test');
+    expect(s).toBeDefined();
+    expect(s!.today_l1_hit_rate).toBeCloseTo(0.60);
+    expect(s!.today_edge_hit_rate).toBeCloseTo(0.70);
+    expect(s!.today_bypass_rate).toBeCloseTo(0.20);
+  });
+
+  it('requests=0 일 때 3개 비율 모두 0', async () => {
+    const repo = makeRepo();
+    repo.upsert('b.test', 'https://b.test');
+    // 통계 행 미삽입 상태 — divide-by-zero 가드 확인용 삽입
+    const statsRepo = new DomainStatsRepository(repo.database);
+    statsRepo.insert({
+      host: 'b.test',
+      timestamp: Math.floor(Date.now() / 1000),
+      requests: 0,
+      cache_hits: 0,
+      cache_misses: 0,
+      bandwidth: 0,
+      avg_response_time: 0,
+      l1_hits: 0,
+      l2_hits: 0,
+      bypass_method: 0,
+      bypass_nocache: 0,
+      bypass_size: 0,
+      bypass_other: 0,
+    });
+    const summaries2 = statsRepo.getSummaryAll();
+    const s = summaries2.find((x) => x.host === 'b.test');
+    expect(s).toBeDefined();
+    expect(s!.today_l1_hit_rate).toBe(0);
+    expect(s!.today_edge_hit_rate).toBe(0);
+    expect(s!.today_bypass_rate).toBe(0);
   });
 });

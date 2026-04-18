@@ -78,6 +78,13 @@ export interface DomainSummary {
   today_requests_delta: number;
   /** 전일 대비 히트율 변화율(%) */
   hit_rate_delta: number;
+  // Phase 12 신규 (선택 필드 — 마이그레이션 직후 값이 0이어도 UI가 안전하게 소비)
+  /** L1(메모리) 캐시 히트율 = today_l1_hits / today_requests */
+  today_l1_hit_rate: number;
+  /** 엣지(L1+L2) 캐시 히트율 = (today_l1_hits + today_l2_hits) / today_requests */
+  today_edge_hit_rate: number;
+  /** 캐시 우회율 = today_bypass_total / today_requests */
+  today_bypass_rate: number;
 }
 
 /** period 허용 값 */
@@ -251,28 +258,40 @@ export class DomainStatsRepository {
     const todayStart = now - (now % 86400);
     const since24h = now - 86400;
 
-    // 오늘 통계 집계
+    // 오늘 통계 집계 — L1/L2/bypass 신규 컬럼 포함
     type TodayRow = {
       host: string;
       today_requests: number;
       today_cache_hits: number;
       today_bandwidth: number;
+      today_l1_hits: number;
+      today_l2_hits: number;
+      today_bypass_total: number;
     };
 
     const todayRows = this.db
       .prepare(
         `SELECT
            host,
-           SUM(requests)   AS today_requests,
-           SUM(cache_hits) AS today_cache_hits,
-           SUM(bandwidth)  AS today_bandwidth
+           SUM(requests)                                                       AS today_requests,
+           SUM(cache_hits)                                                     AS today_cache_hits,
+           SUM(bandwidth)                                                      AS today_bandwidth,
+           SUM(l1_hits)                                                        AS today_l1_hits,
+           SUM(l2_hits)                                                        AS today_l2_hits,
+           SUM(bypass_method + bypass_nocache + bypass_size + bypass_other)    AS today_bypass_total
          FROM domain_stats
          WHERE timestamp >= ?
          GROUP BY host`,
       )
       .all(todayStart) as TodayRow[];
 
-    // 어제 통계 집계 — 전일 대비 변화율 계산용
+    // 어제 통계 집계 — 전일 대비 변화율 계산용 (delta에는 신규 컬럼 불필요)
+    type YesterdayRow = {
+      host: string;
+      today_requests: number;
+      today_cache_hits: number;
+      today_bandwidth: number;
+    };
     const yesterdayStart = todayStart - 86400;
     const yesterdayRows = this.db
       .prepare(
@@ -285,9 +304,9 @@ export class DomainStatsRepository {
          WHERE timestamp >= ? AND timestamp < ?
          GROUP BY host`,
       )
-      .all(yesterdayStart, todayStart) as TodayRow[];
+      .all(yesterdayStart, todayStart) as YesterdayRow[];
 
-    const yesterdayMap = new Map<string, TodayRow>();
+    const yesterdayMap = new Map<string, YesterdayRow>();
     for (const row of yesterdayRows) {
       yesterdayMap.set(row.host, row);
     }
@@ -324,15 +343,20 @@ export class DomainStatsRepository {
       const yesterdayRequests = yesterday?.today_requests ?? 0;
       const yesterdayHitRate = yesterdayRequests > 0 ? (yesterday?.today_cache_hits ?? 0) / yesterdayRequests : 0;
       const todayHitRate = r.today_requests > 0 ? r.today_cache_hits / r.today_requests : 0;
+      const todayReq = r.today_requests;
       return {
         host: r.host,
-        today_requests: r.today_requests,
+        today_requests: todayReq,
         today_cache_hits: r.today_cache_hits,
         today_bandwidth: r.today_bandwidth,
         hit_rate: todayHitRate,
         hourly: hourlyMap.get(r.host) ?? [],
-        today_requests_delta: this.getDelta(r.today_requests, yesterdayRequests),
+        today_requests_delta: this.getDelta(todayReq, yesterdayRequests),
         hit_rate_delta: this.getDelta(todayHitRate, yesterdayHitRate),
+        // Phase 12 신규 — divide-by-zero 가드 포함
+        today_l1_hit_rate:   todayReq > 0 ? r.today_l1_hits      / todayReq : 0,
+        today_edge_hit_rate: todayReq > 0 ? (r.today_l1_hits + r.today_l2_hits) / todayReq : 0,
+        today_bypass_rate:   todayReq > 0 ? r.today_bypass_total  / todayReq : 0,
       };
     });
   }
