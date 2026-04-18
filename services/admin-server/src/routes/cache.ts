@@ -85,6 +85,52 @@ export async function cacheRoutes(app: FastifyInstance) {
     };
   });
 
+  /** 시계열 버킷 — 스택 차트용 L1/L2/miss/bypass 집계, range=1h(분 단위)|24h(시간 단위) */
+  const RANGE_TABLE: Record<string, { windowSec: number; bucketSec: number }> = {
+    '1h':  { windowSec: 3600,  bucketSec: 60 },
+    '24h': { windowSec: 86400, bucketSec: 3600 },
+  };
+
+  app.get<{ Querystring: { range?: string; host?: string } }>('/api/cache/series', async (req, reply) => {
+    const range = req.query.range ?? '1h';
+    const cfg = RANGE_TABLE[range];
+    if (!cfg) {
+      return reply.status(400).send({ error: `invalid range: ${range}` });
+    }
+    const sinceSec = Math.floor(Date.now() / 1000) - cfg.windowSec;
+    const host = req.query.host;
+
+    // host 필터가 있을 때만 WHERE 절에 AND host = ? 추가
+    const hostWhere = host ? 'AND host = ?' : '';
+    const params: unknown[] = host
+      ? [cfg.bucketSec, cfg.bucketSec, sinceSec, host]
+      : [cfg.bucketSec, cfg.bucketSec, sinceSec];
+
+    const rows = app.db.prepare(`
+      SELECT (timestamp / ?) * ?               AS bucket_ts_sec,
+             COALESCE(SUM(l1_hits), 0)         AS l1_hits,
+             COALESCE(SUM(l2_hits), 0)         AS l2_hits,
+             COALESCE(SUM(cache_misses), 0)    AS miss,
+             COALESCE(SUM(bypass_method + bypass_nocache + bypass_size + bypass_other), 0) AS bypass
+      FROM domain_stats
+      WHERE timestamp >= ? ${hostWhere}
+      GROUP BY bucket_ts_sec
+      ORDER BY bucket_ts_sec ASC
+    `).all(...params) as Array<{
+      bucket_ts_sec: number; l1_hits: number; l2_hits: number; miss: number; bypass: number;
+    }>;
+
+    return {
+      buckets: rows.map(r => ({
+        ts:      Number(r.bucket_ts_sec) * 1000,  // epoch ms 변환
+        l1_hits: r.l1_hits,
+        l2_hits: r.l2_hits,
+        miss:    r.miss,
+        bypass:  r.bypass,
+      })),
+    };
+  });
+
   /** 인기 콘텐츠 목록 — hit_count 내림차순 상위 20개, domain 쿼리로 특정 도메인만 필터링 가능 */
   app.get<{ Querystring: { limit?: string; domain?: string } }>('/api/cache/popular', async (request) => {
     try {
