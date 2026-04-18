@@ -2,10 +2,17 @@ use std::{collections::HashMap, sync::Arc};
 use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 
+use crate::metrics::{SharedMetrics, SharedRecent};
 use cdn_proto::dns::{
     dns_service_server::DnsService,
     HealthRequest, HealthResponse,
     SyncDomainsRequest, SyncDomainsResponse,
+    StatsRequest, StatsResponse,
+    RecentQueriesRequest, RecentQueriesResponse,
+    RecordsRequest, RecordsResponse,
+    TopDomain,
+    QueryEntry as ProtoQueryEntry,
+    DnsRecord  as ProtoDnsRecord,
 };
 
 // DomainMap 타입 — dns.rs와 동일하게 유지
@@ -13,6 +20,9 @@ pub type DomainMap = Arc<RwLock<HashMap<String, String>>>;
 
 pub struct DnsGrpc {
     pub(crate) domain_map: DomainMap,
+    pub(crate) metrics:    SharedMetrics,
+    pub(crate) recent:     SharedRecent,
+    pub(crate) cdn_ip:     String,
 }
 
 #[tonic::async_trait]
@@ -44,6 +54,70 @@ impl DnsService for DnsGrpc {
             latency_ms: 0,
         }))
     }
+
+    /// DNS 통계 조회 — 누적 카운터 + 상위 qname 10개 반환
+    async fn get_stats(
+        &self,
+        _: Request<StatsRequest>,
+    ) -> Result<Response<StatsResponse>, Status> {
+        let snap = self.metrics.snapshot();
+        let top_domains = self
+            .recent
+            .top_qnames(10)
+            .into_iter()
+            .map(|(qname, count)| TopDomain { qname, count })
+            .collect();
+        Ok(Response::new(StatsResponse {
+            total_queries: snap.total,
+            matched:       snap.matched,
+            nxdomain:      snap.nxdomain,
+            forwarded:     snap.forwarded,
+            uptime_secs:   snap.uptime_secs,
+            top_domains,
+        }))
+    }
+
+    /// 최근 쿼리 목록 조회 — limit을 [1, 512]로 클램프
+    async fn get_recent_queries(
+        &self,
+        req: Request<RecentQueriesRequest>,
+    ) -> Result<Response<RecentQueriesResponse>, Status> {
+        let raw = req.into_inner().limit;
+        // clamp: 0 → 1, >512 → 512
+        let limit = raw.clamp(1, 512) as usize;
+        let entries = self
+            .recent
+            .snapshot(limit)
+            .into_iter()
+            .map(|e| ProtoQueryEntry {
+                ts_unix_ms: e.ts_unix_ms,
+                client_ip:  e.client_ip,
+                qname:      e.qname,
+                qtype:      e.qtype,
+                result:     e.result.as_str().to_string(),
+                latency_us: e.latency_us,
+            })
+            .collect();
+        Ok(Response::new(RecentQueriesResponse { entries }))
+    }
+
+    /// DNS 레코드 목록 조회 — domain_map의 모든 호스트를 cdn_ip로 가는 A 레코드로 변환
+    async fn get_records(
+        &self,
+        _: Request<RecordsRequest>,
+    ) -> Result<Response<RecordsResponse>, Status> {
+        let map = self.domain_map.read().await;
+        let records = map
+            .iter()
+            .map(|(host, _origin)| ProtoDnsRecord {
+                host:   host.clone(),
+                target: self.cdn_ip.clone(),
+                rtype:  "A".to_string(),
+                source: "auto".to_string(),
+            })
+            .collect();
+        Ok(Response::new(RecordsResponse { records }))
+    }
 }
 
 #[cfg(test)]
@@ -53,12 +127,16 @@ mod tests {
     use tokio::sync::RwLock;
     use tonic::Request;
 
+    use crate::metrics::QueryResult;
     use cdn_proto::dns::{SyncDomainsRequest, HealthRequest, DnsDomain};
 
     /// 테스트용 DnsGrpc 인스턴스 생성
     fn make_grpc() -> DnsGrpc {
         DnsGrpc {
             domain_map: Arc::new(RwLock::new(HashMap::new())),
+            metrics:    Arc::new(crate::metrics::DnsMetrics::new()),
+            recent:     Arc::new(crate::metrics::RecentQueries::new(512)),
+            cdn_ip:     "127.0.0.1".to_string(),
         }
     }
 
@@ -137,5 +215,88 @@ mod tests {
             .into_inner();
 
         assert!(res.online);
+    }
+
+    #[tokio::test]
+    async fn get_stats_는_스냅샷과_top_domains를_반환한다() {
+        let g = make_grpc();
+        g.metrics.record(QueryResult::Matched);
+        g.metrics.record(QueryResult::Forwarded);
+        g.recent.push(crate::metrics::QueryEntry {
+            ts_unix_ms: 0, client_ip: "1.1.1.1".into(),
+            qname: "a.test".into(), qtype: "A".into(),
+            result: QueryResult::Matched, latency_us: 10,
+        });
+        let res = g.get_stats(Request::new(StatsRequest {})).await.unwrap().into_inner();
+        assert_eq!(res.total_queries, 2);
+        assert_eq!(res.matched, 1);
+        assert_eq!(res.forwarded, 1);
+        assert_eq!(res.top_domains.len(), 1);
+        assert_eq!(res.top_domains[0].qname, "a.test");
+        assert_eq!(res.top_domains[0].count, 1);
+    }
+
+    #[tokio::test]
+    async fn get_recent_queries_는_limit을_512로_클램프한다() {
+        let g = make_grpc();
+        for _ in 0..5 {
+            g.recent.push(crate::metrics::QueryEntry {
+                ts_unix_ms: 0, client_ip: "1.1.1.1".into(),
+                qname: "a.test".into(), qtype: "A".into(),
+                result: QueryResult::Matched, latency_us: 0,
+            });
+        }
+        // 과도한 limit → 실제 보유분까지만 반환되는지 확인
+        let res = g.get_recent_queries(Request::new(RecentQueriesRequest { limit: 10_000 }))
+            .await.unwrap().into_inner();
+        assert_eq!(res.entries.len(), 5);
+        assert_eq!(res.entries[0].result, "matched");
+
+        // 축소 limit
+        let res = g.get_recent_queries(Request::new(RecentQueriesRequest { limit: 3 }))
+            .await.unwrap().into_inner();
+        assert_eq!(res.entries.len(), 3);
+
+        // limit=0 → clamp로 1이 되어 1개 반환
+        let res = g.get_recent_queries(Request::new(RecentQueriesRequest { limit: 0 }))
+            .await.unwrap().into_inner();
+        assert_eq!(res.entries.len(), 1);
+
+        // 업퍼 바운드 클램프 검증 — 링버퍼는 512 cap이므로 이미 512개만 보유
+        let g2 = make_grpc();
+        for i in 0..513 {
+            g2.recent.push(crate::metrics::QueryEntry {
+                ts_unix_ms: i as i64,
+                client_ip: "1.1.1.1".into(),
+                qname: format!("q{i}.test"),
+                qtype: "A".into(),
+                result: QueryResult::Matched,
+                latency_us: 0,
+            });
+        }
+        let res = g2.get_recent_queries(Request::new(RecentQueriesRequest { limit: 10_000 }))
+            .await.unwrap().into_inner();
+        assert_eq!(res.entries.len(), 512, "limit은 512로 클램프되어야 한다");
+    }
+
+    #[tokio::test]
+    async fn get_records_는_도메인맵을_a_레코드로_반환한다() {
+        let g = make_grpc();
+        {
+            let mut m = g.domain_map.write().await;
+            m.insert("edu.test".into(), "https://edu.test".into());
+            m.insert("textbook.net".into(), "https://textbook.net".into());
+        }
+        let res = g.get_records(Request::new(RecordsRequest {}))
+            .await.unwrap().into_inner();
+        assert_eq!(res.records.len(), 2);
+        for r in &res.records {
+            assert_eq!(r.target, "127.0.0.1");
+            assert_eq!(r.rtype, "A");
+            assert_eq!(r.source, "auto");
+        }
+        let hosts: std::collections::HashSet<String> = res.records.iter().map(|r| r.host.clone()).collect();
+        assert!(hosts.contains("edu.test"));
+        assert!(hosts.contains("textbook.net"));
     }
 }

@@ -7,9 +7,10 @@ test.describe('AppLayout', () => {
     // 사이드바 타이틀
     await expect(page.getByText('Smart School CDN')).toBeVisible();
 
-    // 사이드바 네비게이션 항목 — 3개만 존재
+    // 사이드바 네비게이션 항목 — 4개 존재 (대시보드/도메인/DNS/시스템)
     await expect(page.getByRole('link', { name: '대시보드' })).toBeVisible();
     await expect(page.getByRole('link', { name: '도메인 관리' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'DNS' })).toBeVisible();
     await expect(page.getByRole('link', { name: '시스템' })).toBeVisible();
 
     // 제거된 메뉴 항목이 없음을 확인

@@ -2,13 +2,47 @@ syntax = "proto3";
 package cdn.dns;
 
 service DnsService {
-  rpc SyncDomains(SyncDomainsRequest) returns (SyncDomainsResponse);
-  rpc Health(HealthRequest)           returns (HealthResponse);
+  rpc SyncDomains      (SyncDomainsRequest)    returns (SyncDomainsResponse);
+  rpc Health           (HealthRequest)         returns (HealthResponse);
+  rpc GetStats         (StatsRequest)          returns (StatsResponse);
+  rpc GetRecentQueries (RecentQueriesRequest)  returns (RecentQueriesResponse);
+  rpc GetRecords       (RecordsRequest)        returns (RecordsResponse);
 }
 
-message SyncDomainsRequest { repeated DnsDomain domains = 1; }
-message DnsDomain { string host = 1; string origin = 2; }
+message SyncDomainsRequest  { repeated DnsDomain domains = 1; }
+message DnsDomain           { string host = 1; string origin = 2; }
 message SyncDomainsResponse { bool success = 1; }
 
-message HealthRequest {}
+message HealthRequest  {}
 message HealthResponse { bool online = 1; int64 latency_ms = 2; }
+
+message StatsRequest  {}
+message StatsResponse {
+  uint64 total_queries           = 1;
+  uint64 matched                 = 2;
+  uint64 nxdomain                = 3;
+  uint64 forwarded               = 4;
+  uint64 uptime_secs             = 5;
+  repeated TopDomain top_domains = 6;
+}
+message TopDomain { string qname = 1; uint32 count = 2; }
+
+message RecentQueriesRequest  { uint32 limit = 1; }
+message RecentQueriesResponse { repeated QueryEntry entries = 1; }
+message QueryEntry {
+  int64  ts_unix_ms = 1;
+  string client_ip  = 2;
+  string qname      = 3;
+  string qtype      = 4;
+  string result     = 5;   // "matched" | "nxdomain" | "forwarded"
+  uint32 latency_us = 6;
+}
+
+message RecordsRequest  {}
+message RecordsResponse { repeated DnsRecord records = 1; }
+message DnsRecord {
+  string host   = 1;
+  string target = 2;
+  string rtype  = 3;   // Phase A: "A" 고정
+  string source = 4;   // Phase A: "auto" 고정
+}

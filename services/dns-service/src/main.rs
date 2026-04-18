@@ -2,6 +2,7 @@
 /// - DNS UDP 서버(:53), gRPC 서버(:50053), HTTP 헬스체크(:8082)를 병행 기동한다
 mod dns;
 mod grpc;
+mod metrics;
 
 use std::{
     collections::HashMap,
@@ -15,6 +16,7 @@ use tracing_subscriber::EnvFilter;
 
 use cdn_proto::dns::dns_service_server::DnsServiceServer;
 use grpc::{DnsGrpc, DomainMap};
+use metrics::{DnsMetrics, RecentQueries};
 
 /// Docker healthcheck 및 로드밸런서용 헬스 엔드포인트
 async fn health() -> &'static str { "ok" }
@@ -52,9 +54,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // DNS UDP 서버를 태스크로 실행하고 핸들을 보관 — 종료 시 감지
     // domain_map 이동 전에 클론
     let dns_map = domain_map.clone();
-    let svc = DnsServiceServer::new(DnsGrpc { domain_map });
+    // gRPC와 UDP 서버가 동일한 Arc를 공유해야 /api/dns/status가 실제 트래픽을 반영함
+    // (별도 Arc를 사용하면 gRPC는 0만 보고하고 실제 카운트는 UDP 쪽에만 쌓임)
+    let dns_metrics = Arc::new(DnsMetrics::new());
+    let dns_recent = Arc::new(RecentQueries::new(512));
+    let svc = DnsServiceServer::new(DnsGrpc {
+        domain_map,
+        metrics: dns_metrics.clone(),
+        recent:  dns_recent.clone(),
+        cdn_ip:  cdn_ip.to_string(),
+    });
     let dns_handle = tokio::spawn(async move {
-        dns::run_dns_server(dns_map, cdn_ip, dns_upstream).await;
+        dns::run_dns_server(dns_map, dns_metrics, dns_recent, cdn_ip, dns_upstream).await;
     });
 
     // HTTP 헬스체크 서버 — Docker healthcheck용 (:8082)

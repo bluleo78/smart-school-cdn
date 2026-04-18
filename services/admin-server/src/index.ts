@@ -9,12 +9,15 @@ import { domainRoutes } from './routes/domains.js';
 import { systemRoutes } from './routes/system.js';
 import { DomainRepository, DOMAIN_SCHEMA } from './db/domain-repo.js';
 import { DomainStatsRepository } from './db/domain-stats-repo.js';
+import { DnsMetricsRepository, DNS_METRICS_SCHEMA } from './db/dns-metrics-repo.js';
 import { startStatsCollector } from './stats-collector.js';
+import { startDnsMetricsCollector } from './dns-metrics-collector.js';
 import { createStorageClient } from './grpc/storage_client.js';
 import { createTlsClient } from './grpc/tls_client.js';
 import { createDnsClient } from './grpc/dns_client.js';
 import { createOptimizerClient } from './grpc/optimizer_client.js';
 import { optimizerRoutes } from './routes/optimizer.js';
+import { dnsRoutes } from './routes/dns.js';
 import { logRoutes } from './routes/logs.js';
 
 // SQLite DB 초기화 — 앱 기동 시 1회 실행
@@ -43,10 +46,14 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_domain_stats_ts ON domain_stats(timestamp);
 `);
 
+// DNS 메트릭 버킷 테이블 생성 — Phase A: 1분 단위 카운터 델타 저장
+db.exec(DNS_METRICS_SCHEMA);
+
 // 외래 키 제약 활성화 — 도메인 삭제 시 cascade 동작에 필요
 db.pragma('foreign_keys = ON');
 
 const domainRepo = new DomainRepository(db);
+const dnsMetricsRepo = new DnsMetricsRepository(db);
 
 // Rust 프록시 기본 도메인 시드 — 없으면 삽입, 있으면 무시
 domainRepo.upsert('httpbin.org', 'https://httpbin.org');
@@ -69,6 +76,7 @@ app.decorate('storageClient', storageClient);
 app.decorate('tlsClient', tlsClient);
 app.decorate('dnsClient', dnsClient);
 app.decorate('optimizerClient', optimizerClient);
+app.decorate('dnsMetricsRepo', dnsMetricsRepo);
 app.decorate('proxyAdminUrl', proxyAdminUrl);
 app.decorate('healthMonitor', new HealthMonitor({
   proxyAdminUrl,
@@ -103,6 +111,9 @@ await app.register(systemRoutes);
 /** 최적화 프로파일 + 절감 통계 API 라우트 등록 */
 await app.register(optimizerRoutes);
 
+/** DNS 상태/레코드/쿼리/메트릭 API 라우트 등록 */
+await app.register(dnsRoutes);
+
 /** 실시간 로그 스트리밍 SSE 라우트 등록 */
 await app.register(logRoutes);
 
@@ -116,6 +127,12 @@ try {
   // Proxy 통계 폴링 시작 — 1분마다 /stats 엔드포인트에서 수집하여 DB에 저장
   const statsRepo = new DomainStatsRepository(db);
   startStatsCollector(proxyAdminUrl, statsRepo, app.log);
+  // DNS 메트릭 폴링 시작 — 1분마다 dns-service GetStats 호출, 델타 계산 후 DB에 저장
+  startDnsMetricsCollector({
+    getStats: () => dnsClient.getStats(),
+    repo: dnsMetricsRepo,
+    log: app.log,
+  });
 } catch (err) {
   app.log.error(err);
   process.exit(1);

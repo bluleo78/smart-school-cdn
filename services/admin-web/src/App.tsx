@@ -4,6 +4,7 @@ import { AppLayout } from './components/layout/AppLayout';
 import { DashboardPage } from './pages/DashboardPage';
 import { DomainsPage } from './pages/DomainsPage';
 import { DomainDetailPage } from './pages/DomainDetailPage';
+import { DnsPage } from './pages/DnsPage';
 import { SystemPage } from './pages/SystemPage';
 
 function NotFoundPage() {
@@ -25,6 +26,7 @@ export function App() {
           <Route path="domains/:host" element={<DomainDetailPage />} />
           <Route path="cache" element={<Navigate to="/domains" replace />} />
           <Route path="optimizer" element={<Navigate to="/domains" replace />} />
+          <Route path="dns" element={<DnsPage />} />
           <Route path="system" element={<SystemPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Route>
