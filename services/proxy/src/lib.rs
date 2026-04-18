@@ -2,6 +2,7 @@
 pub mod clients;
 pub mod coalescer;
 pub mod config;
+pub mod events;
 pub mod state;
 
 use std::collections::HashMap;
@@ -163,6 +164,8 @@ pub struct ProxyState {
     pub memory_cache: moka::future::Cache<String, Arc<MemoryCacheEntry>>,
     /// 도메인별 요청 통계 카운터
     pub counters: DomainCounters,
+    /// 최적화 이벤트 배치 push 송신자 — None이면 이벤트 수집 비활성화
+    pub events: Option<events::EventsSender>,
 }
 
 /// 관리 API 핸들러 상태
@@ -276,6 +279,68 @@ fn parse_cache_control(cache_control: Option<&str>, pragma: Option<&str>) -> Cac
     CacheDirective::Cacheable(None)
 }
 
+/// Phase 13 관찰 대상 — 미디어(오디오/비디오) 요청 여부 판정.
+/// URL 확장자 우선, 차선으로 Content-Type 의 base가 video/·audio/ 로 시작하는지 확인한다.
+fn is_media_request(path: &str, content_type: Option<&str>) -> bool {
+    // path 마지막 `.` 이후 → 알파뉴메릭 prefix 추출 (쿼리·프래그먼트 방어)
+    let ext = path
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if matches!(
+        ext.as_str(),
+        "mp4" | "m4v" | "mov" | "avi" | "webm" | "mpg" | "mpeg"
+            | "mp3" | "m4a" | "aac" | "flac" | "wav" | "ogg"
+    ) {
+        return true;
+    }
+    if let Some(ct) = content_type {
+        let base = ct.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
+        if base.starts_with("video/") || base.starts_with("audio/") {
+            return true;
+        }
+    }
+    false
+}
+
+/// 미디어 요청이면 배치 푸셔로 이벤트 송출 — Phase 13 범위에서는 `media_cache`만 대상.
+/// 보내는 필드는 admin-server `optimization_events` 스키마와 1:1.
+fn emit_media_cache_event(
+    events_sender: &Option<events::EventsSender>,
+    host: &str,
+    uri: &Uri,
+    outcome: CacheOutcome,
+    body_bytes: Option<u64>,
+    headers: &HeaderMap,
+    content_type: Option<&str>,
+    elapsed_ms: u64,
+) {
+    let Some(sender) = events_sender else { return };
+    if !is_media_request(uri.path(), content_type) {
+        return;
+    }
+    let range_header = headers
+        .get(axum::http::header::RANGE)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+    sender.emit(events::EventRecord {
+        event_type: "media_cache",
+        host: host.to_string(),
+        url: uri.to_string(),
+        decision: outcome.as_header().to_string(),
+        // Range 파서·슬라이싱이 들어오기 전까지는 원본=응답 바이트 동일
+        orig_size: body_bytes,
+        out_size: body_bytes,
+        range_header,
+        content_type: content_type.map(str::to_string),
+        elapsed_ms,
+    });
+}
+
 /// 응답이 캐시 가능한 콘텐츠 타입인지 판정.
 /// 학교 교과서 CDN 워크로드(이미지·텍스트·폰트·JS/JSON·PDF·EPUB·오디오/비디오·WASM)를 대상으로 한다.
 fn is_cacheable_content_type(content_type: &str) -> bool {
@@ -378,6 +443,11 @@ async fn proxy_handler(
             }
             tracing::info!(host=%host, url=%uri, elapsed_ms=%elapsed_ms, "L1 메모리 캐시 HIT");
             record_domain_outcome(&ps.counters, &host, CacheOutcome::L1Hit, entry.body.len() as u64, elapsed_ms);
+            emit_media_cache_event(
+                &ps.events, &host, &uri, CacheOutcome::L1Hit,
+                Some(entry.body.len() as u64), &headers,
+                entry.content_type.as_deref(), elapsed_ms,
+            );
 
             let mut resp = Response::builder().status(StatusCode::OK);
             if let Some(ref ct) = entry.content_type {
@@ -420,6 +490,11 @@ async fn proxy_handler(
             }
             tracing::info!(host=%host, url=%uri, elapsed_ms=%elapsed_ms, "L2 디스크 캐시 HIT (L1 승격)");
             record_domain_outcome(&ps.counters, &host, CacheOutcome::L2Hit, cached_bytes.len() as u64, elapsed_ms);
+            emit_media_cache_event(
+                &ps.events, &host, &uri, CacheOutcome::L2Hit,
+                Some(cached_bytes.len() as u64), &headers,
+                content_type.as_deref(), elapsed_ms,
+            );
 
             let mut resp = Response::builder().status(StatusCode::OK);
             if let Some(ct) = content_type {
@@ -589,6 +664,11 @@ async fn proxy_handler(
                     cache="MISS", "프록시 요청 처리 완료"
                 );
                 record_domain_outcome(&ps.counters, &host, *outcome, body.len() as u64, elapsed_ms);
+                emit_media_cache_event(
+                    &ps.events, &host, &uri, *outcome,
+                    Some(body.len() as u64), &headers,
+                    ct.as_deref(), elapsed_ms,
+                );
                 let mut response = Response::builder().status(*status);
                 if let Some(ct_str) = ct {
                     response = response.header("Content-Type", ct_str.as_str());
@@ -615,6 +695,10 @@ async fn proxy_handler(
                     });
                 }
                 record_domain_outcome(&ps.counters, &host, CacheOutcome::BypassOther, 0, elapsed_ms);
+                emit_media_cache_event(
+                    &ps.events, &host, &uri, CacheOutcome::BypassOther,
+                    None, &headers, None, elapsed_ms,
+                );
                 return Response::builder()
                     .status(StatusCode::BAD_GATEWAY)
                     .header("X-Cache-Status", HeaderValue::from_static("BYPASS"))
@@ -691,6 +775,17 @@ async fn proxy_handler(
         });
     }
     record_domain_outcome(&ps.counters, &host, CacheOutcome::BypassMethod, response_body.len() as u64, elapsed_ms);
+    {
+        // non-GET 경로는 response_headers에서 Content-Type을 추출하여 미디어 여부 판정
+        let ct = response_headers
+            .get("content-type")
+            .and_then(|v| v.to_str().ok());
+        emit_media_cache_event(
+            &ps.events, &host, &uri, CacheOutcome::BypassMethod,
+            Some(response_body.len() as u64), &headers,
+            ct, elapsed_ms,
+        );
+    }
 
     tracing::info!(
         method = %method, host = %host, url = %uri,
@@ -1880,6 +1975,7 @@ mod tests {
             coalescer: Arc::new(coalescer::Coalescer::new()),
             memory_cache: moka::future::Cache::builder().max_capacity(100).build(),
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            events: None,
         };
 
         let router = build_proxy_router(ps);
@@ -1935,6 +2031,7 @@ mod tests {
             coalescer: Arc::new(coalescer::Coalescer::new()),
             memory_cache: moka::future::Cache::builder().max_capacity(100).build(),
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            events: None,
         };
 
         let router = build_proxy_router(ps);
@@ -1989,6 +2086,7 @@ mod tests {
             coalescer: Arc::new(coalescer::Coalescer::new()),
             memory_cache: moka::future::Cache::builder().max_capacity(100).build(),
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            events: None,
         };
 
         let router = build_proxy_router(ps);
@@ -2046,6 +2144,7 @@ mod tests {
             coalescer: Arc::new(coalescer::Coalescer::new()),
             memory_cache: moka::future::Cache::builder().max_capacity(100).build(),
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            events: None,
         };
 
         let router = build_proxy_router(ps);
@@ -2128,6 +2227,7 @@ mod tests {
             coalescer: Arc::new(coalescer::Coalescer::new()),
             memory_cache: moka::future::Cache::builder().max_capacity(100).build(),
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            events: None,
         };
 
         let router = build_proxy_router(ps);
@@ -2282,6 +2382,7 @@ mod tests {
             coalescer: Arc::new(coalescer::Coalescer::new()),
             memory_cache: moka::future::Cache::builder().max_capacity(100).build(),
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            events: None,
         };
         let router = build_proxy_router(ps.clone());
         (ps, router)
@@ -2532,6 +2633,7 @@ mod tests {
             coalescer: Arc::new(coalescer::Coalescer::new()),
             memory_cache,
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            events: None,
         };
 
         let shared = ps.shared.clone();
@@ -2613,6 +2715,7 @@ mod tests {
             coalescer: Arc::new(coalescer::Coalescer::new()),
             memory_cache,
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            events: None,
         };
 
         let shared = ps.shared.clone();
@@ -2642,6 +2745,45 @@ mod tests {
     }
 
     // ─── is_cacheable_content_type 단위 테스트 ───────────────────────
+
+    // ─── is_media_request 단위 테스트 ───────────────────────────────────
+
+    #[test]
+    fn is_media_request_video_audio_extensions() {
+        // 비디오
+        assert!(is_media_request("/foo/p34.mp4", None));
+        assert!(is_media_request("/x/y/trailer.m4v", None));
+        assert!(is_media_request("/clip.webm", None));
+        // 오디오
+        assert!(is_media_request("/media/mp3/page-flip.mp3", None));
+        assert!(is_media_request("/clip.m4a", None));
+        assert!(is_media_request("/beep.wav", None));
+    }
+
+    #[test]
+    fn is_media_request_respects_content_type_when_extension_missing() {
+        // 확장자 없는 path라도 Content-Type으로 판정
+        assert!(is_media_request("/stream/abc", Some("video/mp4")));
+        assert!(is_media_request("/stream/def", Some("audio/mpeg; charset=binary")));
+    }
+
+    #[test]
+    fn is_media_request_rejects_non_media() {
+        // 이미지·텍스트 자산은 Phase 13 범위 밖
+        assert!(!is_media_request("/icon.png", None));
+        assert!(!is_media_request("/script.js", Some("application/javascript")));
+        assert!(!is_media_request("/page.xhtml", Some("text/html")));
+        assert!(!is_media_request("/font.woff2", None));
+        // 확장자 없음 + content-type 없음
+        assert!(!is_media_request("/api/annotation", None));
+    }
+
+    #[test]
+    fn is_media_request_handles_query_and_fragment() {
+        // 확장자 뒤 쿼리/프래그먼트가 붙어도 정상 판정
+        assert!(is_media_request("/p34.mp4?token=abc", None));
+        assert!(is_media_request("/p34.mp4#t=10", None));
+    }
 
     #[test]
     fn is_cacheable_content_type_checks() {
@@ -2858,6 +3000,7 @@ mod tests {
             coalescer: Arc::new(coalescer::Coalescer::new()),
             memory_cache,
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            events: None,
         };
 
         let router = build_proxy_router(ps.clone());

@@ -109,6 +109,13 @@ async fn main() {
 
     let counters: proxy::DomainCounters = Arc::new(std::sync::RwLock::new(HashMap::new()));
 
+    // 최적화 이벤트 배치 push 태스크 시작 — admin-server /internal/events/batch 로 전송
+    // 태스크 JoinHandle은 _events_pusher로 유지해 태스크가 drop되지 않도록 한다
+    let events_pusher = proxy::events::start(proxy::events::EventsConfig::from_env());
+    let events_sender = Some(events_pusher.sender.clone());
+    // 태스크 핸들을 main 스코프에 유지하기 위해 변수로 바인딩 (선두 `_`로 unused 경고 억제)
+    let _events_handle = events_pusher.handle;
+
     let ps = ProxyState {
         shared: shared_state.clone(),
         http_client,
@@ -120,6 +127,7 @@ async fn main() {
         coalescer: Arc::new(Coalescer::new()),
         memory_cache: memory_cache.clone(),
         counters: counters.clone(),
+        events: events_sender,
     };
 
     let proxy_router = build_proxy_router(ps);
