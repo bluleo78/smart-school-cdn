@@ -121,7 +121,9 @@ describe('POST /api/domains', () => {
     );
   });
 
-  it('syncToProxy 실패해도 클라이언트에는 201을 반환한다', async () => {
+  it('syncToProxy 실패 시 502와 저장된 도메인을 반환한다 (에러 전파)', async () => {
+    // Proxy 동기화 실패는 502로 클라이언트에 전파한다 (e011b87: POST 에러 전파).
+    // 단, DB에는 이미 upsert되었으므로 응답 본문에 저장된 도메인 정보를 포함한다.
     const axiosMod = await import('axios');
     vi.mocked(axiosMod.default.post).mockRejectedValueOnce(new Error('Network error'));
 
@@ -132,7 +134,12 @@ describe('POST /api/domains', () => {
       url: '/api/domains',
       payload: { host: 'textbook.com', origin: 'https://textbook.com' },
     });
-    expect(res.statusCode).toBe(201);
+    expect(res.statusCode).toBe(502);
+    const body = JSON.parse(res.body);
+    expect(body.error).toContain('Proxy 동기화 실패');
+    expect(body.domain?.host).toBe('textbook.com');
+    // DB에는 이미 저장되어 있다 — HealthMonitor가 proxy online 전환 시 재동기화한다
+    expect(repo.findByHost('textbook.com')?.origin).toBe('https://textbook.com');
   });
 
   it('도메인 추가 시 tls-service와 dns-service에 syncDomains가 호출된다', async () => {
