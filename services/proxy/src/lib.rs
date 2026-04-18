@@ -2741,4 +2741,213 @@ mod tests {
         assert_eq!(CacheOutcome::BypassSize.as_header(),    "BYPASS-SIZE");
         assert_eq!(CacheOutcome::BypassOther.as_header(),   "BYPASS-OTHER");
     }
+
+    // ─── outcome 분류·X-Cache-Reason 헤더 통합 테스트 ────────────────────
+
+    /// Cache-Control: no-store 헤더를 포함하는 mock 원본 서버 기동
+    /// — origin_no_cache 분기(BYPASS-NOCACHE) 검증용
+    async fn start_mock_origin_server_with_nostore(body: Vec<u8>, content_type: &'static str) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let app = axum::Router::new().fallback(move || {
+                let body = body.clone();
+                async move {
+                    axum::response::Response::builder()
+                        .status(200)
+                        .header("content-type", content_type)
+                        .header("cache-control", "no-store")
+                        .body(axum::body::Body::from(body))
+                        .unwrap()
+                }
+            });
+            axum::serve(listener, app).await.unwrap();
+        });
+        format!("http://127.0.0.1:{}", addr.port())
+    }
+
+    /// POST 요청은 non-GET 경로로 처리되어 BYPASS-METHOD로 분류되고
+    /// X-Cache-Reason: BYPASS-METHOD 헤더가 반환된다
+    #[tokio::test]
+    async fn post_요청은_bypass_method로_분류되고_x_cache_reason_헤더_포함() {
+        let origin_url = start_mock_origin_server(b"hello".to_vec(), "text/plain").await;
+        let (ps, router) = make_miss_proxy_state(None, origin_url, "post-test.local").await;
+
+        let resp = router
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/")
+                    .header("host", "post-test.local")
+                    .body(axum::body::Body::from("body"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // POST 자체는 origin에서 200을 받아 그대로 전달
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get("x-cache-reason").and_then(|v| v.to_str().ok()),
+            Some("BYPASS-METHOD")
+        );
+        assert_eq!(
+            resp.headers().get("x-cache-status").and_then(|v| v.to_str().ok()),
+            Some("BYPASS")
+        );
+
+        // bypass_method 카운터만 1 증가, 다른 캐시 카운터는 0
+        let map = ps.counters.read().unwrap();
+        let c = map.get("post-test.local").expect("카운터 항목 없음");
+        assert_eq!(c.bypass_method.load(std::sync::atomic::Ordering::Relaxed), 1);
+        assert_eq!(c.l1_hits.load(std::sync::atomic::Ordering::Relaxed), 0);
+        assert_eq!(c.l2_hits.load(std::sync::atomic::Ordering::Relaxed), 0);
+        assert_eq!(c.cache_misses.load(std::sync::atomic::Ordering::Relaxed), 0);
+        assert_eq!(c.bypass_nocache.load(std::sync::atomic::Ordering::Relaxed), 0);
+    }
+
+    /// L1 메모리 캐시 HIT → X-Cache-Reason: L1-HIT 헤더 반환 + l1_hits 카운터 증가
+    #[tokio::test]
+    async fn l1_hit_응답은_x_cache_reason_l1_hit_헤더_포함하고_l1_hits_증가() {
+        let storage_url = start_mock_storage_server().await;
+        let tls_url = start_mock_tls_server().await;
+        let optimizer_url = start_mock_optimizer_server().await;
+
+        let storage = loop {
+            match clients::storage_client::StorageClient::connect(&storage_url).await {
+                Ok(c) => break c,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        };
+        let tls = loop {
+            match clients::tls_client::TlsClient::connect(&tls_url).await {
+                Ok(c) => break c,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        };
+        let optimizer = loop {
+            match clients::optimizer_client::OptimizerClient::connect(&optimizer_url).await {
+                Ok(c) => break c,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        };
+        let cert_cache = tls.cert_cache.clone();
+
+        let mut dm = HashMap::new();
+        dm.insert("l1hit.local".to_string(), "http://origin.l1hit.local".to_string());
+        let domain_map: DomainMap = Arc::new(tokio::sync::RwLock::new(dm));
+
+        let memory_cache: moka::future::Cache<String, Arc<MemoryCacheEntry>> =
+            moka::future::Cache::builder().max_capacity(100).build();
+
+        // L1 캐시에 항목 미리 삽입
+        let key = compute_cache_key("GET", "l1hit.local", "/page", "");
+        memory_cache.insert(key, Arc::new(MemoryCacheEntry {
+            body: Bytes::from("l1-cached-body"),
+            content_type: Some("text/html".to_string()),
+        })).await;
+
+        let ps = ProxyState {
+            shared: Arc::new(tokio::sync::RwLock::new(state::AppState::new())),
+            http_client: reqwest::Client::new(),
+            storage: Arc::new(Mutex::new(storage)),
+            tls_client: Arc::new(Mutex::new(tls)),
+            optimizer: Some(Arc::new(Mutex::new(optimizer))),
+            domain_map,
+            cert_cache,
+            coalescer: Arc::new(coalescer::Coalescer::new()),
+            memory_cache,
+            counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
+        };
+
+        let router = build_proxy_router(ps.clone());
+        let resp = router
+            .oneshot(
+                Request::builder()
+                    .uri("/page")
+                    .header("host", "l1hit.local")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get("x-cache-reason").and_then(|v| v.to_str().ok()),
+            Some("L1-HIT")
+        );
+        assert_eq!(
+            resp.headers().get("x-cache-status").and_then(|v| v.to_str().ok()),
+            Some("HIT")
+        );
+
+        // l1_hits만 증가, miss/bypass는 0
+        let map = ps.counters.read().unwrap();
+        let c = map.get("l1hit.local").expect("카운터 항목 없음");
+        assert_eq!(c.l1_hits.load(std::sync::atomic::Ordering::Relaxed), 1);
+        assert_eq!(c.cache_misses.load(std::sync::atomic::Ordering::Relaxed), 0);
+        assert_eq!(c.bypass_method.load(std::sync::atomic::Ordering::Relaxed), 0);
+    }
+
+    /// origin이 Cache-Control: no-store를 반환하면 BYPASS-NOCACHE로 분류되고
+    /// storage.put()이 호출되지 않는다 (gRPC mock storage에 항목이 없음)
+    #[tokio::test]
+    async fn origin_no_store_응답은_bypass_nocache_로_분류되고_저장_안됨() {
+        let origin_url = start_mock_origin_server_with_nostore(
+            b"<html>no-store</html>".to_vec(),
+            "text/html",
+        ).await;
+
+        let (ps, router) = make_miss_proxy_state(None, origin_url, "nostore.local").await;
+
+        let resp = router
+            .oneshot(
+                Request::builder()
+                    .uri("/page")
+                    .header("host", "nostore.local")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get("x-cache-reason").and_then(|v| v.to_str().ok()),
+            Some("BYPASS-NOCACHE")
+        );
+
+        // bypass_nocache 카운터만 증가, miss는 0
+        let map = ps.counters.read().unwrap();
+        let c = map.get("nostore.local").expect("카운터 항목 없음");
+        assert_eq!(c.bypass_nocache.load(std::sync::atomic::Ordering::Relaxed), 1);
+        assert_eq!(c.cache_misses.load(std::sync::atomic::Ordering::Relaxed), 0);
+
+        // storage에 항목이 없어야 함 — gRPC get으로 확인
+        // (coalescer 내부에서 put이 호출됐다면 storage에 키가 존재했을 것)
+        let key = compute_cache_key("GET", "nostore.local", "/page", "");
+        let hit = ps.storage.lock().await.get(&key).await;
+        assert!(hit.is_none(), "no-store 응답은 storage에 저장되지 않아야 한다");
+    }
+
+    // ─── classify_outcome 사이즈 우선순위 단위 테스트 ────────────────────
+
+    /// size_exceeded=true이면 다른 조건과 무관하게 BypassSize 반환
+    #[test]
+    fn classify_outcome_size_exceeded_는_bypass_size() {
+        assert_eq!(
+            classify_outcome(true, false, false, false, true, false),
+            CacheOutcome::BypassSize,
+        );
+    }
+
+    /// size_exceeded가 true이고 origin_ok_and_cacheable도 true여도 BypassSize가 우선
+    #[test]
+    fn classify_outcome_size가_cacheable보다_우선() {
+        assert_eq!(
+            classify_outcome(true, false, false, false, true, true),
+            CacheOutcome::BypassSize,
+        );
+    }
 }
