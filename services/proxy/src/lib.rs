@@ -181,9 +181,12 @@ struct AdminState {
 /// 기본 캐시 TTL (Cache-Control 헤더 없을 때)
 const DEFAULT_TTL: Duration = Duration::from_secs(3600);
 
-/// L2 storage에 저장 가능한 단일 응답 최대 크기 (10 MB)
-/// 이 크기를 초과하면 BypassSize로 분류하고 캐시에 저장하지 않는다
-const MAX_CACHE_ENTRY_BYTES: u64 = 10 * 1024 * 1024;
+/// L2 storage에 저장 가능한 단일 응답 최대 크기 (128 MB)
+/// 이 크기를 초과하면 BypassSize로 분류하고 캐시에 저장하지 않는다.
+/// 학교 교과서 SCORM 패키지·비디오 파일까지 수용할 수 있도록 넉넉히 설정.
+// 불변: MAX_CACHE_ENTRY_BYTES >= MAX_MEMORY_ENTRY_BYTES —
+// L1 캐시가 L2 캐시보다 작은 상한을 갖도록 한다.
+const MAX_CACHE_ENTRY_BYTES: u64 = 128 * 1024 * 1024;
 
 /// 프록시 라우터 빌드
 pub fn build_proxy_router(ps: ProxyState) -> Router {
@@ -271,6 +274,22 @@ fn parse_cache_control(cache_control: Option<&str>, pragma: Option<&str>) -> Cac
         return CacheDirective::Cacheable(max_age);
     }
     CacheDirective::Cacheable(None)
+}
+
+/// 응답이 캐시 가능한 콘텐츠 타입인지 판정.
+/// 학교 교과서 CDN 워크로드(이미지·텍스트·폰트·JS/JSON·PDF·EPUB·오디오/비디오·WASM)를 대상으로 한다.
+fn is_cacheable_content_type(content_type: &str) -> bool {
+    content_type.starts_with("image/")
+        || content_type.starts_with("text/")
+        || content_type.starts_with("font/")
+        || content_type.starts_with("video/")
+        || content_type.starts_with("audio/")
+        || content_type == "application/javascript"
+        || content_type == "application/json"
+        || content_type == "application/octet-stream"
+        || content_type == "application/pdf"
+        || content_type == "application/wasm"
+        || content_type == "application/epub+zip"
 }
 
 /// "directive=N" 형태에서 Duration 추출
@@ -482,30 +501,18 @@ async fn proxy_handler(
                 .map(|s| s.to_string());
 
             // outcome 분류에 필요한 조건 계산
-            // Cache-Control에 no-cache/no-store/private 포함 여부
-            let cc_str = resp_headers
-                .get("cache-control")
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("");
-            let origin_no_cache = cc_str.split(',').map(str::trim).any(|d| {
-                let lower = d.to_lowercase();
-                lower == "no-cache" || lower == "no-store" || lower == "private"
-            });
+            // parse_cache_control()이 이미 파싱한 cache_directive를 재사용해 중복 파싱 방지
+            let origin_no_cache = matches!(cache_directive, CacheDirective::NoStore);
             // 응답 크기가 단일 캐시 항목 최대치 초과 여부
             let size_exceeded = resp_body.len() as u64 > MAX_CACHE_ENTRY_BYTES;
-            // 캐시 가능한 Content-Type 여부
+            // 캐시 가능한 Content-Type 여부 — is_cacheable_content_type() 헬퍼로 위임
             let ct_str = content_type.as_deref().unwrap_or("");
             let ct_base = ct_str.split(';').next().unwrap_or("").trim();
-            let is_cacheable_content_type = ct_base.starts_with("image/")
-                || ct_base.starts_with("text/")
-                || ct_base.starts_with("font/")
-                || ct_base == "application/javascript"
-                || ct_base == "application/json"
-                || ct_base == "application/octet-stream";
+            let cacheable_ct = is_cacheable_content_type(ct_base);
             let origin_ok_and_cacheable = status.is_success()
                 && !origin_no_cache
                 && !size_exceeded
-                && is_cacheable_content_type;
+                && cacheable_ct;
             // classify_outcome: L1/L2 miss 이후이므로 두 플래그 모두 false
             let outcome = classify_outcome(
                 true, // GET 경로에서만 이 클로저가 실행됨
@@ -610,7 +617,9 @@ async fn proxy_handler(
                 record_domain_outcome(&ps.counters, &host, CacheOutcome::BypassOther, 0, elapsed_ms);
                 return Response::builder()
                     .status(StatusCode::BAD_GATEWAY)
+                    .header("X-Cache-Status", HeaderValue::from_static("BYPASS"))
                     .header("X-Cache-Reason", HeaderValue::from_static(CacheOutcome::BypassOther.as_header()))
+                    .header("X-Served-By", HeaderValue::from_static("smart-school-cdn"))
                     .body(Body::from("Origin fetch failed"))
                     .unwrap();
             }
@@ -2630,6 +2639,30 @@ mod tests {
         let entry = memory_cache_check.get(&key).await;
         assert!(entry.is_some(), "L2 HIT 후 L1 메모리 캐시에 승격되어야 한다");
         assert_eq!(&entry.unwrap().body[..], &[60, 104, 49, 62]);
+    }
+
+    // ─── is_cacheable_content_type 단위 테스트 ───────────────────────
+
+    #[test]
+    fn is_cacheable_content_type_checks() {
+        assert!(is_cacheable_content_type("image/png"));
+        assert!(is_cacheable_content_type("image/svg+xml"));
+        assert!(is_cacheable_content_type("text/html"));
+        assert!(is_cacheable_content_type("text/css"));
+        assert!(is_cacheable_content_type("font/woff2"));
+        assert!(is_cacheable_content_type("video/mp4"));
+        assert!(is_cacheable_content_type("audio/mpeg"));
+        assert!(is_cacheable_content_type("application/javascript"));
+        assert!(is_cacheable_content_type("application/json"));
+        assert!(is_cacheable_content_type("application/pdf"));
+        assert!(is_cacheable_content_type("application/wasm"));
+        assert!(is_cacheable_content_type("application/epub+zip"));
+        assert!(is_cacheable_content_type("application/octet-stream"));
+
+        // 비캐시 대상
+        assert!(!is_cacheable_content_type(""));
+        assert!(!is_cacheable_content_type("application/xml"));
+        assert!(!is_cacheable_content_type("multipart/form-data"));
     }
 
     // ─── CacheOutcome / classify_outcome 단위 테스트 ──────────────────
