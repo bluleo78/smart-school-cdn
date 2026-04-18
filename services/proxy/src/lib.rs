@@ -35,34 +35,70 @@ pub struct MemoryCacheEntry {
 pub type DomainMap = Arc<RwLock<HashMap<String, String>>>;
 
 /// 도메인별 요청 통계 카운터 (lock-free atomic 연산)
+/// L1/L2 히트, 4종 bypass, miss를 개별 집계한다
 pub struct DomainCounter {
-    pub requests: AtomicU64,
-    pub cache_hits: AtomicU64,
-    pub cache_misses: AtomicU64,
-    pub bandwidth: AtomicU64,
+    pub requests:          AtomicU64,
+    pub l1_hits:           AtomicU64,
+    pub l2_hits:           AtomicU64,
+    pub cache_misses:      AtomicU64,
+    pub bypass_method:     AtomicU64,
+    pub bypass_nocache:    AtomicU64,
+    pub bypass_size:       AtomicU64,
+    pub bypass_other:      AtomicU64,
+    pub bandwidth:         AtomicU64,
     pub response_time_sum: AtomicU64,
+}
+
+/// 도메인 카운터 스냅샷 — swap_reset() 반환값
+pub struct DomainStatsSnapshot {
+    pub requests:      u64,
+    pub l1_hits:       u64,
+    pub l2_hits:       u64,
+    pub cache_misses:  u64,
+    pub bypass_method: u64,
+    pub bypass_nocache: u64,
+    pub bypass_size:   u64,
+    pub bypass_other:  u64,
+    /// 하위 호환 파생값 (= l1_hits + l2_hits)
+    pub cache_hits:    u64,
+    pub bandwidth:     u64,
+    pub response_time_sum: u64,
 }
 
 impl DomainCounter {
     pub fn new() -> Self {
         Self {
-            requests: AtomicU64::new(0),
-            cache_hits: AtomicU64::new(0),
-            cache_misses: AtomicU64::new(0),
-            bandwidth: AtomicU64::new(0),
+            requests:          AtomicU64::new(0),
+            l1_hits:           AtomicU64::new(0),
+            l2_hits:           AtomicU64::new(0),
+            cache_misses:      AtomicU64::new(0),
+            bypass_method:     AtomicU64::new(0),
+            bypass_nocache:    AtomicU64::new(0),
+            bypass_size:       AtomicU64::new(0),
+            bypass_other:      AtomicU64::new(0),
+            bandwidth:         AtomicU64::new(0),
             response_time_sum: AtomicU64::new(0),
         }
     }
 
-    /// 카운터를 읽고 0으로 리셋 (swap) — 통계 수집 후 초기화용
-    pub fn take(&self) -> (u64, u64, u64, u64, u64) {
-        (
-            self.requests.swap(0, Ordering::Relaxed),
-            self.cache_hits.swap(0, Ordering::Relaxed),
-            self.cache_misses.swap(0, Ordering::Relaxed),
-            self.bandwidth.swap(0, Ordering::Relaxed),
-            self.response_time_sum.swap(0, Ordering::Relaxed),
-        )
+    /// 카운터를 읽고 0으로 원자적 리셋 — 통계 수집 후 초기화용
+    pub fn take(&self) -> DomainStatsSnapshot {
+        let requests       = self.requests.swap(0, Ordering::Relaxed);
+        let l1_hits        = self.l1_hits.swap(0, Ordering::Relaxed);
+        let l2_hits        = self.l2_hits.swap(0, Ordering::Relaxed);
+        let cache_misses   = self.cache_misses.swap(0, Ordering::Relaxed);
+        let bypass_method  = self.bypass_method.swap(0, Ordering::Relaxed);
+        let bypass_nocache = self.bypass_nocache.swap(0, Ordering::Relaxed);
+        let bypass_size    = self.bypass_size.swap(0, Ordering::Relaxed);
+        let bypass_other   = self.bypass_other.swap(0, Ordering::Relaxed);
+        let bandwidth      = self.bandwidth.swap(0, Ordering::Relaxed);
+        let response_time_sum = self.response_time_sum.swap(0, Ordering::Relaxed);
+        let cache_hits = l1_hits + l2_hits;
+        DomainStatsSnapshot {
+            requests, l1_hits, l2_hits, cache_misses,
+            bypass_method, bypass_nocache, bypass_size, bypass_other,
+            cache_hits, bandwidth, response_time_sum,
+        }
     }
 }
 
@@ -70,10 +106,11 @@ impl DomainCounter {
 pub type DomainCounters = Arc<std::sync::RwLock<HashMap<String, DomainCounter>>>;
 
 /// 도메인 요청 카운터 증가 — read lock 우선 시도, 없으면 write lock으로 entry 생성
-fn record_domain_counter(
+/// outcome을 통해 L1/L2 히트·miss·bypass 4종을 개별 집계한다
+fn record_domain_outcome(
     counters: &DomainCounters,
     host: &str,
-    cache_hit: bool,
+    outcome: CacheOutcome,
     bandwidth: u64,
     response_time_ms: u64,
 ) {
@@ -81,8 +118,15 @@ fn record_domain_counter(
         let map = counters.read().unwrap();
         if let Some(c) = map.get(host) {
             c.requests.fetch_add(1, Ordering::Relaxed);
-            if cache_hit { c.cache_hits.fetch_add(1, Ordering::Relaxed); }
-            else { c.cache_misses.fetch_add(1, Ordering::Relaxed); }
+            match outcome {
+                CacheOutcome::L1Hit         => { c.l1_hits.fetch_add(1, Ordering::Relaxed); }
+                CacheOutcome::L2Hit         => { c.l2_hits.fetch_add(1, Ordering::Relaxed); }
+                CacheOutcome::Miss          => { c.cache_misses.fetch_add(1, Ordering::Relaxed); }
+                CacheOutcome::BypassMethod  => { c.bypass_method.fetch_add(1, Ordering::Relaxed); }
+                CacheOutcome::BypassNoCache => { c.bypass_nocache.fetch_add(1, Ordering::Relaxed); }
+                CacheOutcome::BypassSize    => { c.bypass_size.fetch_add(1, Ordering::Relaxed); }
+                CacheOutcome::BypassOther   => { c.bypass_other.fetch_add(1, Ordering::Relaxed); }
+            }
             c.bandwidth.fetch_add(bandwidth, Ordering::Relaxed);
             c.response_time_sum.fetch_add(response_time_ms, Ordering::Relaxed);
             return;
@@ -91,8 +135,15 @@ fn record_domain_counter(
     let mut map = counters.write().unwrap();
     let c = map.entry(host.to_string()).or_insert_with(DomainCounter::new);
     c.requests.fetch_add(1, Ordering::Relaxed);
-    if cache_hit { c.cache_hits.fetch_add(1, Ordering::Relaxed); }
-    else { c.cache_misses.fetch_add(1, Ordering::Relaxed); }
+    match outcome {
+        CacheOutcome::L1Hit         => { c.l1_hits.fetch_add(1, Ordering::Relaxed); }
+        CacheOutcome::L2Hit         => { c.l2_hits.fetch_add(1, Ordering::Relaxed); }
+        CacheOutcome::Miss          => { c.cache_misses.fetch_add(1, Ordering::Relaxed); }
+        CacheOutcome::BypassMethod  => { c.bypass_method.fetch_add(1, Ordering::Relaxed); }
+        CacheOutcome::BypassNoCache => { c.bypass_nocache.fetch_add(1, Ordering::Relaxed); }
+        CacheOutcome::BypassSize    => { c.bypass_size.fetch_add(1, Ordering::Relaxed); }
+        CacheOutcome::BypassOther   => { c.bypass_other.fetch_add(1, Ordering::Relaxed); }
+    }
     c.bandwidth.fetch_add(bandwidth, Ordering::Relaxed);
     c.response_time_sum.fetch_add(response_time_ms, Ordering::Relaxed);
 }
@@ -303,7 +354,7 @@ async fn proxy_handler(
                 });
             }
             tracing::info!(host=%host, url=%uri, elapsed_ms=%elapsed_ms, "L1 메모리 캐시 HIT");
-            record_domain_counter(&ps.counters, &host, true, entry.body.len() as u64, elapsed_ms);
+            record_domain_outcome(&ps.counters, &host, CacheOutcome::L1Hit, entry.body.len() as u64, elapsed_ms);
 
             let mut resp = Response::builder().status(StatusCode::OK);
             if let Some(ref ct) = entry.content_type {
@@ -344,7 +395,7 @@ async fn proxy_handler(
                 });
             }
             tracing::info!(host=%host, url=%uri, elapsed_ms=%elapsed_ms, "L2 디스크 캐시 HIT (L1 승격)");
-            record_domain_counter(&ps.counters, &host, true, cached_bytes.len() as u64, elapsed_ms);
+            record_domain_outcome(&ps.counters, &host, CacheOutcome::L2Hit, cached_bytes.len() as u64, elapsed_ms);
 
             let mut resp = Response::builder().status(StatusCode::OK);
             if let Some(ct) = content_type {
@@ -488,7 +539,7 @@ async fn proxy_handler(
                     status=%status.as_u16(), elapsed_ms=%elapsed_ms,
                     cache="MISS", "프록시 요청 처리 완료"
                 );
-                record_domain_counter(&ps.counters, &host, false, body.len() as u64, elapsed_ms);
+                record_domain_outcome(&ps.counters, &host, CacheOutcome::Miss, body.len() as u64, elapsed_ms);
                 let mut response = Response::builder().status(*status);
                 if let Some(ct_str) = ct {
                     response = response.header("Content-Type", ct_str.as_str());
@@ -513,7 +564,7 @@ async fn proxy_handler(
                         cache_status: "BYPASS".to_string(),
                     });
                 }
-                record_domain_counter(&ps.counters, &host, false, 0, elapsed_ms);
+                record_domain_outcome(&ps.counters, &host, CacheOutcome::BypassOther, 0, elapsed_ms);
                 return (StatusCode::BAD_GATEWAY, "Origin fetch failed").into_response();
             }
         }
@@ -583,7 +634,7 @@ async fn proxy_handler(
             cache_status: "BYPASS".to_string(),
         });
     }
-    record_domain_counter(&ps.counters, &host, false, response_body.len() as u64, elapsed_ms);
+    record_domain_outcome(&ps.counters, &host, CacheOutcome::BypassMethod, response_body.len() as u64, elapsed_ms);
 
     tracing::info!(
         method = %method, host = %host, url = %uri,
@@ -711,14 +762,20 @@ async fn ca_mobileconfig_handler(State(ps): State<ProxyState>) -> Response {
 async fn stats_handler(State(state): State<AdminState>) -> impl IntoResponse {
     let counters = state.counters.read().unwrap();
     let stats: Vec<serde_json::Value> = counters.iter().map(|(host, c)| {
-        let (requests, hits, misses, bw, rt_sum) = c.take();
-        let avg_rt = if requests > 0 { rt_sum / requests } else { 0 };
+        let snap = c.take();
+        let avg_rt = if snap.requests > 0 { snap.response_time_sum / snap.requests } else { 0 };
         serde_json::json!({
-            "host": host,
-            "requests": requests,
-            "cache_hits": hits,
-            "cache_misses": misses,
-            "bandwidth": bw,
+            "host":              host,
+            "requests":          snap.requests,
+            "l1_hits":           snap.l1_hits,
+            "l2_hits":           snap.l2_hits,
+            "cache_misses":      snap.cache_misses,
+            "bypass_method":     snap.bypass_method,
+            "bypass_nocache":    snap.bypass_nocache,
+            "bypass_size":       snap.bypass_size,
+            "bypass_other":      snap.bypass_other,
+            "cache_hits":        snap.cache_hits,    // 하위 호환 (= l1_hits + l2_hits)
+            "bandwidth":         snap.bandwidth,
             "avg_response_time": avg_rt
         })
     }).collect();
