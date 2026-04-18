@@ -276,6 +276,29 @@ export async function domainRoutes(
     }
   });
 
+  /** 단일 도메인 요약 통계 — L1/Edge/Bypass 비율 포함 (Overview 카드용) */
+  app.get<{ Params: { host: string } }>(
+    '/api/domains/:host/summary',
+    async (request, reply) => {
+      const host = decodeURIComponent(request.params.host);
+      const domain = domainRepo.findByHost(host);
+      if (!domain) {
+        return reply.status(404).send({ error: '도메인을 찾을 수 없습니다.' });
+      }
+      const summary = statsRepo.getSummaryForHost(host);
+      return {
+        host,
+        today_requests:      summary?.today_requests      ?? 0,
+        today_cache_hits:    summary?.today_cache_hits     ?? 0,
+        today_bandwidth:     summary?.today_bandwidth      ?? 0,
+        hit_rate:            summary?.hit_rate             ?? 0,
+        today_l1_hit_rate:   summary?.today_l1_hit_rate    ?? 0,
+        today_edge_hit_rate: summary?.today_edge_hit_rate  ?? 0,
+        today_bypass_rate:   summary?.today_bypass_rate    ?? 0,
+      };
+    },
+  );
+
   /** 도메인 통계 조회 (period: 24h | 7d | 30d) */
   app.get<{ Params: { host: string }; Querystring: { period?: string } }>(
     '/api/domains/:host/stats',

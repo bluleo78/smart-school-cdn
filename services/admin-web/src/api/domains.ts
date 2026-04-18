@@ -3,6 +3,7 @@ import axios from 'axios';
 import type {
   Domain,
   DomainSummary,
+  DomainHostSummary,
   DomainStats,
   DomainLog,
   BulkAddResult,
@@ -71,6 +72,14 @@ export async function bulkAddDomains(
 /** 도메인 일괄 삭제 */
 export async function bulkDeleteDomains(hosts: string[]): Promise<{ deleted: number }> {
   const res = await axios.delete<{ deleted: number }>('/api/domains/bulk', { data: { hosts } });
+  return res.data;
+}
+
+/** 단일 도메인 요약 통계 조회 — L1/Edge/Bypass 비율 포함 */
+export async function fetchDomainHostSummary(host: string): Promise<DomainHostSummary> {
+  const res = await axios.get<DomainHostSummary>(
+    `/api/domains/${encodeURIComponent(host)}/summary`,
+  );
   return res.data;
 }
 

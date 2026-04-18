@@ -46,6 +46,16 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_domain_stats_ts ON domain_stats(timestamp);
 `);
 
+// domain_stats 테이블 마이그레이션 — Phase 12 (캐시 통계 재설계)
+// L1/L2 히트와 4분류 BYPASS 카운터를 컬럼으로 분리. 과거 row는 default 0으로 자동 채워짐.
+const colsStats = (db.pragma('table_info(domain_stats)') as Array<{ name: string }>).map((c) => c.name);
+if (!colsStats.includes('l1_hits'))        db.exec('ALTER TABLE domain_stats ADD COLUMN l1_hits        INTEGER NOT NULL DEFAULT 0');
+if (!colsStats.includes('l2_hits'))        db.exec('ALTER TABLE domain_stats ADD COLUMN l2_hits        INTEGER NOT NULL DEFAULT 0');
+if (!colsStats.includes('bypass_method'))  db.exec('ALTER TABLE domain_stats ADD COLUMN bypass_method  INTEGER NOT NULL DEFAULT 0');
+if (!colsStats.includes('bypass_nocache')) db.exec('ALTER TABLE domain_stats ADD COLUMN bypass_nocache INTEGER NOT NULL DEFAULT 0');
+if (!colsStats.includes('bypass_size'))    db.exec('ALTER TABLE domain_stats ADD COLUMN bypass_size    INTEGER NOT NULL DEFAULT 0');
+if (!colsStats.includes('bypass_other'))   db.exec('ALTER TABLE domain_stats ADD COLUMN bypass_other   INTEGER NOT NULL DEFAULT 0');
+
 // DNS 메트릭 버킷 테이블 생성 — Phase A: 1분 단위 카운터 델타 저장
 db.exec(DNS_METRICS_SCHEMA);
 
@@ -71,7 +81,8 @@ const dnsClient = createDnsClient(grpcAddr(process.env.DNS_GRPC_URL ?? 'localhos
 const optimizerClient = createOptimizerClient(grpcAddr(process.env.OPTIMIZER_GRPC_URL ?? 'localhost:50054'));
 const proxyAdminUrl = process.env.PROXY_ADMIN_URL ?? 'http://localhost:8081';
 
-// Fastify 인스턴스에 gRPC 클라이언트 데코레이터 등록
+// Fastify 인스턴스에 gRPC 클라이언트 및 DB 데코레이터 등록
+app.decorate('db', db);
 app.decorate('storageClient', storageClient);
 app.decorate('tlsClient', tlsClient);
 app.decorate('dnsClient', dnsClient);

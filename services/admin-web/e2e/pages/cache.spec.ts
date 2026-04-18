@@ -1,8 +1,7 @@
-/// 캐시 기능 E2E 테스트 — 대시보드 캐시 카드 검증
-/// 캐시 관리 페이지 제거로 대시보드 카드 테스트만 유지
+/// 캐시 기능 E2E 테스트 — 대시보드 캐시 카드 검증 (재설계 후 shape)
 import { test, expect } from '../fixtures/test';
 import { mockApi } from '../fixtures/api-mock';
-import { createCacheStats, createPopularContent } from '../factories/cache.factory';
+import { createCacheStats, createCacheSeriesBuckets, createPopularContent } from '../factories/cache.factory';
 import { createProxyStatusOnline } from '../factories/proxy.factory';
 
 // ─── 공통 헬퍼 ───────────────────────────────────────────────────
@@ -12,75 +11,119 @@ async function mockDashboardApis(page: Parameters<typeof mockApi>[0]) {
   await mockApi(page, 'GET', '/proxy/requests', []);
   await mockApi(page, 'GET', '/cache/stats', createCacheStats());
   await mockApi(page, 'GET', '/cache/popular', createPopularContent());
+  await page.route('**/api/cache/series*', (route) =>
+    route.fulfill({ json: { buckets: createCacheSeriesBuckets() } }),
+  );
 }
 
-// ─── 대시보드 캐시 카드 ────────────────────────────────────────
-test.describe('대시보드 — 캐시 히트율 카드', () => {
-  test('히트율 퍼센트가 표시된다', async ({ page }) => {
+// ─── 대시보드 L1 히트율 카드 ──────────────────────────────────
+test.describe('대시보드 — L1 히트율 카드', () => {
+  test('L1 히트율 퍼센트가 표시된다', async ({ page }) => {
     await mockDashboardApis(page);
     await page.goto('/');
     await expect(page.getByTestId('cache-hit-rate-card')).toBeVisible();
-    await expect(page.getByText('73.2%')).toBeVisible();
+    // createCacheStats() → l1_hit_rate = 700/1000 = 0.7 → "70.0%"
+    await expect(page.getByTestId('dashboard-l1-hit-rate')).toBeVisible();
+    await expect(page.getByTestId('dashboard-l1-hit-rate')).toHaveText('70.0%');
   });
 
-  test('HIT/MISS 카운트가 표시된다', async ({ page }) => {
+  test('L1 HIT/요청 카운트가 표시된다', async ({ page }) => {
     await mockDashboardApis(page);
     await page.goto('/');
-    // HIT 750, MISS 274
-    await expect(page.getByText('HIT 750')).toBeVisible();
-    await expect(page.getByText('MISS 274')).toBeVisible();
+    // l1_hits 700, requests 1000 — 카드 하단 부제목에 표시 (cache-hit-rate-card 내부)
+    const card = page.getByTestId('cache-hit-rate-card');
+    await expect(card.getByText(/L1 HIT 700/)).toBeVisible();
+    await expect(card.getByText(/요청 1,000/)).toBeVisible();
   });
 
   test('로딩 중 스켈레톤이 표시된다', async ({ page }) => {
     await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
     await mockApi(page, 'GET', '/proxy/requests', []);
     await mockApi(page, 'GET', '/cache/stats', createCacheStats(), { delay: 1000 });
+    await page.route('**/api/cache/series*', (route) =>
+      route.fulfill({ json: { buckets: createCacheSeriesBuckets() } }),
+    );
     await page.goto('/');
     await expect(page.getByTestId('cache-hit-rate-loading')).toBeVisible();
-    await expect(page.getByText('73.2%')).toBeVisible({ timeout: 5000 });
+    await expect(page.getByTestId('dashboard-l1-hit-rate')).toBeVisible({ timeout: 5000 });
   });
 });
 
+// ─── 엣지 히트율 카드 ─────────────────────────────────────────
+test.describe('대시보드 — 엣지 히트율 카드', () => {
+  test('엣지 히트율이 표시된다', async ({ page }) => {
+    await mockDashboardApis(page);
+    await page.goto('/');
+    // edge_hit_rate = (700+100)/1000 = 0.8 → "80.0%"
+    await expect(page.getByTestId('dashboard-edge-hit-rate')).toBeVisible();
+    await expect(page.getByTestId('dashboard-edge-hit-rate')).toHaveText('80.0%');
+  });
+});
+
+// ─── BYPASS 비율 카드 ─────────────────────────────────────────
+test.describe('대시보드 — BYPASS 비율 카드', () => {
+  test('BYPASS 비율이 표시된다', async ({ page }) => {
+    await mockDashboardApis(page);
+    await page.goto('/');
+    // bypass_rate = 50/1000 = 0.05 → "5.0%"
+    await expect(page.getByTestId('dashboard-bypass-rate')).toBeVisible();
+    await expect(page.getByTestId('dashboard-bypass-rate')).toHaveText('5.0%');
+  });
+});
+
+// ─── 스토리지 사용량 카드 ─────────────────────────────────────
 test.describe('대시보드 — 스토리지 사용량 카드', () => {
   test('사용량 수치와 프로그레스 바가 표시된다', async ({ page }) => {
-    await mockDashboardApis(page);
+    const stats = createCacheStats({
+      disk: { used_bytes: 4_509_715_456, max_bytes: 21_474_836_480, entry_count: 42 },
+    });
+    await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
+    await mockApi(page, 'GET', '/proxy/requests', []);
+    await mockApi(page, 'GET', '/cache/stats', stats);
+    await mockApi(page, 'GET', '/cache/popular', createPopularContent());
+    await page.route('**/api/cache/series*', (route) =>
+      route.fulfill({ json: { buckets: createCacheSeriesBuckets() } }),
+    );
     await page.goto('/');
     await expect(page.getByTestId('storage-usage-card')).toBeVisible();
     await expect(page.getByTestId('storage-bar')).toBeVisible();
-    // 4_509_715_456 bytes = 4.2 GB — storage-usage-card 안에서 확인
+    // 4_509_715_456 bytes ≈ 4.2 GB
     await expect(page.getByTestId('storage-usage-card').getByText('4.2 GB', { exact: false })).toBeVisible();
   });
 
   test('사용률 퍼센트가 표시된다', async ({ page }) => {
-    await mockDashboardApis(page);
+    const stats = createCacheStats({
+      disk: { used_bytes: 4_509_715_456, max_bytes: 21_474_836_480, entry_count: 42 },
+    });
+    await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
+    await mockApi(page, 'GET', '/proxy/requests', []);
+    await mockApi(page, 'GET', '/cache/stats', stats);
+    await mockApi(page, 'GET', '/cache/popular', createPopularContent());
+    await page.route('**/api/cache/series*', (route) =>
+      route.fulfill({ json: { buckets: createCacheSeriesBuckets() } }),
+    );
     await page.goto('/');
     // 4509715456 / 21474836480 * 100 ≈ 21.0%
     await expect(page.getByText('21.0%', { exact: false })).toBeVisible();
   });
 });
 
-test.describe('대시보드 — 대역폭 절감 카드', () => {
-  test('"대역폭 절감" 제목이 표시된다', async ({ page }) => {
-    await mockDashboardApis(page);
-    await page.goto('/');
-    await expect(page.getByText('대역폭 절감')).toBeVisible();
-  });
-
-  test('절감량이 사람이 읽기 좋은 단위로 표시된다', async ({ page }) => {
-    await mockDashboardApis(page);
-    await page.goto('/');
-    // by_domain size_bytes = 3_000_000_000 → 2.8 GB
-    await expect(page.getByText('2.8 GB')).toBeVisible();
-  });
-});
-
+// ─── 캐시 항목 수 카드 ────────────────────────────────────────
 test.describe('대시보드 — 캐시 항목 수 카드', () => {
   test('항목 수가 표시된다', async ({ page }) => {
-    await mockDashboardApis(page);
+    const stats = createCacheStats({
+      disk: { used_bytes: 1024 * 1024, max_bytes: 20 * 1024 ** 3, entry_count: 3842 },
+    });
+    await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
+    await mockApi(page, 'GET', '/proxy/requests', []);
+    await mockApi(page, 'GET', '/cache/stats', stats);
+    await mockApi(page, 'GET', '/cache/popular', createPopularContent());
+    await page.route('**/api/cache/series*', (route) =>
+      route.fulfill({ json: { buckets: createCacheSeriesBuckets() } }),
+    );
     await page.goto('/');
-    // entry_count: 3842 → "3,842" — 기존 EntryCountCard에서 확인
-    const entryCard = page.getByText('저장된 URL').locator('..');
-    await expect(entryCard).toBeVisible();
-    await expect(entryCard.getByText('3,842')).toBeVisible();
+    // entry_count: 3842 → "3,842"
+    await expect(page.getByTestId('dashboard-entry-count')).toBeVisible();
+    await expect(page.getByTestId('dashboard-entry-count')).toHaveText('3,842');
   });
 });

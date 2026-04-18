@@ -9,6 +9,13 @@ interface ProxyStat {
   cache_misses: number;
   bandwidth: number;
   avg_response_time: number;
+  // Phase 12 신규 — Proxy가 아직 전송하지 않는 경우 0으로 폴백
+  l1_hits?: number;
+  l2_hits?: number;
+  bypass_method?: number;
+  bypass_nocache?: number;
+  bypass_size?: number;
+  bypass_other?: number;
 }
 
 /** Proxy에서 통계를 가져와 DB에 저장하는 폴링 타이머 */
@@ -32,6 +39,12 @@ export function startStatsCollector(
           cache_misses: stat.cache_misses,
           bandwidth: stat.bandwidth,
           avg_response_time: stat.avg_response_time,
+          l1_hits: stat.l1_hits ?? 0,
+          l2_hits: stat.l2_hits ?? 0,
+          bypass_method: stat.bypass_method ?? 0,
+          bypass_nocache: stat.bypass_nocache ?? 0,
+          bypass_size: stat.bypass_size ?? 0,
+          bypass_other: stat.bypass_other ?? 0,
         });
       }
     } catch (err) {

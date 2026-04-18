@@ -1,8 +1,8 @@
-/// 대역폭 절감 카드
+/// 총 요청 카드 — 재설계 이후 bandwidth 필드가 `CacheStats`에서 제거됨.
+/// 해당 슬롯은 24h 총 요청수를 노출해 전체 트래픽 규모를 파악할 수 있게 한다.
 import { useCacheStats } from '../../hooks/useCacheStats';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Skeleton } from '../ui/skeleton';
-import { formatBytes } from '../../lib/format';
 
 export function BandwidthSavedCard() {
   const { data, isLoading, error } = useCacheStats();
@@ -10,30 +10,32 @@ export function BandwidthSavedCard() {
   if (isLoading) {
     return (
       <Card variant="glass">
-        <CardHeader><CardTitle>대역폭 절감</CardTitle></CardHeader>
+        <CardHeader><CardTitle>총 요청 (24h)</CardTitle></CardHeader>
         <CardContent><Skeleton className="h-8 w-24" /></CardContent>
       </Card>
     );
   }
 
-  if (error) {
+  if (error || !data) {
     return (
       <Card variant="glass">
-        <CardHeader><CardTitle>대역폭 절감</CardTitle></CardHeader>
+        <CardHeader><CardTitle>총 요청 (24h)</CardTitle></CardHeader>
         <CardContent><p className="text-sm text-destructive">연결 실패</p></CardContent>
       </Card>
     );
   }
 
-  /// 도메인별 캐시 크기 합산을 대역폭 절감 추정치로 사용한다
-  const saved = data?.by_domain?.reduce((acc, d) => acc + d.size_bytes, 0) ?? 0;
-
   return (
-    <Card variant="glass">
-      <CardHeader><CardTitle>대역폭 절감</CardTitle></CardHeader>
+    <Card variant="glass" data-testid="total-requests-card">
+      <CardHeader><CardTitle>총 요청 (24h)</CardTitle></CardHeader>
       <CardContent>
-        <p className="text-3xl font-bold">{formatBytes(saved)}</p>
-        <p className="text-xs text-muted-foreground mt-1">캐시 HIT으로 절감된 트래픽</p>
+        <p
+          className="text-3xl font-bold tabular-nums"
+          data-testid="dashboard-total-requests"
+        >
+          {data.requests.toLocaleString()}
+        </p>
+        <p className="text-xs text-muted-foreground mt-1">최근 24시간 누적 요청 수</p>
       </CardContent>
     </Card>
   );

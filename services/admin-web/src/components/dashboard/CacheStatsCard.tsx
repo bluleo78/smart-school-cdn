@@ -1,4 +1,7 @@
-/// 캐시 통계 카드 — 총 항목 수, 총 사용량, 히트율 표시 + 전체 캐시 퍼지
+/// BYPASS 사유 세부 카드 — BYPASS 4분류(METHOD/NOCACHE/SIZE/OTHER)를 나눠 보여주고
+/// 운영자가 원인별로 정책을 튜닝할 수 있도록 돕는다. 재설계 이전엔 총 항목/용량/히트율을
+/// 담았으나, 해당 지표는 EntryCount/StorageUsage/CacheHitRate 카드가 전담하므로
+/// 이 슬롯은 BYPASS 상세로 재배치했다. 전체 퍼지 버튼은 유지한다.
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { useCacheStats } from '../../hooks/useCacheStats';
@@ -29,7 +32,7 @@ export function CacheStatsCard() {
   if (isLoading) {
     return (
       <Card variant="glass">
-        <CardHeader><CardTitle>캐시 통계</CardTitle></CardHeader>
+        <CardHeader><CardTitle>BYPASS 사유 세부</CardTitle></CardHeader>
         <CardContent className="space-y-3">
           <Skeleton className="h-5 w-24" />
           <Skeleton className="h-4 w-20" />
@@ -39,10 +42,10 @@ export function CacheStatsCard() {
     );
   }
 
-  if (error) {
+  if (error || !data) {
     return (
       <Card variant="glass">
-        <CardHeader><CardTitle>캐시 통계</CardTitle></CardHeader>
+        <CardHeader><CardTitle>BYPASS 사유 세부</CardTitle></CardHeader>
         <CardContent>
           <p className="text-sm text-destructive">데이터 로드 실패</p>
         </CardContent>
@@ -52,34 +55,38 @@ export function CacheStatsCard() {
 
   return (
     <>
-      <Card variant="glass">
-        <CardHeader><CardTitle>캐시 통계</CardTitle></CardHeader>
+      <Card variant="glass" data-testid="cache-stats-card">
+        <CardHeader><CardTitle>BYPASS 사유 세부</CardTitle></CardHeader>
         <CardContent className="space-y-3">
-          {/* 총 캐시 항목 수 */}
-          <div>
-            <p className="text-xl font-bold leading-tight">
-              {(data?.entry_count ?? 0).toLocaleString()}건
-            </p>
-            <p className="text-xs text-muted-foreground">총 캐시 항목</p>
+          {/* BYPASS 4분류 카운터 */}
+          <div className="grid grid-cols-2 gap-2 text-sm" data-testid="bypass-breakdown">
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">METHOD</span>
+              <span className="font-mono tabular-nums">{data.bypass.method.toLocaleString()}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">NOCACHE</span>
+              <span className="font-mono tabular-nums">{data.bypass.nocache.toLocaleString()}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">SIZE</span>
+              <span className="font-mono tabular-nums">{data.bypass.size.toLocaleString()}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">OTHER</span>
+              <span className="font-mono tabular-nums">{data.bypass.other.toLocaleString()}</span>
+            </div>
           </div>
-          {/* 총 사용량 */}
+          {/* 총 BYPASS */}
           <div>
-            <p className="text-lg font-semibold leading-tight">
-              {formatBytes(data?.total_size_bytes ?? 0)}
+            <p className="text-lg font-semibold leading-tight tabular-nums">
+              {data.bypass.total.toLocaleString()}
             </p>
-            <p className="text-xs text-muted-foreground">총 사용량</p>
+            <p className="text-xs text-muted-foreground">총 BYPASS</p>
           </div>
-          {/* 히트율 */}
-          <div>
-            <p className="text-lg font-semibold leading-tight">
-              {((data?.hit_rate ?? 0) * 100).toFixed(1)}%
-            </p>
-            <p className="text-xs text-muted-foreground">히트율</p>
-          </div>
-          {/* 전체 퍼지 버튼 */}
+          {/* 전체 퍼지 버튼 — 캐시 긴급 초기화용 */}
           <Button
             variant="destructive"
-
             className="mt-1 w-full"
             onClick={() => setShowConfirm(true)}
           >

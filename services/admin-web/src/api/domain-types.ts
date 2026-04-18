@@ -34,6 +34,18 @@ export interface DomainAlert {
   lastError?: string;
 }
 
+/** 단일 도메인 요약 통계 — L1/Edge/Bypass 비율 포함 (Overview 카드용) */
+export interface DomainHostSummary {
+  host: string;
+  today_requests: number;
+  today_cache_hits: number;
+  today_bandwidth: number;
+  hit_rate: number;
+  today_l1_hit_rate: number;
+  today_edge_hit_rate: number;
+  today_bypass_rate: number;
+}
+
 /** 도메인 통계 (기간별) */
 export interface DomainStats {
   host: string;

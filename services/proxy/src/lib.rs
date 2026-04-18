@@ -35,34 +35,70 @@ pub struct MemoryCacheEntry {
 pub type DomainMap = Arc<RwLock<HashMap<String, String>>>;
 
 /// 도메인별 요청 통계 카운터 (lock-free atomic 연산)
+/// L1/L2 히트, 4종 bypass, miss를 개별 집계한다
 pub struct DomainCounter {
-    pub requests: AtomicU64,
-    pub cache_hits: AtomicU64,
-    pub cache_misses: AtomicU64,
-    pub bandwidth: AtomicU64,
+    pub requests:          AtomicU64,
+    pub l1_hits:           AtomicU64,
+    pub l2_hits:           AtomicU64,
+    pub cache_misses:      AtomicU64,
+    pub bypass_method:     AtomicU64,
+    pub bypass_nocache:    AtomicU64,
+    pub bypass_size:       AtomicU64,
+    pub bypass_other:      AtomicU64,
+    pub bandwidth:         AtomicU64,
     pub response_time_sum: AtomicU64,
+}
+
+/// 도메인 카운터 스냅샷 — swap_reset() 반환값
+pub struct DomainStatsSnapshot {
+    pub requests:      u64,
+    pub l1_hits:       u64,
+    pub l2_hits:       u64,
+    pub cache_misses:  u64,
+    pub bypass_method: u64,
+    pub bypass_nocache: u64,
+    pub bypass_size:   u64,
+    pub bypass_other:  u64,
+    /// 하위 호환 파생값 (= l1_hits + l2_hits)
+    pub cache_hits:    u64,
+    pub bandwidth:     u64,
+    pub response_time_sum: u64,
 }
 
 impl DomainCounter {
     pub fn new() -> Self {
         Self {
-            requests: AtomicU64::new(0),
-            cache_hits: AtomicU64::new(0),
-            cache_misses: AtomicU64::new(0),
-            bandwidth: AtomicU64::new(0),
+            requests:          AtomicU64::new(0),
+            l1_hits:           AtomicU64::new(0),
+            l2_hits:           AtomicU64::new(0),
+            cache_misses:      AtomicU64::new(0),
+            bypass_method:     AtomicU64::new(0),
+            bypass_nocache:    AtomicU64::new(0),
+            bypass_size:       AtomicU64::new(0),
+            bypass_other:      AtomicU64::new(0),
+            bandwidth:         AtomicU64::new(0),
             response_time_sum: AtomicU64::new(0),
         }
     }
 
-    /// 카운터를 읽고 0으로 리셋 (swap) — 통계 수집 후 초기화용
-    pub fn take(&self) -> (u64, u64, u64, u64, u64) {
-        (
-            self.requests.swap(0, Ordering::Relaxed),
-            self.cache_hits.swap(0, Ordering::Relaxed),
-            self.cache_misses.swap(0, Ordering::Relaxed),
-            self.bandwidth.swap(0, Ordering::Relaxed),
-            self.response_time_sum.swap(0, Ordering::Relaxed),
-        )
+    /// 카운터를 읽고 0으로 원자적 리셋 — 통계 수집 후 초기화용
+    pub fn take(&self) -> DomainStatsSnapshot {
+        let requests       = self.requests.swap(0, Ordering::Relaxed);
+        let l1_hits        = self.l1_hits.swap(0, Ordering::Relaxed);
+        let l2_hits        = self.l2_hits.swap(0, Ordering::Relaxed);
+        let cache_misses   = self.cache_misses.swap(0, Ordering::Relaxed);
+        let bypass_method  = self.bypass_method.swap(0, Ordering::Relaxed);
+        let bypass_nocache = self.bypass_nocache.swap(0, Ordering::Relaxed);
+        let bypass_size    = self.bypass_size.swap(0, Ordering::Relaxed);
+        let bypass_other   = self.bypass_other.swap(0, Ordering::Relaxed);
+        let bandwidth      = self.bandwidth.swap(0, Ordering::Relaxed);
+        let response_time_sum = self.response_time_sum.swap(0, Ordering::Relaxed);
+        let cache_hits = l1_hits + l2_hits;
+        DomainStatsSnapshot {
+            requests, l1_hits, l2_hits, cache_misses,
+            bypass_method, bypass_nocache, bypass_size, bypass_other,
+            cache_hits, bandwidth, response_time_sum,
+        }
     }
 }
 
@@ -70,10 +106,11 @@ impl DomainCounter {
 pub type DomainCounters = Arc<std::sync::RwLock<HashMap<String, DomainCounter>>>;
 
 /// 도메인 요청 카운터 증가 — read lock 우선 시도, 없으면 write lock으로 entry 생성
-fn record_domain_counter(
+/// outcome을 통해 L1/L2 히트·miss·bypass 4종을 개별 집계한다
+fn record_domain_outcome(
     counters: &DomainCounters,
     host: &str,
-    cache_hit: bool,
+    outcome: CacheOutcome,
     bandwidth: u64,
     response_time_ms: u64,
 ) {
@@ -81,8 +118,15 @@ fn record_domain_counter(
         let map = counters.read().unwrap();
         if let Some(c) = map.get(host) {
             c.requests.fetch_add(1, Ordering::Relaxed);
-            if cache_hit { c.cache_hits.fetch_add(1, Ordering::Relaxed); }
-            else { c.cache_misses.fetch_add(1, Ordering::Relaxed); }
+            match outcome {
+                CacheOutcome::L1Hit         => { c.l1_hits.fetch_add(1, Ordering::Relaxed); }
+                CacheOutcome::L2Hit         => { c.l2_hits.fetch_add(1, Ordering::Relaxed); }
+                CacheOutcome::Miss          => { c.cache_misses.fetch_add(1, Ordering::Relaxed); }
+                CacheOutcome::BypassMethod  => { c.bypass_method.fetch_add(1, Ordering::Relaxed); }
+                CacheOutcome::BypassNoCache => { c.bypass_nocache.fetch_add(1, Ordering::Relaxed); }
+                CacheOutcome::BypassSize    => { c.bypass_size.fetch_add(1, Ordering::Relaxed); }
+                CacheOutcome::BypassOther   => { c.bypass_other.fetch_add(1, Ordering::Relaxed); }
+            }
             c.bandwidth.fetch_add(bandwidth, Ordering::Relaxed);
             c.response_time_sum.fetch_add(response_time_ms, Ordering::Relaxed);
             return;
@@ -91,8 +135,15 @@ fn record_domain_counter(
     let mut map = counters.write().unwrap();
     let c = map.entry(host.to_string()).or_insert_with(DomainCounter::new);
     c.requests.fetch_add(1, Ordering::Relaxed);
-    if cache_hit { c.cache_hits.fetch_add(1, Ordering::Relaxed); }
-    else { c.cache_misses.fetch_add(1, Ordering::Relaxed); }
+    match outcome {
+        CacheOutcome::L1Hit         => { c.l1_hits.fetch_add(1, Ordering::Relaxed); }
+        CacheOutcome::L2Hit         => { c.l2_hits.fetch_add(1, Ordering::Relaxed); }
+        CacheOutcome::Miss          => { c.cache_misses.fetch_add(1, Ordering::Relaxed); }
+        CacheOutcome::BypassMethod  => { c.bypass_method.fetch_add(1, Ordering::Relaxed); }
+        CacheOutcome::BypassNoCache => { c.bypass_nocache.fetch_add(1, Ordering::Relaxed); }
+        CacheOutcome::BypassSize    => { c.bypass_size.fetch_add(1, Ordering::Relaxed); }
+        CacheOutcome::BypassOther   => { c.bypass_other.fetch_add(1, Ordering::Relaxed); }
+    }
     c.bandwidth.fetch_add(bandwidth, Ordering::Relaxed);
     c.response_time_sum.fetch_add(response_time_ms, Ordering::Relaxed);
 }
@@ -129,6 +180,13 @@ struct AdminState {
 
 /// 기본 캐시 TTL (Cache-Control 헤더 없을 때)
 const DEFAULT_TTL: Duration = Duration::from_secs(3600);
+
+/// L2 storage에 저장 가능한 단일 응답 최대 크기 (128 MB)
+/// 이 크기를 초과하면 BypassSize로 분류하고 캐시에 저장하지 않는다.
+/// 학교 교과서 SCORM 패키지·비디오 파일까지 수용할 수 있도록 넉넉히 설정.
+// 불변: MAX_CACHE_ENTRY_BYTES >= MAX_MEMORY_ENTRY_BYTES —
+// L1 캐시가 L2 캐시보다 작은 상한을 갖도록 한다.
+const MAX_CACHE_ENTRY_BYTES: u64 = 128 * 1024 * 1024;
 
 /// 프록시 라우터 빌드
 pub fn build_proxy_router(ps: ProxyState) -> Router {
@@ -218,6 +276,22 @@ fn parse_cache_control(cache_control: Option<&str>, pragma: Option<&str>) -> Cac
     CacheDirective::Cacheable(None)
 }
 
+/// 응답이 캐시 가능한 콘텐츠 타입인지 판정.
+/// 학교 교과서 CDN 워크로드(이미지·텍스트·폰트·JS/JSON·PDF·EPUB·오디오/비디오·WASM)를 대상으로 한다.
+fn is_cacheable_content_type(content_type: &str) -> bool {
+    content_type.starts_with("image/")
+        || content_type.starts_with("text/")
+        || content_type.starts_with("font/")
+        || content_type.starts_with("video/")
+        || content_type.starts_with("audio/")
+        || content_type == "application/javascript"
+        || content_type == "application/json"
+        || content_type == "application/octet-stream"
+        || content_type == "application/pdf"
+        || content_type == "application/wasm"
+        || content_type == "application/epub+zip"
+}
+
 /// "directive=N" 형태에서 Duration 추출
 fn parse_duration_directive(cc: &str, directive: &str) -> Option<Duration> {
     for part in cc.split(',').map(str::trim) {
@@ -303,7 +377,7 @@ async fn proxy_handler(
                 });
             }
             tracing::info!(host=%host, url=%uri, elapsed_ms=%elapsed_ms, "L1 메모리 캐시 HIT");
-            record_domain_counter(&ps.counters, &host, true, entry.body.len() as u64, elapsed_ms);
+            record_domain_outcome(&ps.counters, &host, CacheOutcome::L1Hit, entry.body.len() as u64, elapsed_ms);
 
             let mut resp = Response::builder().status(StatusCode::OK);
             if let Some(ref ct) = entry.content_type {
@@ -311,6 +385,7 @@ async fn proxy_handler(
             }
             return resp
                 .header("X-Cache-Status", HeaderValue::from_static("HIT"))
+                .header("X-Cache-Reason", HeaderValue::from_static(CacheOutcome::L1Hit.as_header()))
                 .header("X-Served-By", HeaderValue::from_static("smart-school-cdn"))
                 .body(Body::from(entry.body.clone()))
                 .unwrap();
@@ -344,7 +419,7 @@ async fn proxy_handler(
                 });
             }
             tracing::info!(host=%host, url=%uri, elapsed_ms=%elapsed_ms, "L2 디스크 캐시 HIT (L1 승격)");
-            record_domain_counter(&ps.counters, &host, true, cached_bytes.len() as u64, elapsed_ms);
+            record_domain_outcome(&ps.counters, &host, CacheOutcome::L2Hit, cached_bytes.len() as u64, elapsed_ms);
 
             let mut resp = Response::builder().status(StatusCode::OK);
             if let Some(ct) = content_type {
@@ -352,6 +427,7 @@ async fn proxy_handler(
             }
             return resp
                 .header("X-Cache-Status", HeaderValue::from_static("HIT"))
+                .header("X-Cache-Reason", HeaderValue::from_static(CacheOutcome::L2Hit.as_header()))
                 .header("X-Served-By", HeaderValue::from_static("smart-school-cdn"))
                 .body(Body::from(cached_bytes))
                 .unwrap();
@@ -424,8 +500,31 @@ async fn proxy_handler(
                 .and_then(|v| v.to_str().ok())
                 .map(|s| s.to_string());
 
-            // 캐시 가능 + 성공 응답이면 optimizer → storage.put
-            let (serve_bytes, serve_ct) = if matches!(&cache_directive, CacheDirective::Cacheable(_)) && status.is_success() {
+            // outcome 분류에 필요한 조건 계산
+            // parse_cache_control()이 이미 파싱한 cache_directive를 재사용해 중복 파싱 방지
+            let origin_no_cache = matches!(cache_directive, CacheDirective::NoStore);
+            // 응답 크기가 단일 캐시 항목 최대치 초과 여부
+            let size_exceeded = resp_body.len() as u64 > MAX_CACHE_ENTRY_BYTES;
+            // 캐시 가능한 Content-Type 여부 — is_cacheable_content_type() 헬퍼로 위임
+            let ct_str = content_type.as_deref().unwrap_or("");
+            let ct_base = ct_str.split(';').next().unwrap_or("").trim();
+            let cacheable_ct = is_cacheable_content_type(ct_base);
+            let origin_ok_and_cacheable = status.is_success()
+                && !origin_no_cache
+                && !size_exceeded
+                && cacheable_ct;
+            // classify_outcome: L1/L2 miss 이후이므로 두 플래그 모두 false
+            let outcome = classify_outcome(
+                true, // GET 경로에서만 이 클로저가 실행됨
+                false,
+                false,
+                origin_no_cache,
+                size_exceeded,
+                origin_ok_and_cacheable,
+            );
+
+            // outcome이 Miss일 때만 optimizer → storage.put 수행
+            let (serve_bytes, serve_ct) = if outcome == CacheOutcome::Miss {
                 let ttl = if let CacheDirective::Cacheable(Some(t)) = cache_directive { t } else { DEFAULT_TTL };
                 let full_url = format!("https://{}{}", host_c, uri_str);
                 let domain = host_c.split(':').next().unwrap_or(&host_c).to_string();
@@ -459,18 +558,19 @@ async fn proxy_handler(
 
                 (Bytes::from(store_bytes), store_ct)
             } else {
+                // Bypass* — 캐시 저장 생략, 원본 응답 그대로 전달
                 (resp_body, content_type)
             };
 
             // 첫 번째 요청자만 miss 카운터 증가 (구독자는 record_request만)
             state_c.write().await.record_cache_miss();
-            Ok(Arc::new((serve_bytes, serve_ct, status)))
+            Ok(Arc::new((serve_bytes, serve_ct, status, outcome)))
         }).await;
 
         let elapsed_ms = start.elapsed().as_millis() as u64;
         match coalesced {
             Ok(resp) => {
-                let (body, ct, status) = resp.as_ref();
+                let (body, ct, status, outcome) = resp.as_ref();
                 {
                     let mut app_state = state.write().await;
                     app_state.record_request(RequestLog {
@@ -488,13 +588,14 @@ async fn proxy_handler(
                     status=%status.as_u16(), elapsed_ms=%elapsed_ms,
                     cache="MISS", "프록시 요청 처리 완료"
                 );
-                record_domain_counter(&ps.counters, &host, false, body.len() as u64, elapsed_ms);
+                record_domain_outcome(&ps.counters, &host, *outcome, body.len() as u64, elapsed_ms);
                 let mut response = Response::builder().status(*status);
                 if let Some(ct_str) = ct {
                     response = response.header("Content-Type", ct_str.as_str());
                 }
                 return response
                     .header("X-Cache-Status", HeaderValue::from_static("MISS"))
+                    .header("X-Cache-Reason", HeaderValue::from_static(outcome.as_header()))
                     .header("X-Served-By", HeaderValue::from_static("smart-school-cdn"))
                     .body(Body::from(body.clone()))
                     .unwrap();
@@ -513,8 +614,14 @@ async fn proxy_handler(
                         cache_status: "BYPASS".to_string(),
                     });
                 }
-                record_domain_counter(&ps.counters, &host, false, 0, elapsed_ms);
-                return (StatusCode::BAD_GATEWAY, "Origin fetch failed").into_response();
+                record_domain_outcome(&ps.counters, &host, CacheOutcome::BypassOther, 0, elapsed_ms);
+                return Response::builder()
+                    .status(StatusCode::BAD_GATEWAY)
+                    .header("X-Cache-Status", HeaderValue::from_static("BYPASS"))
+                    .header("X-Cache-Reason", HeaderValue::from_static(CacheOutcome::BypassOther.as_header()))
+                    .header("X-Served-By", HeaderValue::from_static("smart-school-cdn"))
+                    .body(Body::from("Origin fetch failed"))
+                    .unwrap();
             }
         }
     }
@@ -583,7 +690,7 @@ async fn proxy_handler(
             cache_status: "BYPASS".to_string(),
         });
     }
-    record_domain_counter(&ps.counters, &host, false, response_body.len() as u64, elapsed_ms);
+    record_domain_outcome(&ps.counters, &host, CacheOutcome::BypassMethod, response_body.len() as u64, elapsed_ms);
 
     tracing::info!(
         method = %method, host = %host, url = %uri,
@@ -607,6 +714,7 @@ async fn proxy_handler(
     }
     response
         .header("X-Cache-Status", HeaderValue::from_static("BYPASS"))
+        .header("X-Cache-Reason", HeaderValue::from_static(CacheOutcome::BypassMethod.as_header()))
         .header("X-Served-By", HeaderValue::from_static("smart-school-cdn"))
         .body(Body::from(response_body))
         .unwrap()
@@ -711,14 +819,20 @@ async fn ca_mobileconfig_handler(State(ps): State<ProxyState>) -> Response {
 async fn stats_handler(State(state): State<AdminState>) -> impl IntoResponse {
     let counters = state.counters.read().unwrap();
     let stats: Vec<serde_json::Value> = counters.iter().map(|(host, c)| {
-        let (requests, hits, misses, bw, rt_sum) = c.take();
-        let avg_rt = if requests > 0 { rt_sum / requests } else { 0 };
+        let snap = c.take();
+        let avg_rt = if snap.requests > 0 { snap.response_time_sum / snap.requests } else { 0 };
         serde_json::json!({
-            "host": host,
-            "requests": requests,
-            "cache_hits": hits,
-            "cache_misses": misses,
-            "bandwidth": bw,
+            "host":              host,
+            "requests":          snap.requests,
+            "l1_hits":           snap.l1_hits,
+            "l2_hits":           snap.l2_hits,
+            "cache_misses":      snap.cache_misses,
+            "bypass_method":     snap.bypass_method,
+            "bypass_nocache":    snap.bypass_nocache,
+            "bypass_size":       snap.bypass_size,
+            "bypass_other":      snap.bypass_other,
+            "cache_hits":        snap.cache_hits,    // 하위 호환 (= l1_hits + l2_hits)
+            "bandwidth":         snap.bandwidth,
             "avg_response_time": avg_rt
         })
     }).collect();
@@ -950,6 +1064,71 @@ async fn domain_purge_handler(
         "purged_count": purged_count,
         "freed_bytes": freed_bytes,
     })).into_response()
+}
+
+/// 요청 1건당 정확히 하나의 캐시 결과 분류.
+/// 우선순위: method → L1 → L2 → NoCache → Size → Miss → Other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CacheOutcome {
+    L1Hit,
+    L2Hit,
+    Miss,
+    BypassMethod,
+    BypassNoCache,
+    BypassSize,
+    BypassOther,
+}
+
+impl CacheOutcome {
+    /// `X-Cache-Reason` 헤더 값
+    pub fn as_header(&self) -> &'static str {
+        match self {
+            Self::L1Hit         => "L1-HIT",
+            Self::L2Hit         => "L2-HIT",
+            Self::Miss          => "MISS",
+            Self::BypassMethod  => "BYPASS-METHOD",
+            Self::BypassNoCache => "BYPASS-NOCACHE",
+            Self::BypassSize    => "BYPASS-SIZE",
+            Self::BypassOther   => "BYPASS-OTHER",
+        }
+    }
+}
+
+/// 순수 함수 — 입력 상태로부터 outcome을 결정한다.
+/// 우선순위: method → L1 → L2 → NoCache → Size → origin_ok → Other.
+/// - `method_is_get_or_head`: GET/HEAD 요청이면 true
+/// - `l1_hit`: L1 메모리 캐시 HIT 여부
+/// - `l2_hit`: L2 디스크 캐시 HIT 여부 (L1 miss 후에만 의미)
+/// - `origin_no_cache`: origin 응답 Cache-Control이 no-cache/no-store
+/// - `size_exceeded`: 응답 크기가 MAX_CACHE_ENTRY_BYTES 초과
+/// - `origin_ok_and_cacheable`: origin 200 OK + 캐시 저장 성공
+pub fn classify_outcome(
+    method_is_get_or_head: bool,
+    l1_hit: bool,
+    l2_hit: bool,
+    origin_no_cache: bool,
+    size_exceeded: bool,
+    origin_ok_and_cacheable: bool,
+) -> CacheOutcome {
+    if !method_is_get_or_head {
+        return CacheOutcome::BypassMethod;
+    }
+    if l1_hit {
+        return CacheOutcome::L1Hit;
+    }
+    if l2_hit {
+        return CacheOutcome::L2Hit;
+    }
+    if origin_no_cache {
+        return CacheOutcome::BypassNoCache;
+    }
+    if size_exceeded {
+        return CacheOutcome::BypassSize;
+    }
+    if origin_ok_and_cacheable {
+        return CacheOutcome::Miss;
+    }
+    CacheOutcome::BypassOther
 }
 
 #[cfg(test)]
@@ -2460,5 +2639,315 @@ mod tests {
         let entry = memory_cache_check.get(&key).await;
         assert!(entry.is_some(), "L2 HIT 후 L1 메모리 캐시에 승격되어야 한다");
         assert_eq!(&entry.unwrap().body[..], &[60, 104, 49, 62]);
+    }
+
+    // ─── is_cacheable_content_type 단위 테스트 ───────────────────────
+
+    #[test]
+    fn is_cacheable_content_type_checks() {
+        assert!(is_cacheable_content_type("image/png"));
+        assert!(is_cacheable_content_type("image/svg+xml"));
+        assert!(is_cacheable_content_type("text/html"));
+        assert!(is_cacheable_content_type("text/css"));
+        assert!(is_cacheable_content_type("font/woff2"));
+        assert!(is_cacheable_content_type("video/mp4"));
+        assert!(is_cacheable_content_type("audio/mpeg"));
+        assert!(is_cacheable_content_type("application/javascript"));
+        assert!(is_cacheable_content_type("application/json"));
+        assert!(is_cacheable_content_type("application/pdf"));
+        assert!(is_cacheable_content_type("application/wasm"));
+        assert!(is_cacheable_content_type("application/epub+zip"));
+        assert!(is_cacheable_content_type("application/octet-stream"));
+
+        // 비캐시 대상
+        assert!(!is_cacheable_content_type(""));
+        assert!(!is_cacheable_content_type("application/xml"));
+        assert!(!is_cacheable_content_type("multipart/form-data"));
+    }
+
+    // ─── CacheOutcome / classify_outcome 단위 테스트 ──────────────────
+
+    #[test]
+    fn classify_outcome_비GET은_method_bypass() {
+        assert_eq!(
+            classify_outcome(false, false, false, false, false, false),
+            CacheOutcome::BypassMethod
+        );
+    }
+
+    #[test]
+    fn classify_outcome_l1_히트() {
+        assert_eq!(
+            classify_outcome(true, true, false, false, false, false),
+            CacheOutcome::L1Hit
+        );
+    }
+
+    #[test]
+    fn classify_outcome_l1_미스_l2_히트() {
+        assert_eq!(
+            classify_outcome(true, false, true, false, false, false),
+            CacheOutcome::L2Hit
+        );
+    }
+
+    #[test]
+    fn classify_outcome_origin_nocache() {
+        assert_eq!(
+            classify_outcome(true, false, false, true, false, false),
+            CacheOutcome::BypassNoCache
+        );
+    }
+
+    #[test]
+    fn classify_outcome_size_초과() {
+        assert_eq!(
+            classify_outcome(true, false, false, false, true, false),
+            CacheOutcome::BypassSize
+        );
+    }
+
+    #[test]
+    fn classify_outcome_origin_ok_캐시_저장() {
+        assert_eq!(
+            classify_outcome(true, false, false, false, false, true),
+            CacheOutcome::Miss
+        );
+    }
+
+    #[test]
+    fn classify_outcome_기타는_other() {
+        assert_eq!(
+            classify_outcome(true, false, false, false, false, false),
+            CacheOutcome::BypassOther
+        );
+    }
+
+    #[test]
+    fn classify_outcome_nocache가_size보다_우선() {
+        assert_eq!(
+            classify_outcome(true, false, false, true, true, false),
+            CacheOutcome::BypassNoCache
+        );
+    }
+
+    #[test]
+    fn cache_outcome_as_header_매핑() {
+        assert_eq!(CacheOutcome::L1Hit.as_header(),         "L1-HIT");
+        assert_eq!(CacheOutcome::L2Hit.as_header(),         "L2-HIT");
+        assert_eq!(CacheOutcome::Miss.as_header(),          "MISS");
+        assert_eq!(CacheOutcome::BypassMethod.as_header(),  "BYPASS-METHOD");
+        assert_eq!(CacheOutcome::BypassNoCache.as_header(), "BYPASS-NOCACHE");
+        assert_eq!(CacheOutcome::BypassSize.as_header(),    "BYPASS-SIZE");
+        assert_eq!(CacheOutcome::BypassOther.as_header(),   "BYPASS-OTHER");
+    }
+
+    // ─── outcome 분류·X-Cache-Reason 헤더 통합 테스트 ────────────────────
+
+    /// Cache-Control: no-store 헤더를 포함하는 mock 원본 서버 기동
+    /// — origin_no_cache 분기(BYPASS-NOCACHE) 검증용
+    async fn start_mock_origin_server_with_nostore(body: Vec<u8>, content_type: &'static str) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let app = axum::Router::new().fallback(move || {
+                let body = body.clone();
+                async move {
+                    axum::response::Response::builder()
+                        .status(200)
+                        .header("content-type", content_type)
+                        .header("cache-control", "no-store")
+                        .body(axum::body::Body::from(body))
+                        .unwrap()
+                }
+            });
+            axum::serve(listener, app).await.unwrap();
+        });
+        format!("http://127.0.0.1:{}", addr.port())
+    }
+
+    /// POST 요청은 non-GET 경로로 처리되어 BYPASS-METHOD로 분류되고
+    /// X-Cache-Reason: BYPASS-METHOD 헤더가 반환된다
+    #[tokio::test]
+    async fn post_요청은_bypass_method로_분류되고_x_cache_reason_헤더_포함() {
+        let origin_url = start_mock_origin_server(b"hello".to_vec(), "text/plain").await;
+        let (ps, router) = make_miss_proxy_state(None, origin_url, "post-test.local").await;
+
+        let resp = router
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/")
+                    .header("host", "post-test.local")
+                    .body(axum::body::Body::from("body"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // POST 자체는 origin에서 200을 받아 그대로 전달
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get("x-cache-reason").and_then(|v| v.to_str().ok()),
+            Some("BYPASS-METHOD")
+        );
+        assert_eq!(
+            resp.headers().get("x-cache-status").and_then(|v| v.to_str().ok()),
+            Some("BYPASS")
+        );
+
+        // bypass_method 카운터만 1 증가, 다른 캐시 카운터는 0
+        let map = ps.counters.read().unwrap();
+        let c = map.get("post-test.local").expect("카운터 항목 없음");
+        assert_eq!(c.bypass_method.load(std::sync::atomic::Ordering::Relaxed), 1);
+        assert_eq!(c.l1_hits.load(std::sync::atomic::Ordering::Relaxed), 0);
+        assert_eq!(c.l2_hits.load(std::sync::atomic::Ordering::Relaxed), 0);
+        assert_eq!(c.cache_misses.load(std::sync::atomic::Ordering::Relaxed), 0);
+        assert_eq!(c.bypass_nocache.load(std::sync::atomic::Ordering::Relaxed), 0);
+    }
+
+    /// L1 메모리 캐시 HIT → X-Cache-Reason: L1-HIT 헤더 반환 + l1_hits 카운터 증가
+    #[tokio::test]
+    async fn l1_hit_응답은_x_cache_reason_l1_hit_헤더_포함하고_l1_hits_증가() {
+        let storage_url = start_mock_storage_server().await;
+        let tls_url = start_mock_tls_server().await;
+        let optimizer_url = start_mock_optimizer_server().await;
+
+        let storage = loop {
+            match clients::storage_client::StorageClient::connect(&storage_url).await {
+                Ok(c) => break c,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        };
+        let tls = loop {
+            match clients::tls_client::TlsClient::connect(&tls_url).await {
+                Ok(c) => break c,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        };
+        let optimizer = loop {
+            match clients::optimizer_client::OptimizerClient::connect(&optimizer_url).await {
+                Ok(c) => break c,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        };
+        let cert_cache = tls.cert_cache.clone();
+
+        let mut dm = HashMap::new();
+        dm.insert("l1hit.local".to_string(), "http://origin.l1hit.local".to_string());
+        let domain_map: DomainMap = Arc::new(tokio::sync::RwLock::new(dm));
+
+        let memory_cache: moka::future::Cache<String, Arc<MemoryCacheEntry>> =
+            moka::future::Cache::builder().max_capacity(100).build();
+
+        // L1 캐시에 항목 미리 삽입
+        let key = compute_cache_key("GET", "l1hit.local", "/page", "");
+        memory_cache.insert(key, Arc::new(MemoryCacheEntry {
+            body: Bytes::from("l1-cached-body"),
+            content_type: Some("text/html".to_string()),
+        })).await;
+
+        let ps = ProxyState {
+            shared: Arc::new(tokio::sync::RwLock::new(state::AppState::new())),
+            http_client: reqwest::Client::new(),
+            storage: Arc::new(Mutex::new(storage)),
+            tls_client: Arc::new(Mutex::new(tls)),
+            optimizer: Some(Arc::new(Mutex::new(optimizer))),
+            domain_map,
+            cert_cache,
+            coalescer: Arc::new(coalescer::Coalescer::new()),
+            memory_cache,
+            counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
+        };
+
+        let router = build_proxy_router(ps.clone());
+        let resp = router
+            .oneshot(
+                Request::builder()
+                    .uri("/page")
+                    .header("host", "l1hit.local")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get("x-cache-reason").and_then(|v| v.to_str().ok()),
+            Some("L1-HIT")
+        );
+        assert_eq!(
+            resp.headers().get("x-cache-status").and_then(|v| v.to_str().ok()),
+            Some("HIT")
+        );
+
+        // l1_hits만 증가, miss/bypass는 0
+        let map = ps.counters.read().unwrap();
+        let c = map.get("l1hit.local").expect("카운터 항목 없음");
+        assert_eq!(c.l1_hits.load(std::sync::atomic::Ordering::Relaxed), 1);
+        assert_eq!(c.cache_misses.load(std::sync::atomic::Ordering::Relaxed), 0);
+        assert_eq!(c.bypass_method.load(std::sync::atomic::Ordering::Relaxed), 0);
+    }
+
+    /// origin이 Cache-Control: no-store를 반환하면 BYPASS-NOCACHE로 분류되고
+    /// storage.put()이 호출되지 않는다 (gRPC mock storage에 항목이 없음)
+    #[tokio::test]
+    async fn origin_no_store_응답은_bypass_nocache_로_분류되고_저장_안됨() {
+        let origin_url = start_mock_origin_server_with_nostore(
+            b"<html>no-store</html>".to_vec(),
+            "text/html",
+        ).await;
+
+        let (ps, router) = make_miss_proxy_state(None, origin_url, "nostore.local").await;
+
+        let resp = router
+            .oneshot(
+                Request::builder()
+                    .uri("/page")
+                    .header("host", "nostore.local")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get("x-cache-reason").and_then(|v| v.to_str().ok()),
+            Some("BYPASS-NOCACHE")
+        );
+
+        // bypass_nocache 카운터만 증가, miss는 0
+        let map = ps.counters.read().unwrap();
+        let c = map.get("nostore.local").expect("카운터 항목 없음");
+        assert_eq!(c.bypass_nocache.load(std::sync::atomic::Ordering::Relaxed), 1);
+        assert_eq!(c.cache_misses.load(std::sync::atomic::Ordering::Relaxed), 0);
+
+        // storage에 항목이 없어야 함 — gRPC get으로 확인
+        // (coalescer 내부에서 put이 호출됐다면 storage에 키가 존재했을 것)
+        let key = compute_cache_key("GET", "nostore.local", "/page", "");
+        let hit = ps.storage.lock().await.get(&key).await;
+        assert!(hit.is_none(), "no-store 응답은 storage에 저장되지 않아야 한다");
+    }
+
+    // ─── classify_outcome 사이즈 우선순위 단위 테스트 ────────────────────
+
+    /// size_exceeded=true이면 다른 조건과 무관하게 BypassSize 반환
+    #[test]
+    fn classify_outcome_size_exceeded_는_bypass_size() {
+        assert_eq!(
+            classify_outcome(true, false, false, false, true, false),
+            CacheOutcome::BypassSize,
+        );
+    }
+
+    /// size_exceeded가 true이고 origin_ok_and_cacheable도 true여도 BypassSize가 우선
+    #[test]
+    fn classify_outcome_size가_cacheable보다_우선() {
+        assert_eq!(
+            classify_outcome(true, false, false, false, true, true),
+            CacheOutcome::BypassSize,
+        );
     }
 }

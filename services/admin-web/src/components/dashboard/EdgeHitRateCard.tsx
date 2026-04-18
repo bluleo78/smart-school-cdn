@@ -1,21 +1,20 @@
-/// L1 히트율 카드 — 재설계 후 대시보드의 메인 메트릭.
-/// L1은 메모리(가장 빠른) 캐시 계층이므로 성공 컬러로 강조한다.
+/// 엣지 히트율 카드 — L1+L2 통합 히트율(= 오리진을 건드리지 않은 비율).
+/// L1 대비 보조 지표이므로 컬러 강조 없이 중립 톤으로 표시한다.
 import { useCacheStats } from '../../hooks/useCacheStats';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Skeleton } from '../ui/skeleton';
 
-/** 비율(0-1) → "%" 문자열 포매터 */
 function fmtPct(n: number) {
   return `${(n * 100).toFixed(1)}%`;
 }
 
-export function CacheHitRateCard() {
+export function EdgeHitRateCard() {
   const { data, isLoading, error } = useCacheStats();
 
   if (isLoading) {
     return (
-      <Card variant="glass" data-testid="cache-hit-rate-loading">
-        <CardHeader><CardTitle>L1 히트율</CardTitle></CardHeader>
+      <Card variant="glass" data-testid="edge-hit-rate-loading">
+        <CardHeader><CardTitle>엣지 히트율 (L1+L2)</CardTitle></CardHeader>
         <CardContent className="space-y-2">
           <Skeleton className="h-8 w-20" />
           <Skeleton className="h-4 w-28" />
@@ -27,24 +26,26 @@ export function CacheHitRateCard() {
   if (error || !data) {
     return (
       <Card variant="glass">
-        <CardHeader><CardTitle>L1 히트율</CardTitle></CardHeader>
+        <CardHeader><CardTitle>엣지 히트율 (L1+L2)</CardTitle></CardHeader>
         <CardContent><p className="text-sm text-destructive">연결 실패</p></CardContent>
       </Card>
     );
   }
 
+  const edgeHits = data.l1_hits + data.l2_hits;
+
   return (
-    <Card variant="glass" data-testid="cache-hit-rate-card">
-      <CardHeader><CardTitle>L1 히트율</CardTitle></CardHeader>
+    <Card variant="glass" data-testid="edge-hit-rate-card">
+      <CardHeader><CardTitle>엣지 히트율 (L1+L2)</CardTitle></CardHeader>
       <CardContent>
         <p
-          className="text-3xl font-bold tabular-nums text-success"
-          data-testid="dashboard-l1-hit-rate"
+          className="text-3xl font-bold tabular-nums"
+          data-testid="dashboard-edge-hit-rate"
         >
-          {fmtPct(data.l1_hit_rate)}
+          {fmtPct(data.edge_hit_rate)}
         </p>
         <p className="text-xs text-muted-foreground mt-1">
-          L1 HIT {data.l1_hits.toLocaleString()} / 요청 {data.requests.toLocaleString()}
+          엣지 HIT {edgeHits.toLocaleString()} / 요청 {data.requests.toLocaleString()}
         </p>
       </CardContent>
     </Card>

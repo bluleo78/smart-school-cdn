@@ -66,15 +66,16 @@ export function SystemPage() {
     ? !systemStatus.proxy.online || !systemStatus.storage.online || !systemStatus.tls.online || !systemStatus.dns.online || !systemStatus.optimizer.online
     : false;
 
+  // 캐시 재설계 후 disk 관련 필드는 `cache.disk.*`로 이동했다.
   const diskUsageRatio =
-    cache && cache.max_size_bytes > 0
-      ? cache.total_size_bytes / cache.max_size_bytes
+    cache && cache.disk.max_bytes > 0
+      ? cache.disk.used_bytes / cache.disk.max_bytes
       : 0;
   const diskUsagePercent = Math.round(diskUsageRatio * 100);
   const isDiskWarning = diskUsageRatio >= 0.9;
 
-  const diskUsedGB = cache ? (cache.total_size_bytes / 1024 ** 3).toFixed(1) : '-';
-  const diskMaxGB = cache ? (cache.max_size_bytes / 1024 ** 3).toFixed(1) : '-';
+  const diskUsedGB = cache ? (cache.disk.used_bytes / 1024 ** 3).toFixed(1) : '-';
+  const diskMaxGB = cache ? (cache.disk.max_bytes / 1024 ** 3).toFixed(1) : '-';
 
   return (
     <div className="space-y-6">

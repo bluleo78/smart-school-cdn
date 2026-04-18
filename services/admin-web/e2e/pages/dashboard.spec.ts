@@ -7,7 +7,14 @@ import {
   createProxyStatusOffline,
   createRequestLogs,
 } from '../factories/proxy.factory';
-import { createCacheStats } from '../factories/cache.factory';
+import { createCacheStats, createCacheSeriesBuckets } from '../factories/cache.factory';
+
+/** 스택 차트가 로딩 상태로 멈추지 않도록 /cache/series를 모킹한다 */
+async function mockCacheSeries(page: import('@playwright/test').Page) {
+  await page.route('**/api/cache/series*', (route) =>
+    route.fulfill({ json: { buckets: createCacheSeriesBuckets() } }),
+  );
+}
 
 test.describe('대시보드 — 프록시 상태 카드', () => {
   test('프록시 온라인 시 초록 배지, 업타임, 요청 수가 표시된다', async ({ page }) => {
@@ -15,6 +22,7 @@ test.describe('대시보드 — 프록시 상태 카드', () => {
     await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
     await mockApi(page, 'GET', '/proxy/requests', []);
     await mockApi(page, 'GET', '/cache/stats', createCacheStats());
+    await mockCacheSeries(page);
 
     await page.goto('/');
 
@@ -33,6 +41,7 @@ test.describe('대시보드 — 프록시 상태 카드', () => {
     await mockApi(page, 'GET', '/proxy/status', createProxyStatusOffline());
     await mockApi(page, 'GET', '/proxy/requests', []);
     await mockApi(page, 'GET', '/cache/stats', createCacheStats());
+    await mockCacheSeries(page);
 
     await page.goto('/');
 
@@ -45,6 +54,7 @@ test.describe('대시보드 — 프록시 상태 카드', () => {
     await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline({ uptime: 300 }));
     await mockApi(page, 'GET', '/proxy/requests', []);
     await mockApi(page, 'GET', '/cache/stats', createCacheStats());
+    await mockCacheSeries(page);
 
     await page.goto('/');
 
@@ -57,6 +67,7 @@ test.describe('대시보드 — 요청 로그 테이블', () => {
     await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
     await mockApi(page, 'GET', '/proxy/requests', createRequestLogs());
     await mockApi(page, 'GET', '/cache/stats', createCacheStats());
+    await mockCacheSeries(page);
 
     await page.goto('/');
 
@@ -85,6 +96,7 @@ test.describe('대시보드 — 요청 로그 테이블', () => {
     await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
     await mockApi(page, 'GET', '/proxy/requests', []);
     await mockApi(page, 'GET', '/cache/stats', createCacheStats());
+    await mockCacheSeries(page);
 
     await page.goto('/');
 
@@ -99,6 +111,7 @@ test.describe('대시보드 — 로딩 상태', () => {
     await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline(), { delay: 1000 });
     await mockApi(page, 'GET', '/proxy/requests', [], { delay: 1000 });
     await mockApi(page, 'GET', '/cache/stats', createCacheStats());
+    await mockCacheSeries(page);
 
     await page.goto('/');
 
