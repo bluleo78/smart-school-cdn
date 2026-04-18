@@ -181,6 +181,10 @@ struct AdminState {
 /// 기본 캐시 TTL (Cache-Control 헤더 없을 때)
 const DEFAULT_TTL: Duration = Duration::from_secs(3600);
 
+/// L2 storage에 저장 가능한 단일 응답 최대 크기 (10 MB)
+/// 이 크기를 초과하면 BypassSize로 분류하고 캐시에 저장하지 않는다
+const MAX_CACHE_ENTRY_BYTES: u64 = 10 * 1024 * 1024;
+
 /// 프록시 라우터 빌드
 pub fn build_proxy_router(ps: ProxyState) -> Router {
     Router::new()
@@ -362,6 +366,7 @@ async fn proxy_handler(
             }
             return resp
                 .header("X-Cache-Status", HeaderValue::from_static("HIT"))
+                .header("X-Cache-Reason", HeaderValue::from_static(CacheOutcome::L1Hit.as_header()))
                 .header("X-Served-By", HeaderValue::from_static("smart-school-cdn"))
                 .body(Body::from(entry.body.clone()))
                 .unwrap();
@@ -403,6 +408,7 @@ async fn proxy_handler(
             }
             return resp
                 .header("X-Cache-Status", HeaderValue::from_static("HIT"))
+                .header("X-Cache-Reason", HeaderValue::from_static(CacheOutcome::L2Hit.as_header()))
                 .header("X-Served-By", HeaderValue::from_static("smart-school-cdn"))
                 .body(Body::from(cached_bytes))
                 .unwrap();
@@ -475,8 +481,43 @@ async fn proxy_handler(
                 .and_then(|v| v.to_str().ok())
                 .map(|s| s.to_string());
 
-            // 캐시 가능 + 성공 응답이면 optimizer → storage.put
-            let (serve_bytes, serve_ct) = if matches!(&cache_directive, CacheDirective::Cacheable(_)) && status.is_success() {
+            // outcome 분류에 필요한 조건 계산
+            // Cache-Control에 no-cache/no-store/private 포함 여부
+            let cc_str = resp_headers
+                .get("cache-control")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("");
+            let origin_no_cache = cc_str.split(',').map(str::trim).any(|d| {
+                let lower = d.to_lowercase();
+                lower == "no-cache" || lower == "no-store" || lower == "private"
+            });
+            // 응답 크기가 단일 캐시 항목 최대치 초과 여부
+            let size_exceeded = resp_body.len() as u64 > MAX_CACHE_ENTRY_BYTES;
+            // 캐시 가능한 Content-Type 여부
+            let ct_str = content_type.as_deref().unwrap_or("");
+            let ct_base = ct_str.split(';').next().unwrap_or("").trim();
+            let is_cacheable_content_type = ct_base.starts_with("image/")
+                || ct_base.starts_with("text/")
+                || ct_base.starts_with("font/")
+                || ct_base == "application/javascript"
+                || ct_base == "application/json"
+                || ct_base == "application/octet-stream";
+            let origin_ok_and_cacheable = status.is_success()
+                && !origin_no_cache
+                && !size_exceeded
+                && is_cacheable_content_type;
+            // classify_outcome: L1/L2 miss 이후이므로 두 플래그 모두 false
+            let outcome = classify_outcome(
+                true, // GET 경로에서만 이 클로저가 실행됨
+                false,
+                false,
+                origin_no_cache,
+                size_exceeded,
+                origin_ok_and_cacheable,
+            );
+
+            // outcome이 Miss일 때만 optimizer → storage.put 수행
+            let (serve_bytes, serve_ct) = if outcome == CacheOutcome::Miss {
                 let ttl = if let CacheDirective::Cacheable(Some(t)) = cache_directive { t } else { DEFAULT_TTL };
                 let full_url = format!("https://{}{}", host_c, uri_str);
                 let domain = host_c.split(':').next().unwrap_or(&host_c).to_string();
@@ -510,18 +551,19 @@ async fn proxy_handler(
 
                 (Bytes::from(store_bytes), store_ct)
             } else {
+                // Bypass* — 캐시 저장 생략, 원본 응답 그대로 전달
                 (resp_body, content_type)
             };
 
             // 첫 번째 요청자만 miss 카운터 증가 (구독자는 record_request만)
             state_c.write().await.record_cache_miss();
-            Ok(Arc::new((serve_bytes, serve_ct, status)))
+            Ok(Arc::new((serve_bytes, serve_ct, status, outcome)))
         }).await;
 
         let elapsed_ms = start.elapsed().as_millis() as u64;
         match coalesced {
             Ok(resp) => {
-                let (body, ct, status) = resp.as_ref();
+                let (body, ct, status, outcome) = resp.as_ref();
                 {
                     let mut app_state = state.write().await;
                     app_state.record_request(RequestLog {
@@ -539,13 +581,14 @@ async fn proxy_handler(
                     status=%status.as_u16(), elapsed_ms=%elapsed_ms,
                     cache="MISS", "프록시 요청 처리 완료"
                 );
-                record_domain_outcome(&ps.counters, &host, CacheOutcome::Miss, body.len() as u64, elapsed_ms);
+                record_domain_outcome(&ps.counters, &host, *outcome, body.len() as u64, elapsed_ms);
                 let mut response = Response::builder().status(*status);
                 if let Some(ct_str) = ct {
                     response = response.header("Content-Type", ct_str.as_str());
                 }
                 return response
                     .header("X-Cache-Status", HeaderValue::from_static("MISS"))
+                    .header("X-Cache-Reason", HeaderValue::from_static(outcome.as_header()))
                     .header("X-Served-By", HeaderValue::from_static("smart-school-cdn"))
                     .body(Body::from(body.clone()))
                     .unwrap();
@@ -565,7 +608,11 @@ async fn proxy_handler(
                     });
                 }
                 record_domain_outcome(&ps.counters, &host, CacheOutcome::BypassOther, 0, elapsed_ms);
-                return (StatusCode::BAD_GATEWAY, "Origin fetch failed").into_response();
+                return Response::builder()
+                    .status(StatusCode::BAD_GATEWAY)
+                    .header("X-Cache-Reason", HeaderValue::from_static(CacheOutcome::BypassOther.as_header()))
+                    .body(Body::from("Origin fetch failed"))
+                    .unwrap();
             }
         }
     }
@@ -658,6 +705,7 @@ async fn proxy_handler(
     }
     response
         .header("X-Cache-Status", HeaderValue::from_static("BYPASS"))
+        .header("X-Cache-Reason", HeaderValue::from_static(CacheOutcome::BypassMethod.as_header()))
         .header("X-Served-By", HeaderValue::from_static("smart-school-cdn"))
         .body(Body::from(response_body))
         .unwrap()
