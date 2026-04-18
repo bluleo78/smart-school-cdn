@@ -87,7 +87,7 @@ function createOptimizerProfile() {
   };
 }
 
-/** 도메인 요약 통계 */
+/** 도메인 요약 통계 (도메인 목록 페이지용) */
 function createDomainSummary() {
   return {
     total: 1,
@@ -105,6 +105,23 @@ function createDomainSummary() {
   };
 }
 
+/** 도메인 호스트 요약 — L1/엣지/Bypass 비율 포함 (Overview 카드용) */
+function createDomainHostSummary() {
+  return {
+    host: 'textbook.com',
+    today_requests: 100,
+    today_cache_hits: 70,
+    today_bandwidth: 0,
+    hit_rate: 0.7,
+    hourly: [],
+    today_l1_hit_rate: 0.6,
+    today_edge_hit_rate: 0.7,
+    today_bypass_rate: 0.1,
+    today_requests_delta: 0,
+    today_hit_rate_delta: 0,
+  };
+}
+
 // ─────────────────────────────────────────────
 // 공통 mock 설정
 // ─────────────────────────────────────────────
@@ -117,10 +134,16 @@ async function setupDetailMocks(page: Page) {
   await mockApi(page, 'GET', '/domains/textbook.com', createDomain());
   await mockApi(page, 'GET', '/domains/textbook.com/stats', createDomainStats());
   await mockApi(page, 'GET', '/domains/textbook.com/logs', createDomainLogs());
+  await mockApi(page, 'GET', '/domains/textbook.com/summary', createDomainHostSummary());
   await mockApi(page, 'GET', '/tls/certificates', createCertificates());
   await mockApi(page, 'GET', '/cache/popular', createPopularContent());
   await mockApi(page, 'GET', '/stats/optimization', createOptimizationStats());
   await mockApi(page, 'GET', '/optimizer/profiles', createOptimizerProfile());
+  await page.route('**/api/cache/series*', (route) =>
+    route.fulfill({
+      json: { buckets: [{ ts: Date.now() - 60_000, l1_hits: 10, l2_hits: 1, miss: 2, bypass: 1 }] },
+    }),
+  );
 }
 
 // ─────────────────────────────────────────────
@@ -172,6 +195,28 @@ test.describe('도메인 상세 — Overview 탭', () => {
     // 확인 클릭 → 다이얼로그 닫힘
     await page.getByTestId('purge-confirm-submit').click();
     await expect(page.getByTestId('purge-confirm-dialog')).not.toBeVisible();
+  });
+
+  test('도메인 Overview — L1/엣지/BYPASS 비율 카드 3개가 렌더링된다', async ({ page }) => {
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com');
+
+    // today_l1_hit_rate: 0.6 → "60.0%"
+    await expect(page.getByTestId('domain-overview-l1-hit-rate')).toBeVisible();
+    await expect(page.getByTestId('domain-overview-l1-hit-rate')).toHaveText('60.0%');
+    // today_edge_hit_rate: 0.7 → "70.0%"
+    await expect(page.getByTestId('domain-overview-edge-hit-rate')).toBeVisible();
+    await expect(page.getByTestId('domain-overview-edge-hit-rate')).toHaveText('70.0%');
+    // today_bypass_rate: 0.1 → "10.0%"
+    await expect(page.getByTestId('domain-overview-bypass-rate')).toBeVisible();
+    await expect(page.getByTestId('domain-overview-bypass-rate')).toHaveText('10.0%');
+  });
+
+  test('도메인 Overview — 스택 차트가 렌더링된다', async ({ page }) => {
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com');
+
+    await expect(page.getByTestId('domain-overview-stacked-chart')).toBeVisible();
   });
 });
 

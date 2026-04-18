@@ -7,6 +7,8 @@ import { formatBytes } from '../../../lib/format';
 import { DomainInfoCards } from './DomainInfoCards';
 import { DomainQuickActions } from './DomainQuickActions';
 import { BarSparkline, DeltaBadge } from '../StatSparkline';
+import { DomainCacheCards } from './DomainCacheCards';
+import { DomainStackedChart } from './DomainStackedChart';
 
 interface Props {
   domain: Domain;
@@ -106,6 +108,12 @@ export function DomainOverviewTab({ domain }: Props) {
     <div className="space-y-6" data-testid="domain-overview-tab">
       {/* 기본 정보 + 동기화 상태 */}
       <DomainInfoCards domain={domain} />
+
+      {/* L1/엣지/Bypass 비율 카드 — Phase 12 신규 */}
+      <DomainCacheCards host={domain.host} />
+
+      {/* 캐시 결과 분포 스택 차트 — Phase 12 신규 */}
+      <DomainStackedChart host={domain.host} />
 
       {/* 요약 통계 카드 */}
       <SummaryCards host={domain.host} />

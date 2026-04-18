@@ -1,25 +1,65 @@
-/// 캐시 테스트 데이터 팩토리
-import type { CacheStats, CacheEntry } from '../../src/api/cache';
+/// 캐시 테스트 데이터 팩토리 — 재설계 후 L1/L2/bypass 분리 shape
+import type { CacheStats, CacheSeriesBucket, CacheEntry } from '../../src/api/cache';
 
-/** 캐시 통계 더미 데이터 생성 */
-export function createCacheStats(overrides?: Partial<CacheStats>): CacheStats {
+/** 재설계된 CacheStats 응답 픽스처 */
+export function createCacheStats(overrides: Partial<{
+  requests: number;
+  l1_hits: number;
+  l2_hits: number;
+  miss: number;
+  bypass_total: number;
+  disk: { used_bytes: number; max_bytes: number; entry_count: number };
+  by_domain: CacheStats['by_domain'];
+}> = {}): CacheStats {
+  const req = overrides.requests ?? 1000;
+  const l1 = overrides.l1_hits ?? 700;
+  const l2 = overrides.l2_hits ?? 100;
+  const miss = overrides.miss ?? 150;
+  const bypassTotal = overrides.bypass_total ?? 50;
   return {
-    hit_count: 750,
-    miss_count: 274,
-    bypass_count: 0,
-    hit_rate: 73.2,
-    total_size_bytes: 4_509_715_456,
-    max_size_bytes: 21_474_836_480,
-    entry_count: 3842,
-    by_domain: [
-      { domain: 'cdn.textbook.com', hit_count: 500, size_bytes: 3_000_000_000 },
+    requests: req,
+    l1_hits: l1,
+    l2_hits: l2,
+    miss,
+    bypass: { method: bypassTotal, nocache: 0, size: 0, other: 0, total: bypassTotal },
+    l1_hit_rate: l1 / req,
+    edge_hit_rate: (l1 + l2) / req,
+    bypass_rate: bypassTotal / req,
+    disk: overrides.disk ?? {
+      used_bytes: 1024 * 1024,
+      max_bytes: 20 * 1024 ** 3,
+      entry_count: 42,
+    },
+    by_domain: overrides.by_domain ?? [
+      {
+        host: 'a.test',
+        requests: 600,
+        l1_hits: 500,
+        l2_hits: 50,
+        bypass_total: 20,
+        l1_hit_rate: 500 / 600,
+        edge_hit_rate: 550 / 600,
+      },
+      {
+        host: 'b.test',
+        requests: 400,
+        l1_hits: 200,
+        l2_hits: 50,
+        bypass_total: 30,
+        l1_hit_rate: 200 / 400,
+        edge_hit_rate: 250 / 400,
+      },
     ],
-    hit_rate_history: [
-      { timestamp: '2026-04-11T10:00:00Z', hit_rate: 65.0 },
-      { timestamp: '2026-04-11T10:01:00Z', hit_rate: 73.2 },
-    ],
-    ...overrides,
   };
+}
+
+/** 시계열 버킷 픽스처 (2버킷) */
+export function createCacheSeriesBuckets(): CacheSeriesBucket[] {
+  const now = Date.now();
+  return [
+    { ts: now - 120_000, l1_hits: 50, l2_hits: 5, miss: 10, bypass: 5 },
+    { ts: now - 60_000,  l1_hits: 70, l2_hits: 5, miss: 10, bypass: 5 },
+  ];
 }
 
 /** 인기 콘텐츠 목록 더미 데이터 생성 (2건) */

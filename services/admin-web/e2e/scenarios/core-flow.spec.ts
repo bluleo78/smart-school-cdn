@@ -3,7 +3,7 @@
 /// 여러 페이지를 순서대로 이동하며 시스템의 핵심 워크플로우를 단일 테스트로 커버한다.
 import { test, expect } from '../fixtures/test';
 import { mockApi } from '../fixtures/api-mock';
-import { createCacheStats, createPopularContent } from '../factories/cache.factory';
+import { createCacheStats, createCacheSeriesBuckets, createPopularContent } from '../factories/cache.factory';
 import { createProxyStatusOnline } from '../factories/proxy.factory';
 
 const DOMAIN = 'textbook.co.kr';
@@ -12,12 +12,19 @@ const ORIGIN = 'https://textbook.co.kr';
 /** 도메인에 콘텐츠가 캐싱된 상태의 통계 (42건) */
 function createCacheStatsWithDomain() {
   return createCacheStats({
-    entry_count: 42,
-    hit_count: 30,
-    miss_count: 12,
-    hit_rate: 71.4,
-    total_size_bytes: 10_000_000,
-    by_domain: [{ domain: DOMAIN, hit_count: 30, size_bytes: 10_000_000 }],
+    requests: 42,
+    l1_hits: 30,
+    miss: 12,
+    disk: { used_bytes: 10_000_000, max_bytes: 20 * 1024 ** 3, entry_count: 42 },
+    by_domain: [{
+      host: DOMAIN,
+      requests: 42,
+      l1_hits: 30,
+      l2_hits: 0,
+      bypass_total: 0,
+      l1_hit_rate: 30 / 42,
+      edge_hit_rate: 30 / 42,
+    }],
   });
 }
 
@@ -26,8 +33,15 @@ test.describe('핵심 플로우 시나리오', () => {
     // ─── 1단계: 공통 API 초기 모킹 ───────────────────────────────────
     await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
     await mockApi(page, 'GET', '/proxy/requests', []);
-    await mockApi(page, 'GET', '/cache/stats', createCacheStats({ entry_count: 0, total_size_bytes: 0 }));
+    await mockApi(page, 'GET', '/cache/stats', createCacheStats({
+      requests: 0, l1_hits: 0, l2_hits: 0, miss: 0,
+      disk: { used_bytes: 0, max_bytes: 20 * 1024 ** 3, entry_count: 0 },
+      by_domain: [],
+    }));
     await mockApi(page, 'GET', '/cache/popular', []);
+    await page.route('**/api/cache/series*', (route) =>
+      route.fulfill({ json: { buckets: createCacheSeriesBuckets() } }),
+    );
 
     // ─── 2단계: 도메인 추가 ─────────────────────────────────────────
     await mockApi(page, 'GET', '/domains/summary', {

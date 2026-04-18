@@ -1,6 +1,4 @@
-/// 캐시 결과 분포 시계열 — L1 / L2 / MISS / BYPASS 4층 100% 스택 영역 차트.
-/// 재설계 전엔 단일 '히트율 추이' 라인이었으나, 각 레이어의 기여를 한눈에 비교 가능하도록
-/// 스택 영역으로 변경. 1시간/24시간 범위 토글 제공, 10초 주기 자동 갱신.
+/// 도메인 개요 탭 — 캐시 결과 분포 스택 영역 차트 (L1/L2/MISS/BYPASS)
 import { useMemo, useState } from 'react';
 import {
   AreaChart,
@@ -12,17 +10,23 @@ import {
   CartesianGrid,
   Legend,
 } from 'recharts';
-import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
-import { Skeleton } from '../ui/skeleton';
-import { Button } from '../ui/button';
-import { useCacheSeries } from '../../hooks/useCacheSeries';
-import type { CacheSeriesRange } from '../../api/cache';
+import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
+import { Skeleton } from '../../ui/skeleton';
+import { Button } from '../../ui/button';
+import { useCacheSeries } from '../../../hooks/useCacheSeries';
+import type { CacheSeriesRange } from '../../../api/cache';
 
-export function CacheHitRateChart() {
+interface Props {
+  host: string;
+}
+
+/** 도메인별 캐시 결과 분포를 1h / 24h 범위로 스택 영역 차트로 표시 */
+export function DomainStackedChart({ host }: Props) {
+  /** 조회 범위 — 기본 1시간 */
   const [range, setRange] = useState<CacheSeriesRange>('1h');
-  const { data: buckets, isLoading, error } = useCacheSeries(range);
+  const { data: buckets, isLoading } = useCacheSeries(range, host);
 
-  /** 버킷 epoch-ms → 현지 HH:MM:SS 문자열 변환 + Recharts 친화적 키로 평탄화 */
+  /** API 응답을 차트 데이터 형태로 변환 */
   const data = useMemo(
     () =>
       (buckets ?? []).map((b) => ({
@@ -36,14 +40,14 @@ export function CacheHitRateChart() {
   );
 
   return (
-    <Card data-testid="cache-stacked-chart" className="h-full">
+    <Card data-testid="domain-overview-stacked-chart">
       <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle>캐시 결과 분포 (100% 스택)</CardTitle>
+        <CardTitle>캐시 결과 분포</CardTitle>
+        {/* 범위 토글 버튼 */}
         <div className="flex gap-2">
           <Button
             variant={range === '1h' ? 'default' : 'outline'}
             onClick={() => setRange('1h')}
-            data-testid="cache-range-1h"
             className="px-3 py-1 text-xs"
           >
             1시간
@@ -51,18 +55,15 @@ export function CacheHitRateChart() {
           <Button
             variant={range === '24h' ? 'default' : 'outline'}
             onClick={() => setRange('24h')}
-            data-testid="cache-range-24h"
             className="px-3 py-1 text-xs"
           >
             24시간
           </Button>
         </div>
       </CardHeader>
-      <CardContent className="h-72">
+      <CardContent className="h-64">
         {isLoading ? (
           <Skeleton className="h-full w-full" />
-        ) : error ? (
-          <p className="text-sm text-destructive">연결 실패</p>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={data} stackOffset="expand">

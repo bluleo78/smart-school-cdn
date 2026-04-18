@@ -361,6 +361,12 @@ export class DomainStatsRepository {
     });
   }
 
+  /** 단일 호스트 요약 통계 반환 — /api/domains/:host/summary 라우트용.
+   *  getSummaryAll() 결과에서 해당 host만 필터링하여 반환한다. */
+  getSummaryForHost(host: string): DomainSummary | undefined {
+    return this.getSummaryAll().find((r) => r.host === host);
+  }
+
   /**
    * 30일 이전 데이터 삭제
    * 오래된 통계를 정리하여 DB 크기를 제한한다.

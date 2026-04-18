@@ -7,10 +7,11 @@ test.describe('시스템 페이지', () => {
     // admin-server 없이도 안정적으로 동작하도록 goto 전에 모킹
     await mockApi(page, 'GET', '/proxy/status', { online: true, uptime: 3600 });
     await mockApi(page, 'GET', '/cache/stats', {
-      total_size_bytes: 500_000_000,
-      max_size_bytes: 5_000_000_000,
-      hit_count: 100, miss_count: 50, bypass_count: 10,
-      hit_rate: 66.7, entry_count: 42, by_domain: [], hit_rate_history: [],
+      requests: 160, l1_hits: 100, l2_hits: 6, miss: 44, bypass_total: 10,
+      bypass: { method: 10, nocache: 0, size: 0, other: 0, total: 10 },
+      l1_hit_rate: 100 / 160, edge_hit_rate: 106 / 160, bypass_rate: 10 / 160,
+      disk: { used_bytes: 500_000_000, max_bytes: 5_000_000_000, entry_count: 42 },
+      by_domain: [],
     });
     await page.goto('/system');
   });
@@ -221,10 +222,11 @@ test.describe('LogViewer', () => {
   test.beforeEach(async ({ page }) => {
     await mockApi(page, 'GET', '/proxy/status', { online: true, uptime: 3600 });
     await mockApi(page, 'GET', '/cache/stats', {
-      total_size_bytes: 500_000_000,
-      max_size_bytes: 5_000_000_000,
-      hit_count: 100, miss_count: 50, bypass_count: 10,
-      hit_rate: 66.7, entry_count: 42, by_domain: [], hit_rate_history: [],
+      requests: 160, l1_hits: 100, l2_hits: 6, miss: 44,
+      bypass: { method: 10, nocache: 0, size: 0, other: 0, total: 10 },
+      l1_hit_rate: 100 / 160, edge_hit_rate: 106 / 160, bypass_rate: 10 / 160,
+      disk: { used_bytes: 500_000_000, max_bytes: 5_000_000_000, entry_count: 42 },
+      by_domain: [],
     });
   });
 
