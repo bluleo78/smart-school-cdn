@@ -1,6 +1,6 @@
 /// 서비스 헬스 모니터 — 5초마다 전체 서비스 상태를 수집해 메모리 캐시에 저장
 /// 프론트엔드 요청 시 downstream 서비스를 직접 호출하지 않고 캐시를 반환한다.
-/// proxy offline→online 전환 시 도메인 sync를 자동으로 트리거한다.
+/// proxy offline→online 전환 시 proxy + tls-service + dns-service 도메인 sync를 트리거한다.
 import axios from 'axios';
 import type { FastifyBaseLogger } from 'fastify';
 import { syncToProxy } from './routes/domains.js';
@@ -20,14 +20,20 @@ export interface SystemStatus {
 
 interface GrpcClient { health: () => Promise<{ online: boolean; latency_ms: number }> }
 
+/** syncDomains를 지원하는 gRPC 클라이언트 (tls-service, dns-service) */
+interface DomainEntry { host: string; origin: string }
+interface SyncableGrpcClient extends GrpcClient {
+  syncDomains: (domains: DomainEntry[]) => Promise<{ success: boolean }>;
+}
+
 interface Deps {
-  proxyAdminUrl:  string;
-  storageClient:  GrpcClient;
-  tlsClient:      GrpcClient;
-  dnsClient:      GrpcClient;
+  proxyAdminUrl:   string;
+  storageClient:   GrpcClient;
+  tlsClient:       SyncableGrpcClient;
+  dnsClient:       SyncableGrpcClient;
   optimizerClient: GrpcClient;
-  domainRepo:     DomainRepository;
-  log:            FastifyBaseLogger;
+  domainRepo:      DomainRepository;
+  log:             FastifyBaseLogger;
 }
 
 const OFFLINE_PROXY:  ProxyStatus  = { online: false, uptime: 0, request_count: 0 };
@@ -56,6 +62,26 @@ export class HealthMonitor {
     setInterval(() => this.tick().catch(() => {}), intervalMs);
   }
 
+  /** 활성 도메인 목록을 tls-service + dns-service에 병렬 푸시.
+   *  한 쪽 실패가 다른 쪽을 막지 않도록 allSettled 사용. */
+  private async syncDomainsToGrpcServices(): Promise<void> {
+    const domains = this.deps.domainRepo.findAll({ enabled: true }).map(d => ({
+      host: d.host, origin: d.origin,
+    }));
+    const results = await Promise.allSettled([
+      this.deps.tlsClient.syncDomains(domains),
+      this.deps.dnsClient.syncDomains(domains),
+    ]);
+    const labels = ['tls-service', 'dns-service'];
+    for (const [i, r] of results.entries()) {
+      if (r.status === 'rejected') {
+        this.deps.log.warn({ err: r.reason }, `[health-monitor] ${labels[i]} 도메인 sync 실패`);
+      } else {
+        this.deps.log.info(`[health-monitor] ${labels[i]}에 도메인 ${domains.length}건 sync 완료`);
+      }
+    }
+  }
+
   private async tick(): Promise<void> {
     const TIMEOUT = 2000;
 
@@ -71,10 +97,13 @@ export class HealthMonitor {
     }
     const proxyLatency = proxyOnline ? Date.now() - t0 : -1;
 
-    // offline → online 전환 감지 시 domain sync 트리거
+    // offline → online 전환 감지 시 domain sync 트리거 (proxy + tls + dns)
     if (proxyOnline && !this.proxyWasOnline) {
-      this.deps.log.info('proxy 온라인 전환 감지 — 도메인 sync 시작');
+      this.deps.log.info('proxy 온라인 전환 감지 — 3-서비스 도메인 sync 시작');
       syncToProxy(this.deps.domainRepo).catch(() => {});
+      this.syncDomainsToGrpcServices().catch(err => {
+        this.deps.log.warn({ err }, '[health-monitor] gRPC 도메인 sync 예외');
+      });
     }
     this.proxyWasOnline = proxyOnline;
 
