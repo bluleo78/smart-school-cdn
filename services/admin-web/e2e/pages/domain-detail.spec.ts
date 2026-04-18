@@ -139,9 +139,10 @@ async function setupDetailMocks(page: Page) {
   await mockApi(page, 'GET', '/cache/popular', createPopularContent());
   await mockApi(page, 'GET', '/stats/optimization', createOptimizationStats());
   await mockApi(page, 'GET', '/optimizer/profiles', createOptimizerProfile());
+  // 버킷 합산 비율: l1=6, l2=1, miss=2, bypass=1, total=10 → L1=60%, Edge=70%, BYPASS=10%
   await page.route('**/api/cache/series*', (route) =>
     route.fulfill({
-      json: { buckets: [{ ts: Date.now() - 60_000, l1_hits: 10, l2_hits: 1, miss: 2, bypass: 1 }] },
+      json: { buckets: [{ ts: Date.now() - 60_000, l1_hits: 6, l2_hits: 1, miss: 2, bypass: 1 }] },
     }),
   );
 }

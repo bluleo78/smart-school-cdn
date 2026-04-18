@@ -1,7 +1,9 @@
-/// 도메인 개요 탭 — 기본 정보 + 요약 통계 + 빠른 액션
+/// 도메인 개요 탭 — 기본 정보 + 요약 통계 + 캐시 성능 + 빠른 액션
+import { useState } from 'react';
 import type { Domain } from '../../../api/domain-types';
 import { useDomainStats } from '../../../hooks/useDomainStats';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
+import { Button } from '../../ui/button';
 import { Skeleton } from '../../ui/skeleton';
 import { formatBytes } from '../../../lib/format';
 import { DomainInfoCards } from './DomainInfoCards';
@@ -9,12 +11,13 @@ import { DomainQuickActions } from './DomainQuickActions';
 import { BarSparkline, DeltaBadge } from '../StatSparkline';
 import { DomainCacheCards } from './DomainCacheCards';
 import { DomainStackedChart } from './DomainStackedChart';
+import type { CacheSeriesRange } from '../../../api/cache';
 
 interface Props {
   domain: Domain;
 }
 
-/** 요약 통계 카드 4개 */
+/** 요약 통계 카드 4개 (오늘 고정) */
 function SummaryCards({ host }: { host: string }) {
   const { data, isLoading } = useDomainStats(host, '24h');
 
@@ -103,20 +106,52 @@ function SummaryCards({ host }: { host: string }) {
   );
 }
 
+/** 캐시 성능 섹션 — L1/엣지/BYPASS + 스택 차트가 1h/24h 토글을 공유 */
+function CachePerformanceSection({ host }: { host: string }) {
+  const [range, setRange] = useState<CacheSeriesRange>('1h');
+
+  return (
+    <Card data-testid="domain-cache-performance">
+      <CardHeader className="flex flex-row items-center justify-between">
+        <CardTitle>캐시 성능</CardTitle>
+        <div className="flex gap-2">
+          <Button
+            variant={range === '1h' ? 'default' : 'outline'}
+            onClick={() => setRange('1h')}
+            className="px-3 py-1 text-xs"
+            data-testid="domain-cache-range-1h"
+          >
+            1시간
+          </Button>
+          <Button
+            variant={range === '24h' ? 'default' : 'outline'}
+            onClick={() => setRange('24h')}
+            className="px-3 py-1 text-xs"
+            data-testid="domain-cache-range-24h"
+          >
+            24시간
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <DomainCacheCards host={host} range={range} />
+        <DomainStackedChart host={host} range={range} />
+      </CardContent>
+    </Card>
+  );
+}
+
 export function DomainOverviewTab({ domain }: Props) {
   return (
     <div className="space-y-6" data-testid="domain-overview-tab">
       {/* 기본 정보 + 동기화 상태 */}
       <DomainInfoCards domain={domain} />
 
-      {/* L1/엣지/Bypass 비율 카드 — Phase 12 신규 */}
-      <DomainCacheCards host={domain.host} />
-
-      {/* 캐시 결과 분포 스택 차트 — Phase 12 신규 */}
-      <DomainStackedChart host={domain.host} />
-
-      {/* 요약 통계 카드 */}
+      {/* 요약 통계 카드 (오늘 고정) */}
       <SummaryCards host={domain.host} />
+
+      {/* 캐시 성능 — L1/엣지/BYPASS + 스택 차트 (1h/24h 공유 토글) */}
+      <CachePerformanceSection host={domain.host} />
 
       {/* 빠른 액션 */}
       <DomainQuickActions domain={domain} />

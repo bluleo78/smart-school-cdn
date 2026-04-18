@@ -1,7 +1,10 @@
 /// 도메인 개요 탭 — L1 히트율 / 엣지 히트율 / BYPASS 비율 카드 3개
-import { useDomainHostSummary } from '../../../hooks/useDomainHostSummary';
+/// 범위(1h/24h)에 따른 series 버킷을 합산해 비율을 계산한다. 범위는 부모에서 주입.
+import { useMemo } from 'react';
+import { useCacheSeries } from '../../../hooks/useCacheSeries';
 import { Card, CardContent } from '../../ui/card';
 import { Skeleton } from '../../ui/skeleton';
+import type { CacheSeriesRange } from '../../../api/cache';
 
 /** 비율(0~1)을 퍼센트 문자열로 변환 */
 function fmtPct(n: number) {
@@ -10,13 +13,33 @@ function fmtPct(n: number) {
 
 interface Props {
   host: string;
+  range: CacheSeriesRange;
 }
 
-/** 오늘의 L1/엣지/Bypass 비율을 카드 3개로 표시 */
-export function DomainCacheCards({ host }: Props) {
-  const { data: summary, isLoading } = useDomainHostSummary(host);
+/** 지정 범위의 series 버킷을 합산해 L1/엣지/Bypass 비율 카드 3개를 표시 */
+export function DomainCacheCards({ host, range }: Props) {
+  const { data: buckets, isLoading } = useCacheSeries(range, host);
 
-  if (isLoading || !summary) {
+  /** 버킷 합산 후 비율 산출 — 분모는 l1+l2+miss+bypass */
+  const rates = useMemo(() => {
+    const t = (buckets ?? []).reduce(
+      (a, b) => ({
+        l1: a.l1 + b.l1_hits,
+        l2: a.l2 + b.l2_hits,
+        miss: a.miss + b.miss,
+        bypass: a.bypass + b.bypass,
+      }),
+      { l1: 0, l2: 0, miss: 0, bypass: 0 },
+    );
+    const total = t.l1 + t.l2 + t.miss + t.bypass;
+    return {
+      l1: total > 0 ? t.l1 / total : 0,
+      edge: total > 0 ? (t.l1 + t.l2) / total : 0,
+      bypass: total > 0 ? t.bypass / total : 0,
+    };
+  }, [buckets]);
+
+  if (isLoading) {
     return (
       <div className="grid grid-cols-3 gap-3">
         {[...Array(3)].map((_, i) => (
@@ -36,7 +59,7 @@ export function DomainCacheCards({ host }: Props) {
             className="mt-1 font-bold tabular-nums text-2xl text-success"
             data-testid="domain-overview-l1-hit-rate"
           >
-            {fmtPct(summary.today_l1_hit_rate)}
+            {fmtPct(rates.l1)}
           </p>
         </CardContent>
       </Card>
@@ -49,7 +72,7 @@ export function DomainCacheCards({ host }: Props) {
             className="mt-1 font-bold tabular-nums text-2xl"
             data-testid="domain-overview-edge-hit-rate"
           >
-            {fmtPct(summary.today_edge_hit_rate)}
+            {fmtPct(rates.edge)}
           </p>
         </CardContent>
       </Card>
@@ -62,7 +85,7 @@ export function DomainCacheCards({ host }: Props) {
             className="mt-1 font-bold tabular-nums text-2xl"
             data-testid="domain-overview-bypass-rate"
           >
-            {fmtPct(summary.today_bypass_rate)}
+            {fmtPct(rates.bypass)}
           </p>
         </CardContent>
       </Card>
