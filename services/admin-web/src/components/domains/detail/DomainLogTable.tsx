@@ -1,13 +1,20 @@
-/// 도메인 요청 로그 테이블 — 검색/에러 필터, 30초 자동 갱신
+/// 도메인 요청 로그 테이블 — 검색/에러 필터, 자동 갱신 + 기간 필터 지원
 import { useState } from 'react';
 import { useDomainLogs } from '../../../hooks/useDomainLogs';
 import { formatBytes } from '../../../lib/format';
 import { Input } from '../../ui/input';
 import { Button } from '../../ui/button';
 import { Skeleton } from '../../ui/skeleton';
+import type { StatsPeriod } from '../../../api/domains';
 
 interface Props {
   host: string;
+  /** 조회 기간 — 미지정 시 서버 기본값 사용 */
+  period?: StatsPeriod;
+  /** custom 기간일 때 epoch 범위 */
+  range?: { from: number; to: number };
+  /** 자동 갱신 주기(ms). false 또는 0이면 비활성 */
+  refetchIntervalMs?: number | false;
 }
 
 /** HTTP 상태 코드별 색상 클래스 반환 */
@@ -22,7 +29,7 @@ function cacheColor(status: 'HIT' | 'MISS'): string {
   return status === 'HIT' ? 'text-green-400' : 'text-destructive';
 }
 
-export function DomainLogTable({ host }: Props) {
+export function DomainLogTable({ host, period, range, refetchIntervalMs = false }: Props) {
   /** 검색어 필터 state */
   const [search, setSearch] = useState('');
   /** 에러만 표시 토글 state */
@@ -30,7 +37,19 @@ export function DomainLogTable({ host }: Props) {
   /** 로그 표시 건수 — 기본 50, "더 보기"로 50씩 증가 */
   const [limit, setLimit] = useState(50);
 
-  const { data, isLoading, error } = useDomainLogs(host, { limit });
+  const { data, isLoading, error } = useDomainLogs(
+    host,
+    {
+      limit,
+      offset: 0,
+      q: search || undefined,
+      status: errorsOnly ? '5xx' : undefined,
+      period,
+      from: range?.from,
+      to: range?.to,
+    },
+    refetchIntervalMs,
+  );
 
   if (isLoading) {
     return <Skeleton className="h-40 w-full" />;
