@@ -15,6 +15,7 @@ message GetResponse {
   bool   hit          = 1;
   bytes  body         = 2;
   string content_type = 3;
+  bytes  body_br      = 4;  // Phase 15: Brotli 프리컴프레스 변형 (없으면 빈 bytes)
 }
 
 message PutRequest {
@@ -24,6 +25,7 @@ message PutRequest {
   string content_type = 4;
   bytes  body         = 5;
   uint64 ttl_secs     = 6;
+  bytes  body_br      = 7;  // Phase 15: Brotli 프리컴프레스 변형 (없으면 빈 bytes)
 }
 message PutResponse {}
 
