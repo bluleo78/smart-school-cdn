@@ -174,3 +174,30 @@ describe('GET /api/optimization/stats', () => {
     expect(res.json().period_sec).toBe(3600);
   });
 });
+
+// ─── Phase 15 text_compress 이벤트 ─────────────────────────────────────────
+describe('Phase 15 text_compress 이벤트', () => {
+  it.each(['compressed_br', 'skipped_small', 'skipped_type', 'error'])(
+    'decision=%s 이 화이트리스트 통과한다',
+    async (decision) => {
+      const { app } = mkApp();
+      const res = await app.inject({
+        method: 'POST',
+        url: '/internal/events/batch',
+        headers: { 'content-type': 'application/json' },
+        payload: {
+          events: [
+            sampleEvent({
+              event_type:   'text_compress',
+              decision,
+              content_type: 'application/javascript',
+              orig_size:    10_000,
+              out_size:     3_200,
+            }),
+          ],
+        },
+      });
+      expect(res.statusCode).toBe(200);
+    },
+  );
+});
