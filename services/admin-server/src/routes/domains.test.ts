@@ -222,6 +222,41 @@ describe('DELETE /api/domains/:host', () => {
   });
 });
 
+describe('GET /api/domains/:host/stats', () => {
+  it('GET /api/domains/:host/stats — period=1h 요청에 200 + summary 반환', async () => {
+    const repo = makeRepo();
+    repo.upsert('a.test', 'https://a.test');
+    const app = buildApp(repo);
+    const res = await app.inject({ method: 'GET', url: '/api/domains/a.test/stats?period=1h' });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.period).toBe('1h');
+    expect(body.summary).toBeDefined();
+  });
+
+  it('GET /api/domains/:host/stats — custom + from/to 로 200 반환', async () => {
+    const repo = makeRepo();
+    repo.upsert('a.test', 'https://a.test');
+    const app = buildApp(repo);
+    const now = Math.floor(Date.now() / 1000);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/domains/a.test/stats?period=custom&from=${now - 3600}&to=${now}`,
+    });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.period).toBe('custom');
+  });
+
+  it('GET /api/domains/:host/stats — custom + 잘못된 from/to 는 400', async () => {
+    const repo = makeRepo();
+    repo.upsert('a.test', 'https://a.test');
+    const app = buildApp(repo);
+    const res = await app.inject({ method: 'GET', url: '/api/domains/a.test/stats?period=custom' });
+    expect(res.statusCode).toBe(400);
+  });
+});
+
 describe('GET /api/domains/summary — L1/L2/bypass 비율', () => {
   /**
    * today_l1_hit_rate / today_edge_hit_rate / today_bypass_rate 계산 검증

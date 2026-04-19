@@ -299,8 +299,11 @@ export async function domainRoutes(
     },
   );
 
-  /** 도메인 통계 조회 (period: 24h | 7d | 30d) */
-  app.get<{ Params: { host: string }; Querystring: { period?: string } }>(
+  /** 도메인 통계 조회 (period: 1h | 24h | 7d | 30d | custom) */
+  app.get<{
+    Params: { host: string };
+    Querystring: { period?: string; from?: string; to?: string };
+  }>(
     '/api/domains/:host/stats',
     async (request, reply) => {
       const host = decodeURIComponent(request.params.host);
@@ -308,16 +311,29 @@ export async function domainRoutes(
       if (!domain) {
         return reply.status(404).send({ error: '도메인을 찾을 수 없습니다.' });
       }
-      const periodParam = request.query.period;
-      const validPeriods: StatsPeriod[] = ['24h', '7d', '30d'];
+      const q = request.query;
+      // 1h, custom 추가 — 기존 24h/7d/30d 동작 유지
+      const validPeriods: StatsPeriod[] = ['1h', '24h', '7d', '30d', 'custom'];
       const period: StatsPeriod =
-        periodParam && (validPeriods as string[]).includes(periodParam)
-          ? (periodParam as StatsPeriod)
+        q.period && (validPeriods as string[]).includes(q.period)
+          ? (q.period as StatsPeriod)
           : '24h';
+
+      // custom 기간: from/to 필수 검증 — 누락·비정수·역전 시 400
+      let range: { from: number; to: number } | undefined;
+      if (period === 'custom') {
+        const from = Number(q.from);
+        const to = Number(q.to);
+        if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) {
+          return reply.code(400).send({ error: 'period=custom requires numeric from < to' });
+        }
+        range = { from, to };
+      }
+
       // getStats()의 snake_case + 배열 형태를 프론트엔드 DomainStats 타입으로 변환
-      const raw = statsRepo.getStats(host, period);
+      const raw = statsRepo.getStats(host, period, range);
       const labels = raw.timeseries.map((r) =>
-        period === '24h'
+        period === '1h' || period === '24h'
           ? new Date(r.timestamp * 1000).toISOString().slice(11, 16) // "HH:MM"
           : new Date(r.timestamp * 1000).toISOString().slice(0, 10),  // "YYYY-MM-DD"
       );
