@@ -4,6 +4,28 @@
 
 use std::io::{Read, Write};
 
+const WHITELIST: &[&str] = &[
+    "text/html", "text/css", "text/plain", "text/xml",
+    "application/javascript", "application/json", "application/xml",
+    "image/svg+xml",
+];
+
+/// 응답을 압축해야 하는지 판정.
+/// content_type, content_encoding, 응답 크기, 최소 압축 임계값을 기준으로 결정한다.
+pub fn should_compress(
+    content_type: Option<&str>,
+    content_encoding: Option<&str>,
+    size: usize,
+    min_bytes: usize,
+) -> bool {
+    if size < min_bytes { return false; }
+    let ce = content_encoding.unwrap_or("").trim().to_ascii_lowercase();
+    if !ce.is_empty() && ce != "identity" { return false; }
+    let Some(ct) = content_type else { return false; };
+    let base = ct.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
+    WHITELIST.iter().any(|w| *w == base)
+}
+
 /// gzip 인코딩 — br 미지원 클라이언트용 on-demand 폴백.
 pub fn encode_gzip(body: &[u8], level: u32) -> std::io::Result<Vec<u8>> {
     use flate2::{write::GzEncoder, Compression};
@@ -35,6 +57,39 @@ pub fn compress_brotli(body: &[u8], level: u32) -> std::io::Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn should_compress_화이트리스트_통과() {
+        assert!(should_compress(Some("text/html"), None, 2048, 1024));
+        assert!(should_compress(Some("text/html; charset=utf-8"), None, 2048, 1024));
+        assert!(should_compress(Some("application/javascript"), None, 2048, 1024));
+        assert!(should_compress(Some("application/json"), None, 2048, 1024));
+        assert!(should_compress(Some("image/svg+xml"), None, 2048, 1024));
+    }
+
+    #[test]
+    fn should_compress_화이트리스트_밖은_거부() {
+        assert!(!should_compress(Some("image/jpeg"), None, 2048, 1024));
+        assert!(!should_compress(Some("video/mp4"), None, 2048, 1024));
+        assert!(!should_compress(Some("application/octet-stream"), None, 2048, 1024));
+        assert!(!should_compress(Some("text/event-stream"), None, 2048, 1024));
+        assert!(!should_compress(None, None, 2048, 1024));
+    }
+
+    #[test]
+    fn should_compress_최소크기_미만은_거부() {
+        assert!(!should_compress(Some("text/html"), None, 1023, 1024));
+        assert!(should_compress(Some("text/html"), None, 1024, 1024));
+    }
+
+    #[test]
+    fn should_compress_이미_인코딩된_응답은_거부() {
+        assert!(!should_compress(Some("text/html"), Some("gzip"), 2048, 1024));
+        assert!(!should_compress(Some("text/html"), Some("br"), 2048, 1024));
+        assert!(!should_compress(Some("text/html"), Some("deflate"), 2048, 1024));
+        assert!(should_compress(Some("text/html"), Some(""), 2048, 1024));
+        assert!(should_compress(Some("text/html"), Some("identity"), 2048, 1024));
+    }
 
     #[test]
     fn gzip_라운드트립() {
