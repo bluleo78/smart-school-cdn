@@ -633,3 +633,34 @@
 
 ### 17-3. 비목표
 - content-type별 레벨 차등은 17-1의 실측이 근거를 제공했을 때만 도입 (측정 전 도입 금지 — YAGNI)
+
+---
+
+## Phase 18 (후보): 액세스 로그 · DNS 쿼리 영속화 파이프라인
+
+> 목표: 현재 proxy/dns-service의 in-memory 링버퍼에만 존재하는 **개별** HTTP 요청 로그와 DNS 쿼리 로그를 admin-server SQLite로 영속화. 재시작 시 휘발 + 용량 제한(proxy 100건, dns 512건) 문제 해소. Phase 13 `optimization_events` 패턴을 복제한다.
+
+### 18-1. 현황과 승격 조건
+- 현재: 도메인 상세 로그탭이 proxy `/requests` 링버퍼(100건)에 위임 — **Task 17 Quick Fix** 상태
+- 승격 조건 중 하나 이상 충족 시 정식 착수
+  - 운영자가 "어제/지난주" 요청/쿼리 조회 요구를 반복적으로 보고
+  - proxy 재시작 직후 "로그 비어있음" 이슈 반복
+  - 감사/컴플라이언스 요건(요청별 추적)이 생김
+  - DNS NXDOMAIN 추세 조사에 분 집계 대신 원본 쿼리 히스토리 필요
+
+### 18-2. 범위
+- `access_logs` 테이블 + `dns_query_logs` 테이블 추가 (admin-server SQLite)
+- proxy: 기존 `events.rs` 배치 push 패턴 재사용 — `/internal/requests/batch` 엔드포인트로 HTTP 배치 전송
+- dns-service: 동일 패턴으로 배치 push (현재 1분 폴링 집계 외 추가)
+- admin-server: 수신 → SQLite 영속화, 인덱스는 `(host, timestamp)` `(timestamp)` 기본
+- 유지 정책: 기본 **7일 보관 + 주기 vacuum** — config 환경변수로 조정 가능
+- admin-web: 기존 로그 탭 그대로 SQL 소스로 전환
+
+### 18-3. 비목표
+- 전문(Full-text) 검색 — 단순 LIKE 충분
+- 분산 로그 수집 (ELK/Loki) — 단일 노드 전제
+- body·헤더 원문 저장 — 용량·프라이버시 리스크로 영구 제외
+
+### 18-4. 관찰·롤백
+- 영속화 전후 proxy 응답 지연(p99) 비교 — 배치 push가 응답 경로에 영향 주지 않아야 함(기존 events.rs 패턴 유지)
+- 쓰기 부하로 SQLite가 락이 길어지는지 7일 후 재검토

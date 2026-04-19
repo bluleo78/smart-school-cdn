@@ -8,6 +8,81 @@ import type { StatsPeriod } from '../db/domain-stats-repo.js';
 
 const PROXY_ADMIN_URL = process.env.PROXY_ADMIN_URL || 'http://localhost:8081';
 
+/**
+ * Proxy admin API(/requests)에서 in-memory 링버퍼 로그를 가져와 host/기간/상태/캐시/검색 필터와
+ * limit/offset을 적용해 반환한다. `access_logs` SQLite 테이블이 존재하지 않을 때의 폴백 경로.
+ *
+ * 주의: proxy 링버퍼는 최대 100건만 유지(services/proxy/src/state.rs MAX_REQUEST_LOGS)하며
+ * 재시작 시 휘발한다. DB 영속화는 Phase 18 후보로 별도 설계 예정.
+ */
+interface ProxyLogFilters {
+  host: string;
+  since?: number;       // unix seconds inclusive
+  until?: number;       // unix seconds inclusive
+  status?: string;      // '4xx' | '5xx'
+  cache?: string;       // 'hit' | 'miss'
+  q?: string;           // path substring
+  limit: number;
+  offset: number;
+}
+
+interface DomainLogRow {
+  timestamp: number;    // unix seconds — 기존 access_logs 스키마와 동일 형태
+  status_code: number;
+  cache_status: string;
+  path: string;
+  size: number;
+}
+
+async function fetchProxyLogs(filters: ProxyLogFilters): Promise<DomainLogRow[]> {
+  interface ProxyRequestLog {
+    method: string;
+    host: string;
+    url: string;
+    status_code: number;
+    response_time_ms: number;
+    timestamp: string;   // ISO8601
+    cache_status: string;
+  }
+
+  let raw: ProxyRequestLog[];
+  try {
+    const res = await axios.get<ProxyRequestLog[]>(`${PROXY_ADMIN_URL}/requests`, { timeout: 3000 });
+    raw = Array.isArray(res.data) ? res.data : [];
+  } catch {
+    return [];
+  }
+
+  const result: DomainLogRow[] = [];
+  for (const r of raw) {
+    if (r.host !== filters.host) continue;
+    const tsSec = Math.floor(new Date(r.timestamp).getTime() / 1000);
+    if (Number.isNaN(tsSec)) continue;
+    if (filters.since !== undefined && tsSec < filters.since) continue;
+    if (filters.until !== undefined && tsSec > filters.until) continue;
+    if (filters.status === '5xx' && r.status_code < 500) continue;
+    if (filters.status === '4xx' && !(r.status_code >= 400 && r.status_code < 500)) continue;
+    if (filters.cache === 'hit' && r.cache_status.toUpperCase() !== 'HIT') continue;
+    if (filters.cache === 'miss' && r.cache_status.toUpperCase() !== 'MISS') continue;
+
+    // url은 path+query 형태 — 쿼리 제거해 path만 추출
+    const path = r.url.split('?')[0] ?? r.url;
+    if (filters.q && !path.includes(filters.q)) continue;
+
+    result.push({
+      timestamp: tsSec,
+      status_code: r.status_code,
+      cache_status: r.cache_status,
+      path,
+      size: 0,  // proxy RequestLog에 응답 크기 미포함 — 0으로 고정
+    });
+  }
+
+  // proxy는 이미 최신순 반환하지만 필터 후 순서 보장 위해 정렬
+  result.sort((a, b) => b.timestamp - a.timestamp);
+  return result.slice(filters.offset, filters.offset + filters.limit);
+}
+
 /** 현재 활성 도메인 목록을 Proxy admin API에 push (실패 시 false 반환) */
 export async function syncToProxy(domainRepo: DomainRepository): Promise<boolean> {
   try {
@@ -459,8 +534,10 @@ export async function domainRoutes(
 
       return rows;
     } catch {
-      // access_logs 테이블이 존재하지 않으면 빈 배열 반환
-      return [];
+      // access_logs 테이블이 존재하지 않으면 proxy in-memory 링버퍼에 위임 (Task 17 폴백)
+      return fetchProxyLogs({
+        host, since, until, status, cache, q, limit, offset,
+      });
     }
   });
 
@@ -502,13 +579,29 @@ export async function domainRoutes(
         since = now - LOG_DAY_SECONDS; until = now;
       }
 
-      const rows = domainRepo.database.prepare(
-        `SELECT path, COUNT(*) AS count FROM access_logs
-         WHERE host = ? AND timestamp >= ? AND timestamp < ?
-         GROUP BY path ORDER BY count DESC LIMIT ?`
-      ).all(host, since, until, limit) as Array<{ path: string; count: number }>;
-
-      return { urls: rows };
+      try {
+        const rows = domainRepo.database.prepare(
+          `SELECT path, COUNT(*) AS count FROM access_logs
+           WHERE host = ? AND timestamp >= ? AND timestamp < ?
+           GROUP BY path ORDER BY count DESC LIMIT ?`
+        ).all(host, since, until, limit) as Array<{ path: string; count: number }>;
+        return { urls: rows };
+      } catch {
+        // access_logs 테이블이 없으면 proxy 링버퍼에서 집계 (Task 17 폴백)
+        // 링버퍼 용량(100)을 그대로 조회하여 경로별 카운트 후 상위 limit개 반환
+        const logs = await fetchProxyLogs({
+          host, since, until: until - 1, limit: 1000, offset: 0,
+        });
+        const counts = new Map<string, number>();
+        for (const l of logs) {
+          counts.set(l.path, (counts.get(l.path) ?? 0) + 1);
+        }
+        const urls = Array.from(counts.entries())
+          .map(([path, count]) => ({ path, count }))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, limit);
+        return { urls };
+      }
     },
   );
 
