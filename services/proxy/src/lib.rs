@@ -761,7 +761,8 @@ async fn proxy_handler(
                 let full_url = format!("https://{}{}", host_c, uri_str);
                 let domain = host_c.split(':').next().unwrap_or(&host_c).to_string();
 
-                let (store_bytes, store_ct) = if should_optimize(content_type.as_deref()) {
+                let (store_bytes, store_ct, store_br) = if should_optimize(content_type.as_deref()) {
+                    // ── 이미지 최적화 분기 ──
                     if let Some(ref opt) = ps_c.optimizer {
                         let ct = content_type.clone().unwrap_or_default();
                         let started = std::time::Instant::now();
@@ -769,7 +770,6 @@ async fn proxy_handler(
                             Some((ob, oct, decision, orig_sz, out_sz)) => {
                                 let elapsed_ms = started.elapsed().as_millis() as u64;
                                 // Phase 14: decision이 Some일 때만 image_optimize 이벤트 발행.
-                                // enabled=false 프로파일은 server가 None 반환 → 관찰 대상 X (노이즈 회피).
                                 if let (Some(events), Some(dec)) = (ps_c.events.as_ref(), decision) {
                                     events.emit(crate::events::EventRecord {
                                         event_type:   "image_optimize",
@@ -783,19 +783,63 @@ async fn proxy_handler(
                                         elapsed_ms,
                                     });
                                 }
-                                (ob, Some(oct))
+                                (ob, Some(oct), None)
                             }
-                            None => (resp_body.clone(), content_type.clone()),
+                            None => (resp_body.clone(), content_type.clone(), None),
                         }
                     } else {
-                        (resp_body.clone(), content_type.clone())
+                        (resp_body.clone(), content_type.clone(), None)
                     }
+                } else if ps_c.text_compress.enabled
+                    && compress::should_compress(
+                        content_type.as_deref(),
+                        resp_headers.get("content-encoding").and_then(|v| v.to_str().ok()),
+                        resp_body.len(),
+                        ps_c.text_compress.min_bytes,
+                    )
+                {
+                    // ── Phase 15: 텍스트 brotli 프리컴프레스 분기 ──
+                    let body_clone = resp_body.clone();
+                    let level = ps_c.text_compress.br_level;
+                    let started = std::time::Instant::now();
+                    let br_result = tokio::task::spawn_blocking(move || {
+                        compress::compress_brotli(&body_clone, level)
+                    }).await.unwrap_or_else(|_| Err(std::io::Error::other("spawn_blocking join 실패")));
+                    let elapsed_ms = started.elapsed().as_millis() as u64;
+
+                    let (br_opt, decision, out_size) = match br_result {
+                        Ok(br) if (br.len() as f32) <= (resp_body.len() as f32) * 0.9 => {
+                            let out = br.len() as u64;
+                            (Some(Bytes::from(br)), "compressed_br", out)
+                        }
+                        Ok(_) => (None, "skipped_size", resp_body.len() as u64),
+                        Err(err) => {
+                            tracing::warn!(error=%err, "brotli 압축 실패 — 원본만 저장");
+                            (None, "error", resp_body.len() as u64)
+                        }
+                    };
+
+                    if let Some(ev) = ps_c.events.as_ref() {
+                        ev.emit(crate::events::EventRecord {
+                            event_type:   "text_compress",
+                            host:         host_c.clone(),
+                            url:          format!("https://{}{}", host_c, uri_str),
+                            decision:     decision.to_string(),
+                            orig_size:    Some(resp_body.len() as u64),
+                            out_size:     Some(out_size),
+                            range_header: None,
+                            content_type: content_type.clone(),
+                            elapsed_ms,
+                        });
+                    }
+
+                    (resp_body.clone(), content_type.clone(), br_opt)
                 } else {
-                    (resp_body.clone(), content_type.clone())
+                    (resp_body.clone(), content_type.clone(), None)
                 };
 
                 ps_c.storage.lock().await
-                    .put(&key_for_put, &full_url, &host_c, store_ct.clone(), store_bytes.clone(), Some(ttl), None)
+                    .put(&key_for_put, &full_url, &host_c, store_ct.clone(), store_bytes.clone(), Some(ttl), store_br.clone())
                     .await;
 
                 // L1 메모리 캐시 저장 (16MB 이하만)
@@ -804,7 +848,7 @@ async fn proxy_handler(
                     ps_c.memory_cache.insert(key_for_put.clone(), Arc::new(MemoryCacheEntry {
                         body: Bytes::from(store_bytes.clone()),
                         content_type: store_ct.clone(),
-                        body_br: None, // Task 12에서 brotli 통합 시 채워짐
+                        body_br: store_br.clone(),
                     })).await;
                 }
 
@@ -2740,6 +2784,77 @@ mod tests {
                 .unwrap();
         });
         format!("http://127.0.0.1:{}", addr.port())
+    }
+
+    // ─── Phase 15 MISS 통합 테스트 ──────────────────────────────────────
+
+    /// Phase 15 Task 12: MISS 시 text/html 응답에 brotli 변형이 함께 저장된다
+    #[tokio::test]
+    async fn phase15_miss_시_텍스트_응답은_brotli_변형이_함께_저장된다() {
+        let html = "<!DOCTYPE html>\n<html><body>".to_string()
+            + &"<p>textbook content</p>\n".repeat(500)
+            + "</body></html>";
+        let origin_url = start_mock_origin_server(html.as_bytes().to_vec(), "text/html; charset=utf-8").await;
+
+        let storage_url = start_mock_storage_server().await;
+        let tls_url = start_mock_tls_server().await;
+
+        let storage_client = loop {
+            match clients::storage_client::StorageClient::connect(&storage_url).await {
+                Ok(c) => break c,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        };
+        let tls = loop {
+            match clients::tls_client::TlsClient::connect(&tls_url).await {
+                Ok(c) => break c,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        };
+        let cert_cache = tls.cert_cache.clone();
+
+        let mut dm = HashMap::new();
+        dm.insert("textbook.local".to_string(), origin_url);
+        let domain_map: DomainMap = Arc::new(tokio::sync::RwLock::new(dm));
+
+        // TextCompressConfig.br_level=6 (테스트 속도 우선)
+        let ps = ProxyState {
+            shared: Arc::new(tokio::sync::RwLock::new(state::AppState::new())),
+            http_client: reqwest::Client::new(),
+            storage: Arc::new(Mutex::new(storage_client.clone())),
+            tls_client: Arc::new(Mutex::new(tls)),
+            optimizer: None,
+            domain_map,
+            cert_cache,
+            coalescer: Arc::new(coalescer::Coalescer::new()),
+            memory_cache: moka::future::Cache::builder().max_capacity(100).build(),
+            counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            events: None,
+            text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6 },
+        };
+
+        let router = build_proxy_router(ps);
+        let resp = router
+            .oneshot(
+                Request::builder()
+                    .uri("/page.html")
+                    .header("host", "textbook.local")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        drop(to_bytes(resp.into_body(), 1024 * 1024).await.unwrap());
+
+        // storage에 저장된 body_br 확인
+        let key = compute_cache_key("GET", "textbook.local", "/page.html", "");
+        let stored = storage_client.clone().get(&key).await;
+        let (_, _, body_br) = stored.expect("storage에 항목이 저장돼야 한다");
+        assert!(body_br.is_some(), "brotli 변형이 함께 저장돼야 한다");
+        let br = body_br.unwrap();
+        assert!(br.len() < html.len() / 2, "br 크기 < 원본/2: {} vs {}", br.len(), html.len());
     }
 
     // ─── MISS 분기 테스트 A·B·C ─────────────────────────────────────────
