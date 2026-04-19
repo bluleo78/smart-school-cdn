@@ -49,6 +49,17 @@ pub fn encode_png(img: &DynamicImage) -> Result<Vec<u8>, EncodeError> {
     oxipng::optimize_from_memory(&stage1, &opts).map_err(|_| EncodeError::Encode)
 }
 
+/// WebP lossy 인코딩 — libwebp 래퍼(webp 크레이트) 사용.
+/// quality 0~100 범위, f32로 변환하여 libwebp에 전달.
+/// Phase 14에서 WebP 소스 재인코딩(리사이즈 동반) 경로에서만 호출.
+pub fn encode_webp_lossy(img: &DynamicImage, quality: u8) -> Result<Vec<u8>, EncodeError> {
+    // webp::Encoder::from_image은 RGB/RGBA 지원 — DynamicImage에서 직접 생성
+    let encoder = webp::Encoder::from_image(img).map_err(|_| EncodeError::Encode)?;
+    let q = quality.clamp(0, 100) as f32;
+    let webp_bytes = encoder.encode(q);
+    Ok(webp_bytes.to_vec())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -114,6 +125,33 @@ mod tests {
     fn png_차원이_유지된다() {
         let img = sample_rgba(20, 15);
         let out = encode_png(&img).unwrap();
+        let decoded = image::load_from_memory(&out).unwrap();
+        assert_eq!(decoded.width(),  20);
+        assert_eq!(decoded.height(), 15);
+    }
+
+    #[test]
+    fn webp_lossy_인코딩이_유효한_출력을_낸다() {
+        let img = sample_rgb(32, 32);
+        let out = encode_webp_lossy(&img, 85).expect("encode 성공");
+        // WebP RIFF 컨테이너: 0-3 "RIFF", 8-11 "WEBP"
+        assert_eq!(&out[..4],  b"RIFF");
+        assert_eq!(&out[8..12], b"WEBP");
+    }
+
+    #[test]
+    fn webp_lossy_quality_30이_85보다_작거나_같다() {
+        let img = sample_rgb(128, 128);
+        let q30 = encode_webp_lossy(&img, 30).unwrap();
+        let q85 = encode_webp_lossy(&img, 85).unwrap();
+        assert!(q30.len() <= q85.len(),
+            "q30({}) <= q85({})", q30.len(), q85.len());
+    }
+
+    #[test]
+    fn webp_lossy_차원이_유지된다() {
+        let img = sample_rgb(20, 15);
+        let out = encode_webp_lossy(&img, 85).unwrap();
         let decoded = image::load_from_memory(&out).unwrap();
         assert_eq!(decoded.width(),  20);
         assert_eq!(decoded.height(), 15);
