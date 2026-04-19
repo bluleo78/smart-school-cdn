@@ -9,6 +9,8 @@
 //! 순수 함수만 두어 단위 테스트로 완결하고, 리사이즈·프로파일 조회는 optimizer.rs가 담당한다.
 
 use image::DynamicImage;
+use image::codecs::png::PngEncoder;
+use image::ImageEncoder;
 
 /// 인코더 실패 분류 — 호출자가 passthrough_error 결정에 사용.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,6 +27,26 @@ pub fn encode_jpeg(img: &DynamicImage, quality: u8) -> Result<Vec<u8>, EncodeErr
     let encoder = JpegEncoder::new_with_quality(&mut buf, quality);
     img.write_with_encoder(encoder).map_err(|_| EncodeError::Encode)?;
     Ok(buf)
+}
+
+/// PNG 인코딩 — image 크레이트로 1차 인코딩한 뒤 oxipng으로 lossless 재압축.
+/// - level 4 preset (적당한 압축률·속도 균형)
+/// - strip=Safe (메타데이터 정리하되 색공간 정보는 유지)
+/// - interlace=None (다중 패스 렌더링 오버헤드 방지)
+/// 실패 시(oxipng 에러 포함) EncodeError::Encode 반환.
+pub fn encode_png(img: &DynamicImage) -> Result<Vec<u8>, EncodeError> {
+    // 1차: image 크레이트 PNG 인코딩 (RGBA로 통일)
+    let mut stage1 = Vec::new();
+    let rgba = img.to_rgba8();
+    PngEncoder::new(&mut stage1)
+        .write_image(rgba.as_raw(), rgba.width(), rgba.height(), image::ExtendedColorType::Rgba8)
+        .map_err(|_| EncodeError::Encode)?;
+
+    // 2차: oxipng lossless 재압축
+    let mut opts = oxipng::Options::from_preset(4);
+    opts.strip     = oxipng::StripChunks::Safe;
+    opts.interlace = Some(oxipng::Interlacing::None);
+    oxipng::optimize_from_memory(&stage1, &opts).map_err(|_| EncodeError::Encode)
 }
 
 #[cfg(test)]
@@ -57,6 +79,41 @@ mod tests {
     fn jpeg_차원이_유지된다() {
         let img = sample_rgb(20, 15);
         let out = encode_jpeg(&img, 85).unwrap();
+        let decoded = image::load_from_memory(&out).unwrap();
+        assert_eq!(decoded.width(),  20);
+        assert_eq!(decoded.height(), 15);
+    }
+
+    fn sample_rgba(w: u32, h: u32) -> DynamicImage {
+        DynamicImage::new_rgba8(w, h)
+    }
+
+    #[test]
+    fn png_인코딩이_유효한_출력을_낸다() {
+        let img = sample_rgba(32, 32);
+        let out = encode_png(&img).expect("encode 성공");
+        // PNG 시그니처 8바이트
+        assert_eq!(&out[..8], b"\x89PNG\r\n\x1a\n");
+    }
+
+    #[test]
+    fn png_oxipng_결과가_image_원본보다_크지_않다() {
+        // oxipng이 image 크레이트 1차 결과보다 더 작거나 같아야 함
+        let img = sample_rgba(64, 64);
+        let mut stage1 = Vec::new();
+        let rgba = img.to_rgba8();
+        PngEncoder::new(&mut stage1)
+            .write_image(rgba.as_raw(), rgba.width(), rgba.height(), image::ExtendedColorType::Rgba8)
+            .unwrap();
+        let out = encode_png(&img).unwrap();
+        assert!(out.len() <= stage1.len(),
+            "oxipng({}) <= stage1({})", out.len(), stage1.len());
+    }
+
+    #[test]
+    fn png_차원이_유지된다() {
+        let img = sample_rgba(20, 15);
+        let out = encode_png(&img).unwrap();
         let decoded = image::load_from_memory(&out).unwrap();
         assert_eq!(decoded.width(),  20);
         assert_eq!(decoded.height(), 15);
