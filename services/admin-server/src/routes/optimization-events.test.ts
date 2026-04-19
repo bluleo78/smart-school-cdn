@@ -177,7 +177,7 @@ describe('GET /api/optimization/stats', () => {
 
 // ─── Phase 15 text_compress 이벤트 ─────────────────────────────────────────
 describe('Phase 15 text_compress 이벤트', () => {
-  it.each(['compressed_br', 'skipped_small', 'skipped_type', 'error'])(
+  it.each(['compressed_br', 'compressed_gzip', 'skipped_small', 'skipped_type', 'error'])(
     'decision=%s 이 화이트리스트 통과한다',
     async (decision) => {
       const { app } = mkApp();

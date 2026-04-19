@@ -246,6 +246,8 @@ pub struct TextCompressConfig {
     pub min_bytes:  usize,
     pub br_level:   u32,
     pub gzip_level: u32,
+    /// DoS 방어용 상한 — 이 크기를 초과하는 텍스트는 압축 스킵 (기본 8MB)
+    pub max_bytes:  usize,
 }
 
 impl TextCompressConfig {
@@ -259,7 +261,9 @@ impl TextCompressConfig {
             .ok().and_then(|v| v.parse().ok()).unwrap_or(11);
         let gzip_level = std::env::var("TEXT_COMPRESS_GZIP_LEVEL")
             .ok().and_then(|v| v.parse().ok()).unwrap_or(6);
-        Self { enabled, min_bytes, br_level, gzip_level }
+        let max_bytes = std::env::var("TEXT_COMPRESS_MAX_BYTES")
+            .ok().and_then(|v| v.parse().ok()).unwrap_or(8_388_608);
+        Self { enabled, min_bytes, br_level, gzip_level, max_bytes }
     }
 }
 
@@ -526,10 +530,10 @@ async fn proxy_handler(
         }
     };
 
-    // GET 요청만 캐시 대상
-    let cache_key = if method == Method::GET {
+    // GET/HEAD 요청을 캐시 대상으로 처리 — HEAD는 GET과 동일 키 사용 (RFC 7231 §4.3.2)
+    let cache_key = if method == Method::GET || method == Method::HEAD {
         Some(compute_cache_key(
-            method.as_str(),
+            "GET",
             &host,
             uri.path(),
             uri.query().unwrap_or(""),
@@ -544,7 +548,9 @@ async fn proxy_handler(
             let elapsed_ms = start.elapsed().as_millis() as u64;
             // Range 헤더 평가 — 있으면 206 슬라이스, 범위 초과면 416, 없거나 파싱 실패면 200
             let total = entry.body.len() as u64;
-            let has_range_req = headers.get(axum::http::header::RANGE).is_some();
+            let is_head = method == Method::HEAD;
+            // HEAD는 압축 협상 스킵 — Content-Length는 원본 크기 기준
+            let has_range_req = is_head || headers.get(axum::http::header::RANGE).is_some();
             let ae = headers.get(axum::http::header::ACCEPT_ENCODING).and_then(|v| v.to_str().ok());
 
             let (resp_status, resp_body, content_range_hdr, decision, out_bytes, content_encoding) =
@@ -600,18 +606,25 @@ async fn proxy_handler(
                 &headers, entry.content_type.as_deref(), elapsed_ms,
             );
 
+            // HEAD: Content-Length는 원본 크기로, body는 비워서 반환 (RFC 7231 §4.3.2)
+            let content_length = entry.body.len();
+            let body_for_resp = if is_head { Bytes::new() } else { resp_body };
+
             let mut resp = Response::builder()
                 .status(resp_status)
-                .header("Accept-Ranges", "bytes");
+                .header("Accept-Ranges", "bytes")
+                .header("Content-Length", content_length.to_string());
             if let Some(ref ct) = entry.content_type {
                 resp = resp.header("Content-Type", ct.as_str());
             }
             if let Some(cr) = content_range_hdr {
                 resp = resp.header("Content-Range", cr);
             }
-            // Phase 15: Accept-Encoding 협상 결과 헤더
-            if let Some(enc) = content_encoding {
-                resp = resp.header("Content-Encoding", enc);
+            // Phase 15: Accept-Encoding 협상 결과 헤더 (HEAD에서는 스킵)
+            if !is_head {
+                if let Some(enc) = content_encoding {
+                    resp = resp.header("Content-Encoding", enc);
+                }
             }
             if entry.body_br.is_some() {
                 resp = resp.header("Vary", "Accept-Encoding");
@@ -620,7 +633,7 @@ async fn proxy_handler(
                 .header("X-Cache-Status", HeaderValue::from_static("HIT"))
                 .header("X-Cache-Reason", HeaderValue::from_static(CacheOutcome::L1Hit.as_header()))
                 .header("X-Served-By", HeaderValue::from_static("smart-school-cdn"))
-                .body(Body::from(resp_body))
+                .body(Body::from(body_for_resp))
                 .unwrap();
         }
     }
@@ -643,7 +656,9 @@ async fn proxy_handler(
             }
 
             let elapsed_ms = start.elapsed().as_millis() as u64;
-            let has_range_req = headers.get(axum::http::header::RANGE).is_some();
+            let is_head = method == Method::HEAD;
+            // HEAD는 압축 협상 스킵 — Content-Length는 원본 크기 기준
+            let has_range_req = is_head || headers.get(axum::http::header::RANGE).is_some();
             let ae = headers.get(axum::http::header::ACCEPT_ENCODING).and_then(|v| v.to_str().ok());
 
             // Range 헤더 평가 — 있으면 206 슬라이스, 범위 초과면 416
@@ -700,18 +715,25 @@ async fn proxy_handler(
                 &headers, content_type.as_deref(), elapsed_ms,
             );
 
+            // HEAD: Content-Length는 원본 크기로, body는 비워서 반환 (RFC 7231 §4.3.2)
+            let content_length = body_bytes.len();
+            let body_for_resp = if is_head { Bytes::new() } else { resp_body };
+
             let mut resp = Response::builder()
                 .status(resp_status)
-                .header("Accept-Ranges", "bytes");
+                .header("Accept-Ranges", "bytes")
+                .header("Content-Length", content_length.to_string());
             if let Some(ct) = content_type {
                 resp = resp.header("Content-Type", ct);
             }
             if let Some(cr) = content_range_hdr {
                 resp = resp.header("Content-Range", cr);
             }
-            // Phase 15: Accept-Encoding 협상 결과 헤더
-            if let Some(enc) = content_encoding {
-                resp = resp.header("Content-Encoding", enc);
+            // Phase 15: Accept-Encoding 협상 결과 헤더 (HEAD에서는 스킵)
+            if !is_head {
+                if let Some(enc) = content_encoding {
+                    resp = resp.header("Content-Encoding", enc);
+                }
             }
             if cached_br.is_some() {
                 resp = resp.header("Vary", "Accept-Encoding");
@@ -720,7 +742,7 @@ async fn proxy_handler(
                 .header("X-Cache-Status", HeaderValue::from_static("HIT"))
                 .header("X-Cache-Reason", HeaderValue::from_static(CacheOutcome::L2Hit.as_header()))
                 .header("X-Served-By", HeaderValue::from_static("smart-school-cdn"))
-                .body(Body::from(resp_body))
+                .body(Body::from(body_for_resp))
                 .unwrap();
         }
     }
@@ -864,6 +886,7 @@ async fn proxy_handler(
                         resp_body.len(),
                         ps_c.text_compress.min_bytes,
                     )
+                    && resp_body.len() <= ps_c.text_compress.max_bytes
                 {
                     // ── Phase 15: 텍스트 brotli 프리컴프레스 분기 ──
                     let body_clone = resp_body.clone();
@@ -874,15 +897,15 @@ async fn proxy_handler(
                     }).await.unwrap_or_else(|_| Err(std::io::Error::other("spawn_blocking join 실패")));
                     let elapsed_ms = started.elapsed().as_millis() as u64;
 
-                    let (br_opt, decision, out_size) = match br_result {
+                    let (br_opt, decision, out_size_opt) = match br_result {
                         Ok(br) if (br.len() as f32) <= (resp_body.len() as f32) * 0.9 => {
                             let out = br.len() as u64;
-                            (Some(Bytes::from(br)), "compressed_br", out)
+                            (Some(Bytes::from(br)), "compressed_br", Some(out))
                         }
-                        Ok(_) => (None, "skipped_size", resp_body.len() as u64),
+                        Ok(_) => (None, "skipped_type", None),
                         Err(err) => {
                             tracing::warn!(error=%err, "brotli 압축 실패 — 원본만 저장");
-                            (None, "error", resp_body.len() as u64)
+                            (None, "error", None)
                         }
                     };
 
@@ -893,7 +916,7 @@ async fn proxy_handler(
                             url:          format!("https://{}{}", host_c, uri_str),
                             decision:     decision.to_string(),
                             orig_size:    Some(resp_body.len() as u64),
-                            out_size:     Some(out_size),
+                            out_size:     out_size_opt,
                             range_header: None,
                             content_type: content_type.clone(),
                             elapsed_ms,
@@ -902,6 +925,44 @@ async fn proxy_handler(
 
                     (resp_body.clone(), content_type.clone(), br_opt)
                 } else {
+                    // ── should_compress 조건 불충족 시 관찰 이벤트 발행 ──
+                    if ps_c.text_compress.enabled {
+                        if let Some(ev) = ps_c.events.as_ref() {
+                            let ce = resp_headers.get("content-encoding").and_then(|v| v.to_str().ok());
+                            let is_text = compress::is_text_content_type(content_type.as_deref());
+                            let event_decision = if is_text {
+                                if resp_body.len() > ps_c.text_compress.max_bytes {
+                                    // DoS 가드 상한 초과
+                                    Some("skipped_type")
+                                } else if resp_body.len() < ps_c.text_compress.min_bytes {
+                                    Some("skipped_small")
+                                } else {
+                                    // content-encoding 이미 존재하는 경우
+                                    let ce_val = ce.unwrap_or("").trim().to_ascii_lowercase();
+                                    if !ce_val.is_empty() && ce_val != "identity" {
+                                        Some("skipped_type")
+                                    } else {
+                                        None
+                                    }
+                                }
+                            } else {
+                                None  // 이미지·오디오·비디오 등은 관찰 대상 아님
+                            };
+                            if let Some(dec) = event_decision {
+                                ev.emit(crate::events::EventRecord {
+                                    event_type:   "text_compress",
+                                    host:         host_c.clone(),
+                                    url:          format!("https://{}{}", host_c, uri_str),
+                                    decision:     dec.to_string(),
+                                    orig_size:    Some(resp_body.len() as u64),
+                                    out_size:     None,
+                                    range_header: None,
+                                    content_type: content_type.clone(),
+                                    elapsed_ms:   0,
+                                });
+                            }
+                        }
+                    }
                     (resp_body.clone(), content_type.clone(), None)
                 };
 
@@ -2305,7 +2366,7 @@ mod tests {
             memory_cache: moka::future::Cache::builder().max_capacity(100).build(),
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
             events: None,
-            text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6 },
+            text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6, max_bytes: 8_388_608 },
         };
 
         let router = build_proxy_router(ps);
@@ -2362,7 +2423,7 @@ mod tests {
             memory_cache: moka::future::Cache::builder().max_capacity(100).build(),
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
             events: None,
-            text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6 },
+            text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6, max_bytes: 8_388_608 },
         };
 
         let router = build_proxy_router(ps);
@@ -2418,7 +2479,7 @@ mod tests {
             memory_cache: moka::future::Cache::builder().max_capacity(100).build(),
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
             events: None,
-            text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6 },
+            text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6, max_bytes: 8_388_608 },
         };
 
         let router = build_proxy_router(ps);
@@ -2477,7 +2538,7 @@ mod tests {
             memory_cache: moka::future::Cache::builder().max_capacity(100).build(),
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
             events: None,
-            text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6 },
+            text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6, max_bytes: 8_388_608 },
         };
 
         let router = build_proxy_router(ps);
@@ -2562,7 +2623,7 @@ mod tests {
             memory_cache: moka::future::Cache::builder().max_capacity(100).build(),
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
             events: None,
-            text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6 },
+            text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6, max_bytes: 8_388_608 },
         };
 
         let router = build_proxy_router(ps);
@@ -2664,6 +2725,14 @@ mod tests {
         assert!(should_optimize(Some("image/jpeg; charset=utf-8")));
     }
 
+    #[test]
+    fn svg는_image_최적화가_아닌_text_압축_대상() {
+        // Phase 15 회귀: SVG는 should_optimize에서 false여야 하며 텍스트 압축 대상이어야 함.
+        // should_optimize에 SVG가 추가되면 텍스트 압축 경로가 깨지므로 못 박아 둔다.
+        assert!(!should_optimize(Some("image/svg+xml")));
+        assert!(compress::should_compress(Some("image/svg+xml"), None, 2048, 1024));
+    }
+
     // ─── Phase 15 Unit Tests ────────────────────────────────────────────
 
     #[test]
@@ -2756,7 +2825,7 @@ mod tests {
             memory_cache: moka::future::Cache::builder().max_capacity(100).build(),
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
             events: None,
-            text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6 },
+            text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6, max_bytes: 8_388_608 },
         };
         let router = build_proxy_router(ps.clone());
         (ps, router)
@@ -2897,7 +2966,7 @@ mod tests {
             memory_cache: memory_cache.clone(),
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
             events: None,
-            text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6 },
+            text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6, max_bytes: 8_388_608 },
         };
 
         // 1차 요청: MISS — brotli 저장
@@ -2985,7 +3054,7 @@ mod tests {
             memory_cache: memory_cache.clone(),
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
             events: None,
-            text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6 },
+            text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6, max_bytes: 8_388_608 },
         };
 
         // 1차 MISS
@@ -3071,7 +3140,7 @@ mod tests {
             memory_cache: moka::future::Cache::builder().max_capacity(100).build(),
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
             events: None,
-            text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6 },
+            text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6, max_bytes: 8_388_608 },
         };
 
         let router = build_proxy_router(ps);
@@ -3256,7 +3325,7 @@ mod tests {
             memory_cache,
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
             events: None,
-            text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6 },
+            text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6, max_bytes: 8_388_608 },
         };
 
         let shared = ps.shared.clone();
@@ -3339,7 +3408,7 @@ mod tests {
             memory_cache,
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
             events: None,
-            text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6 },
+            text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6, max_bytes: 8_388_608 },
         };
 
         let shared = ps.shared.clone();
@@ -3705,7 +3774,7 @@ mod tests {
             memory_cache,
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
             events: None,
-            text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6 },
+            text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6, max_bytes: 8_388_608 },
         };
 
         let router = build_proxy_router(ps.clone());
@@ -3736,6 +3805,84 @@ mod tests {
         assert_eq!(c.l1_hits.load(std::sync::atomic::Ordering::Relaxed), 1);
         assert_eq!(c.cache_misses.load(std::sync::atomic::Ordering::Relaxed), 0);
         assert_eq!(c.bypass_method.load(std::sync::atomic::Ordering::Relaxed), 0);
+    }
+
+    /// Phase 15: HEAD 요청은 body 없이 원본 크기 Content-Length를 반환해야 한다 (RFC 7231 §4.3.2)
+    #[tokio::test]
+    async fn phase15_head_요청은_body_없이_원본_크기_content_length() {
+        let storage_url = start_mock_storage_server().await;
+        let tls_url = start_mock_tls_server().await;
+
+        let storage = loop {
+            match clients::storage_client::StorageClient::connect(&storage_url).await {
+                Ok(c) => break c,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        };
+        let tls = loop {
+            match clients::tls_client::TlsClient::connect(&tls_url).await {
+                Ok(c) => break c,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        };
+        let cert_cache = tls.cert_cache.clone();
+
+        let mut dm = HashMap::new();
+        dm.insert("head.local".to_string(), "http://origin.head.local".to_string());
+        let domain_map: DomainMap = Arc::new(tokio::sync::RwLock::new(dm));
+
+        let memory_cache: moka::future::Cache<String, Arc<MemoryCacheEntry>> =
+            moka::future::Cache::builder().max_capacity(100).build();
+
+        let cached_body = b"Hello, HEAD World!".to_vec();
+        let orig_len = cached_body.len();
+        // GET 캐시 키로 L1에 삽입 (HEAD는 GET과 같은 키를 공유)
+        let key = compute_cache_key("GET", "head.local", "/page", "");
+        memory_cache.insert(key, Arc::new(MemoryCacheEntry {
+            body:         Bytes::from(cached_body),
+            content_type: Some("text/html".to_string()),
+            body_br:      None,
+        })).await;
+
+        let ps = ProxyState {
+            shared:       Arc::new(tokio::sync::RwLock::new(state::AppState::new())),
+            http_client:  reqwest::Client::new(),
+            storage:      Arc::new(Mutex::new(storage)),
+            tls_client:   Arc::new(Mutex::new(tls)),
+            optimizer:    None,
+            domain_map,
+            cert_cache,
+            coalescer:    Arc::new(coalescer::Coalescer::new()),
+            memory_cache,
+            counters:     Arc::new(std::sync::RwLock::new(HashMap::new())),
+            events:       None,
+            text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6, max_bytes: 8_388_608 },
+        };
+
+        let router = build_proxy_router(ps);
+        let resp = router
+            .oneshot(
+                Request::builder()
+                    .method(Method::HEAD)
+                    .uri("/page")
+                    .header("host", "head.local")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        // Content-Length는 원본 body 크기와 일치해야 한다
+        let cl = resp.headers()
+            .get("content-length")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<usize>().ok())
+            .expect("Content-Length 헤더 없음");
+        assert_eq!(cl, orig_len, "HEAD Content-Length은 원본 body 크기여야 한다");
+        // body는 비어 있어야 한다
+        let body_bytes = axum::body::to_bytes(resp.into_body(), 1024).await.unwrap();
+        assert!(body_bytes.is_empty(), "HEAD 응답 body는 비어야 한다");
     }
 
     /// origin이 Cache-Control: no-store를 반환하면 BYPASS-NOCACHE로 분류되고

@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto';
  * - decision: 처리 결과 분류 문자열. Phase별로 의미가 다르지만 고정 집합으로 운영한다.
  *   · media_cache:   'served_200','served_206','stored_new','invalid_range_416'
  *   · image_optimize:'converted','rejected_size','skipped_small','skipped_type','error'
- *   · text_compress: 'compressed_br','compressed_gzip','skipped_small','skipped_type'
+ *   · text_compress: 'compressed_br','compressed_gzip','skipped_small','skipped_type','error'
  *   · (공통 bypass): 'bypass_nocache','bypass_size','bypass_method','bypass_other'
  * - orig_size / out_size: null 허용 (예: bypass 케이스는 out_size 없음)
  */

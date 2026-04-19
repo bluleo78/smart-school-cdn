@@ -46,6 +46,14 @@ const WHITELIST: &[&str] = &[
     "image/svg+xml",
 ];
 
+/// content-type 문자열이 텍스트 압축 화이트리스트에 해당하는지 반환.
+/// WHITELIST를 재활용해 DRY를 유지한다.
+pub fn is_text_content_type(content_type: Option<&str>) -> bool {
+    let Some(ct) = content_type else { return false; };
+    let base = ct.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
+    WHITELIST.iter().any(|w| *w == base.as_str())
+}
+
 /// 응답을 압축해야 하는지 판정.
 /// content_type, content_encoding, 응답 크기, 최소 압축 임계값을 기준으로 결정한다.
 pub fn should_compress(
