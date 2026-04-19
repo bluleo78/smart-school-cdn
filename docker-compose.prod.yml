@@ -86,6 +86,7 @@ services:
       - TEXT_COMPRESS_MIN_BYTES=1024
       - TEXT_COMPRESS_BR_LEVEL=11
       - TEXT_COMPRESS_GZIP_LEVEL=6
+      - TEXT_COMPRESS_MAX_BYTES=8388608
     depends_on:
       storage-service:
         condition: service_healthy
