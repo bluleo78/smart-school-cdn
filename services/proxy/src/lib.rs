@@ -606,14 +606,17 @@ async fn proxy_handler(
                 &headers, entry.content_type.as_deref(), elapsed_ms,
             );
 
-            // HEAD: Content-Length는 원본 크기로, body는 비워서 반환 (RFC 7231 §4.3.2)
-            let content_length = entry.body.len();
+            // HEAD만 Content-Length를 원본 크기로 명시(RFC 7231 §4.3.2).
+            // GET 응답의 Content-Length는 axum이 body 크기에서 자동 산출 — br/gzip 변형
+            // 반환 시 body.len()과 헤더가 어긋나지 않도록 수동 설정 금지.
             let body_for_resp = if is_head { Bytes::new() } else { resp_body };
 
             let mut resp = Response::builder()
                 .status(resp_status)
-                .header("Accept-Ranges", "bytes")
-                .header("Content-Length", content_length.to_string());
+                .header("Accept-Ranges", "bytes");
+            if is_head {
+                resp = resp.header("Content-Length", entry.body.len().to_string());
+            }
             if let Some(ref ct) = entry.content_type {
                 resp = resp.header("Content-Type", ct.as_str());
             }
@@ -715,14 +718,16 @@ async fn proxy_handler(
                 &headers, content_type.as_deref(), elapsed_ms,
             );
 
-            // HEAD: Content-Length는 원본 크기로, body는 비워서 반환 (RFC 7231 §4.3.2)
-            let content_length = body_bytes.len();
+            // HEAD만 Content-Length를 원본 크기로 명시(RFC 7231 §4.3.2).
+            // GET 응답 Content-Length는 axum이 body 크기에서 자동 산출.
             let body_for_resp = if is_head { Bytes::new() } else { resp_body };
 
             let mut resp = Response::builder()
                 .status(resp_status)
-                .header("Accept-Ranges", "bytes")
-                .header("Content-Length", content_length.to_string());
+                .header("Accept-Ranges", "bytes");
+            if is_head {
+                resp = resp.header("Content-Length", body_bytes.len().to_string());
+            }
             if let Some(ct) = content_type {
                 resp = resp.header("Content-Type", ct);
             }
@@ -3008,8 +3013,18 @@ mod tests {
             "br Accept-Encoding 시 content-encoding: br 이어야 한다"
         );
         assert!(resp2.headers().get("vary").is_some(), "Vary 헤더가 있어야 한다");
+        // 회귀 방지: Content-Length를 수동 설정했을 때 원본 크기로 나가 브라우저가 pending 상태에 빠진 사례가 있다.
+        // GET+br 응답의 Content-Length 헤더는 axum이 body.len()에서 자동 산출하므로 반드시 압축본 크기와 일치해야 한다.
+        let cl_header = resp2
+            .headers()
+            .get("content-length")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<usize>().ok());
         let body = to_bytes(resp2.into_body(), 1024 * 1024).await.unwrap();
         assert!(body.len() < html.len() / 2, "br 압축 응답은 원본보다 작아야 한다: {} vs {}", body.len(), html.len());
+        if let Some(cl) = cl_header {
+            assert_eq!(cl, body.len(), "GET+br 응답의 Content-Length는 압축본 body 크기와 일치해야 한다 (원본 {})", html.len());
+        }
     }
 
     /// Phase 15 Task 13: HIT 시 Accept-Encoding 없으면 identity 응답
