@@ -98,6 +98,17 @@ export interface DomainSummary {
 export type StatsPeriod = '1h' | '24h' | '7d' | '30d' | 'custom';
 
 /**
+ * custom 기간 유효성 검사
+ * - range가 없거나 to <= from이면 에러를 던진다
+ * - custom 이외의 period는 검사를 생략한다
+ */
+function validateRange(period: StatsPeriod, range?: { from: number; to: number }): void {
+  if (period !== 'custom') return;
+  if (!range) throw new Error('custom period requires range { from, to }');
+  if (range.to <= range.from) throw new Error('custom period requires to > from');
+}
+
+/**
  * 도메인 통계 리포지토리
  * 생성자로 DB 커넥션을 주입받아 테스트에서 쉽게 교체할 수 있도록 한다.
  */
@@ -159,11 +170,9 @@ export class DomainStatsRepository {
     let until: number;
     let bucketSize: number;
     if (period === 'custom') {
-      // custom은 반드시 유효한 range를 전달해야 한다
-      if (!range || range.to <= range.from) {
-        throw new Error('custom period requires valid from/to');
-      }
-      since = range.from;
+      // custom은 반드시 유효한 range를 전달해야 한다 — validateRange가 검증
+      validateRange(period, range);
+      since = range!.from;
       until = range.to;
       const span = until - since;
       // 스팬에 따라 버킷 크기 자동 선택: 1시간 이내→60초, 하루 이내→3600초, 그 이상→86400초

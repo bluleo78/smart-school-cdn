@@ -25,6 +25,29 @@ describe('DomainStatsRepository — 1h / custom 확장', () => {
 
   beforeEach(() => { repo = makeRepo(); });
 
+  it('custom 기간은 from/to 범위만 집계한다', () => {
+    const now = Math.floor(Date.now() / 1000);
+    repo.insert({
+      host, timestamp: now - 7200, requests: 100, cache_hits: 50, cache_misses: 50,
+      bandwidth: 0, avg_response_time: 0, l1_hits: 40, l2_hits: 10,
+      bypass_method: 0, bypass_nocache: 0, bypass_size: 0, bypass_other: 0,
+    });
+    repo.insert({
+      host, timestamp: now - 1800, requests: 30, cache_hits: 20, cache_misses: 10,
+      bandwidth: 0, avg_response_time: 0, l1_hits: 15, l2_hits: 5,
+      bypass_method: 0, bypass_nocache: 0, bypass_size: 0, bypass_other: 0,
+    });
+    // from = now-3600, to = now → 뒤쪽 것만 포함
+    const r = repo.getStats(host, 'custom', { from: now - 3600, to: now });
+    expect(r.summary.total_requests).toBe(30);
+  });
+
+  it('custom 기간에 from/to 가 없거나 to <= from 이면 에러', () => {
+    const now = Math.floor(Date.now() / 1000);
+    expect(() => repo.getStats(host, 'custom')).toThrow();
+    expect(() => repo.getStats(host, 'custom', { from: now, to: now - 1 })).toThrow();
+  });
+
   it('1h 기간은 60초 버킷으로 집계한다', () => {
     const now = Math.floor(Date.now() / 1000);
     // 10분 전과 5분 전 각각 1건
