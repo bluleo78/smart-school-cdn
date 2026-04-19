@@ -77,6 +77,12 @@ export interface DomainLog {
   size: number;
 }
 
+/** 도메인 Top URL 한 건 */
+export interface DomainTopUrl {
+  path: string;
+  count: number;
+}
+
 /** 일괄 추가 결과 */
 export interface BulkAddResult {
   success: number;

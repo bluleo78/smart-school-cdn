@@ -6,6 +6,7 @@ import type {
   DomainHostSummary,
   DomainStats,
   DomainLog,
+  DomainTopUrl,
   BulkAddResult,
   DomainsFilter,
 } from './domain-types';
@@ -126,4 +127,23 @@ export async function fetchDomainLogs(
     { params: options },
   );
   return res.data;
+}
+
+/** 도메인 상위 URL 조회 — 기간 내 요청 수 기준 상위 N 경로 반환 */
+export async function fetchDomainTopUrls(
+  host: string,
+  period: StatsPeriod,
+  range?: { from: number; to: number },
+  limit = 5,
+): Promise<DomainTopUrl[]> {
+  const params: Record<string, string | number> = { period, limit };
+  if (period === 'custom' && range) {
+    params.from = range.from;
+    params.to = range.to;
+  }
+  const res = await axios.get<{ urls: DomainTopUrl[] }>(
+    `/api/domains/${encodeURIComponent(host)}/top-urls`,
+    { params },
+  );
+  return res.data.urls;
 }
