@@ -360,10 +360,21 @@ export async function domainRoutes(
     },
   );
 
-  /** 도메인 로그 조회 (limit, status, cache 필터) */
+  // 로그 기간 필터용 시간 상수 (매직 넘버 방지)
+  const LOG_HOUR_SECONDS  = 3600;
+  const LOG_DAY_SECONDS   = 86400;
+  const LOG_WEEK_SECONDS  = 604800;
+  const LOG_MONTH_SECONDS = 2592000;
+
+  /** 도메인 로그 조회 (period/from/to/q/status/cache/limit/offset 필터) */
   app.get<{
     Params: { host: string };
-    Querystring: { limit?: string; status?: string; cache?: string };
+    Querystring: {
+      limit?: string; offset?: string;
+      status?: string; cache?: string;
+      period?: string; from?: string; to?: string;
+      q?: string;
+    };
   }>('/api/domains/:host/logs', async (request, reply) => {
     const host = decodeURIComponent(request.params.host);
     const domain = domainRepo.findByHost(host);
@@ -372,13 +383,51 @@ export async function domainRoutes(
     }
 
     const limit = Math.min(Number(request.query.limit) || 100, 1000);
-    const { status, cache } = request.query;
+    const offset = Number(request.query.offset) || 0;
+    const { status, cache, period, q } = request.query;
+
+    // period → since/until 변환 (없으면 시간 필터 없음)
+    let since: number | undefined;
+    let until: number | undefined;
+    if (period) {
+      const now = Math.floor(Date.now() / 1000);
+      if (period === '1h') {
+        // 최근 1시간
+        since = now - LOG_HOUR_SECONDS;
+      } else if (period === '24h') {
+        since = now - LOG_DAY_SECONDS;
+      } else if (period === '7d') {
+        since = now - LOG_WEEK_SECONDS;
+      } else if (period === '30d') {
+        since = now - LOG_MONTH_SECONDS;
+      } else if (period === 'custom') {
+        // custom: from/to 필수 — 누락·비정수·역전 시 400 반환
+        const fromNum = Number(request.query.from);
+        const toNum   = Number(request.query.to);
+        if (!Number.isFinite(fromNum) || !Number.isFinite(toNum) || toNum <= fromNum) {
+          return reply.code(400).send({ error: 'period=custom requires numeric from < to' });
+        }
+        since = fromNum;
+        until = toNum;
+      }
+      // 알 수 없는 period 값은 무시하여 기존 동작 유지
+    }
 
     // access_logs 테이블이 없을 수 있으므로 try/catch로 빈 배열 폴백
     try {
       const db = domainRepo.database;
       const conditions: string[] = ['host = ?'];
       const params: (string | number)[] = [host];
+
+      // 시간 범위 필터 — period 지정 시에만 적용
+      if (since !== undefined) {
+        conditions.push('timestamp >= ?');
+        params.push(since);
+      }
+      if (until !== undefined) {
+        conditions.push('timestamp <= ?');
+        params.push(until);
+      }
 
       // status 필터: '5xx' → 500+, '4xx' → 400~499
       if (status === '5xx') {
@@ -390,15 +439,21 @@ export async function domainRoutes(
       // cache 필터: 'hit' / 'miss'
       if (cache === 'hit' || cache === 'miss') {
         conditions.push('cache_status = ?');
-        params.push(cache);
+        params.push(cache.toUpperCase());
+      }
+
+      // q: path 부분 문자열 검색 (LIKE)
+      if (q) {
+        conditions.push('path LIKE ?');
+        params.push(`%${q}%`);
       }
 
       const where = `WHERE ${conditions.join(' AND ')}`;
-      params.push(limit);
+      params.push(limit, offset);
 
       const rows = db
         .prepare(
-          `SELECT timestamp, status_code, cache_status, path, size FROM access_logs ${where} ORDER BY timestamp DESC LIMIT ?`,
+          `SELECT timestamp, status_code, cache_status, path, size FROM access_logs ${where} ORDER BY timestamp DESC LIMIT ? OFFSET ?`,
         )
         .all(...params);
 

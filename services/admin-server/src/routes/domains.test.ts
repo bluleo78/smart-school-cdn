@@ -45,10 +45,25 @@ function buildApp(domainRepo: DomainRepository) {
   return app;
 }
 
+/** access_logs 스키마 — 로그 필터 테스트용 */
+const ACCESS_LOGS_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS access_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp INTEGER NOT NULL,
+    host TEXT NOT NULL,
+    method TEXT NOT NULL DEFAULT 'GET',
+    path TEXT NOT NULL,
+    status_code INTEGER NOT NULL DEFAULT 200,
+    cache_status TEXT NOT NULL DEFAULT 'MISS',
+    size INTEGER NOT NULL DEFAULT 0
+  );
+`;
+
 function makeRepo() {
   const db = new Database(':memory:');
   db.exec(DOMAIN_SCHEMA);
   db.exec(DOMAIN_STATS_SCHEMA);
+  db.exec(ACCESS_LOGS_SCHEMA);
   return new DomainRepository(db);
 }
 
@@ -294,7 +309,7 @@ describe('GET /api/domains/summary — L1/L2/bypass 비율', () => {
     expect(s!.today_bypass_rate).toBeCloseTo(0.20);
   });
 
-  it('requests=0 일 때 3개 비율 모두 0', async () => {
+  it('requests=0 일 때 3개 비율 모두 0 (divide-by-zero 가드)', async () => {
     const repo = makeRepo();
     repo.upsert('b.test', 'https://b.test');
     // 통계 행 미삽입 상태 — divide-by-zero 가드 확인용 삽입
@@ -320,5 +335,71 @@ describe('GET /api/domains/summary — L1/L2/bypass 비율', () => {
     expect(s!.today_l1_hit_rate).toBe(0);
     expect(s!.today_edge_hit_rate).toBe(0);
     expect(s!.today_bypass_rate).toBe(0);
+  });
+});
+
+describe('GET /api/domains/:host/logs — period/from/to/q 필터', () => {
+  it('period=1h 으로 최근 1시간만 반환', async () => {
+    const repo = makeRepo();
+    repo.upsert('a.test', 'https://a.test');
+    const app = buildApp(repo);
+    const now = Math.floor(Date.now() / 1000);
+    repo.database.prepare(
+      `INSERT INTO access_logs (timestamp, host, method, path, status_code, cache_status, size)
+       VALUES (?, 'a.test', 'GET', '/old', 200, 'MISS', 100),
+              (?, 'a.test', 'GET', '/new', 200, 'HIT', 200)`,
+    ).run(now - 7200, now - 600);
+
+    const res = await app.inject({ method: 'GET', url: '/api/domains/a.test/logs?period=1h' });
+    expect(res.statusCode).toBe(200);
+    const rows = JSON.parse(res.body);
+    expect(rows.every((r: { path: string }) => r.path === '/new')).toBe(true);
+  });
+
+  it('period=custom + from/to 기간만 반환', async () => {
+    const repo = makeRepo();
+    repo.upsert('a.test', 'https://a.test');
+    const app = buildApp(repo);
+    const now = Math.floor(Date.now() / 1000);
+    repo.database.prepare(
+      `INSERT INTO access_logs (timestamp, host, method, path, status_code, cache_status, size)
+       VALUES (?, 'a.test', 'GET', '/old', 200, 'MISS', 100),
+              (?, 'a.test', 'GET', '/new', 200, 'HIT', 200)`,
+    ).run(now - 7200, now - 600);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/domains/a.test/logs?period=custom&from=${now - 3600}&to=${now}`,
+    });
+    expect(res.statusCode).toBe(200);
+    const rows = JSON.parse(res.body);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].path).toBe('/new');
+  });
+
+  it('period=custom + 잘못된 from/to 는 400', async () => {
+    const repo = makeRepo();
+    repo.upsert('a.test', 'https://a.test');
+    const app = buildApp(repo);
+    const res = await app.inject({ method: 'GET', url: '/api/domains/a.test/logs?period=custom' });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('q= 검색어로 path 필터링', async () => {
+    const repo = makeRepo();
+    repo.upsert('a.test', 'https://a.test');
+    const app = buildApp(repo);
+    const now = Math.floor(Date.now() / 1000);
+    repo.database.prepare(
+      `INSERT INTO access_logs (timestamp, host, method, path, status_code, cache_status, size)
+       VALUES (?, 'a.test', 'GET', '/images/logo.png', 200, 'HIT', 500),
+              (?, 'a.test', 'GET', '/api/data', 200, 'MISS', 100)`,
+    ).run(now - 10, now - 5);
+
+    const res = await app.inject({ method: 'GET', url: '/api/domains/a.test/logs?q=images' });
+    expect(res.statusCode).toBe(200);
+    const rows = JSON.parse(res.body);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].path).toBe('/images/logo.png');
   });
 });
