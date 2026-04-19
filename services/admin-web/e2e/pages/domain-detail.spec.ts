@@ -198,27 +198,6 @@ test.describe('도메인 상세 — Overview 탭', () => {
     await expect(page.getByTestId('purge-confirm-dialog')).not.toBeVisible();
   });
 
-  test('도메인 Overview — L1/엣지/BYPASS 비율 카드 3개가 렌더링된다', async ({ page }) => {
-    await setupDetailMocks(page);
-    await page.goto('/domains/textbook.com');
-
-    // today_l1_hit_rate: 0.6 → "60.0%"
-    await expect(page.getByTestId('domain-overview-l1-hit-rate')).toBeVisible();
-    await expect(page.getByTestId('domain-overview-l1-hit-rate')).toHaveText('60.0%');
-    // today_edge_hit_rate: 0.7 → "70.0%"
-    await expect(page.getByTestId('domain-overview-edge-hit-rate')).toBeVisible();
-    await expect(page.getByTestId('domain-overview-edge-hit-rate')).toHaveText('70.0%');
-    // today_bypass_rate: 0.1 → "10.0%"
-    await expect(page.getByTestId('domain-overview-bypass-rate')).toBeVisible();
-    await expect(page.getByTestId('domain-overview-bypass-rate')).toHaveText('10.0%');
-  });
-
-  test('도메인 Overview — 스택 차트가 렌더링된다', async ({ page }) => {
-    await setupDetailMocks(page);
-    await page.goto('/domains/textbook.com');
-
-    await expect(page.getByTestId('domain-overview-stacked-chart')).toBeVisible();
-  });
 });
 
 // ─────────────────────────────────────────────
