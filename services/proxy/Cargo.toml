@@ -30,6 +30,8 @@ tokio-rustls   = "0.26"
 axum-server    = { version = "0.7", features = ["tls-rustls"] }
 rustls-pemfile = "2"
 moka           = { version = "0.12", features = ["future"] }
+brotli         = "6"
+flate2         = "1"
 
 [dev-dependencies]
 tempfile     = "3"
