@@ -104,10 +104,22 @@ export async function fetchDomainStats(
   return res.data;
 }
 
-/** 도메인 요청 로그 조회 */
+/** 도메인 로그 조회 옵션 — 기간/상태/캐시/검색 필터 포함 */
+export interface DomainLogsOptions {
+  limit?: number;
+  offset?: number;
+  status?: '5xx' | '4xx';
+  cache?: 'hit' | 'miss';
+  q?: string;
+  period?: StatsPeriod;
+  from?: number;
+  to?: number;
+}
+
+/** 도메인 요청 로그 조회 — 기간 필터 및 다양한 검색 옵션 지원 */
 export async function fetchDomainLogs(
   host: string,
-  options?: { limit?: number; offset?: number },
+  options?: DomainLogsOptions,
 ): Promise<DomainLog[]> {
   const res = await axios.get<DomainLog[]>(
     `/api/domains/${encodeURIComponent(host)}/logs`,
