@@ -216,14 +216,6 @@ test.describe('도메인 상세 — 통계 탭', () => {
     await expect(page.getByTestId('domain-stats-tab')).toBeVisible();
   });
 
-  test('인기 콘텐츠 테이블이 렌더링된다', async ({ page }) => {
-    await setupDetailMocks(page);
-    await page.goto('/domains/textbook.com');
-
-    await page.getByRole('tab', { name: '통계' }).click();
-    await expect(page.getByTestId('domain-popular-content')).toBeVisible();
-  });
-
   test('최적화 절감 통계 카드가 렌더링된다', async ({ page }) => {
     await setupDetailMocks(page);
     await page.goto('/domains/textbook.com');

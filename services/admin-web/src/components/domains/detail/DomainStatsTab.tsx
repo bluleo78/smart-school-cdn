@@ -1,102 +1,104 @@
-/// 도메인 통계 탭 — 기간 선택 + HIT/MISS 바 차트 + 대역폭/응답시간 에어리어 차트 + 인기 콘텐츠 + 최적화 절감 + 로그 테이블
+/// 도메인 통계 탭 — 기간 토글 + 수동 새로고침. 캐시/트래픽/최적화 3섹션.
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { PeriodSelector, type PeriodValue } from './PeriodSelector';
+import { ManualRefreshButton } from './ManualRefreshButton';
+import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
+import { Skeleton } from '../../ui/skeleton';
 import { useDomainStats } from '../../../hooks/useDomainStats';
 import { formatBytes } from '../../../lib/format';
-import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
-import { Button } from '../../ui/button';
-import { Skeleton } from '../../ui/skeleton';
-import { DomainLogTable } from './DomainLogTable';
-import { DomainPopularContent } from './DomainPopularContent';
+import { DomainCacheCards } from './DomainCacheCards';
+import { DomainStackedChart } from './DomainStackedChart';
 import { DomainOptimizationStats } from './DomainOptimizationStats';
-
-type Period = '24h' | '7d' | '30d';
 
 interface Props {
   host: string;
 }
 
-const PERIOD_LABELS: { value: Period; label: string }[] = [
-  { value: '24h', label: '24시간' },
-  { value: '7d', label: '7일' },
-  { value: '30d', label: '30일' },
-];
+/** PeriodValue → DomainCacheCards/DomainStackedChart 가 기대하는 '1h'|'24h' 로 축약.
+ *  7d/30d/custom 인 경우엔 24h 로 degrade (시계열 해상도 제한). */
+function toSeriesRange(p: PeriodValue): '1h' | '24h' {
+  return p.period === '1h' ? '1h' : '24h';
+}
 
 export function DomainStatsTab({ host }: Props) {
-  /** 선택된 기간 — 기본값 24h */
-  const [period, setPeriod] = useState<Period>('24h');
+  const [period, setPeriod] = useState<PeriodValue>({ period: '24h' });
+  const qc = useQueryClient();
+  const range =
+    period.period === 'custom' && period.from !== undefined && period.to !== undefined
+      ? { from: period.from, to: period.to }
+      : undefined;
+  const { data, isLoading } = useDomainStats(host, period.period, range);
 
-  const { data, isLoading, error } = useDomainStats(host, period);
+  /** 수동 새로고침 — 이 도메인과 연관된 모든 쿼리 무효화 */
+  function handleRefresh() {
+    qc.invalidateQueries({ queryKey: ['domain', host] });
+  }
 
   return (
-    <div className="space-y-4" data-testid="domain-stats-tab">
-      {/* 기간 선택 버튼 그룹 */}
-      <div className="flex gap-2">
-        {PERIOD_LABELS.map(({ value, label }) => (
-          <Button
-            key={value}
-            variant={period === value ? 'default' : 'outline'}
-            onClick={() => setPeriod(value)}
-            aria-pressed={period === value}
-            className="h-8 text-xs py-1 px-3"
-          >
-            {label}
-          </Button>
-        ))}
+    <div className="space-y-6" data-testid="domain-stats-tab">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <PeriodSelector value={period} onChange={setPeriod} />
+        <ManualRefreshButton onClick={handleRefresh} />
       </div>
 
-      {/* 차트 영역 */}
-      {isLoading ? (
-        <div className="grid grid-cols-2 gap-4">
-          <Skeleton className="h-48 w-full" />
-          <Skeleton className="h-48 w-full" />
-        </div>
-      ) : error ? (
-        <p className="text-sm text-destructive">통계 로드 실패</p>
-      ) : data ? (
-        <div className="grid grid-cols-2 gap-4">
-          {/* 왼쪽: 요청 수 추이 — HIT/MISS 스택 바 차트 */}
-          <Card variant="glass">
-            <CardHeader>
-              <CardTitle className="text-sm">요청 수 추이</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <HitMissBarChart
-                labels={data.timeseries.labels}
-                hits={data.timeseries.hits}
-                misses={data.timeseries.misses}
-              />
-            </CardContent>
-          </Card>
+      {/* 캐시 섹션 */}
+      <Card data-testid="stats-cache-section">
+        <CardHeader><CardTitle className="text-base font-semibold">캐시</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <DomainCacheCards host={host} range={toSeriesRange(period)} />
+          <DomainStackedChart host={host} range={toSeriesRange(period)} />
+        </CardContent>
+      </Card>
 
-          {/* 오른쪽: 대역폭 & 응답 시간 에어리어 차트 */}
-          <Card variant="glass">
-            <CardHeader>
-              <CardTitle className="text-sm">대역폭 &amp; 응답 시간</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <BandwidthResponseChart
-                labels={data.timeseries.labels}
-                bandwidth={data.timeseries.bandwidth}
-                responseTime={data.timeseries.responseTime}
-              />
-            </CardContent>
-          </Card>
-        </div>
-      ) : null}
+      {/* 트래픽 섹션 */}
+      <Card data-testid="stats-traffic-section">
+        <CardHeader><CardTitle className="text-base font-semibold">트래픽</CardTitle></CardHeader>
+        <CardContent>
+          {isLoading || !data ? (
+            <Skeleton className="h-64 w-full" />
+          ) : (
+            <div className="grid grid-cols-2 gap-4 md:grid-cols-1">
+              {/* HIT/MISS 스택 바 차트 */}
+              <Card variant="glass">
+                <CardHeader>
+                  <CardTitle className="text-sm">요청 수 추이</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <HitMissBarChart
+                    labels={data.timeseries.labels}
+                    hits={data.timeseries.hits}
+                    misses={data.timeseries.misses}
+                  />
+                </CardContent>
+              </Card>
 
-      {/* 인기 콘텐츠 */}
-      <DomainPopularContent host={host} />
+              {/* 대역폭 & 응답 시간 에어리어 차트 */}
+              <Card variant="glass">
+                <CardHeader>
+                  <CardTitle className="text-sm">대역폭 &amp; 응답 시간</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <BandwidthResponseChart
+                    labels={data.timeseries.labels}
+                    bandwidth={data.timeseries.bandwidth}
+                    responseTime={data.timeseries.responseTime}
+                  />
+                </CardContent>
+              </Card>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
-      {/* 최적화 절감 통계 */}
-      <DomainOptimizationStats host={host} />
-
-      {/* 하단: 요청 로그 테이블 */}
-      <Card variant="glass">
+      {/* 최적화 섹션 */}
+      <Card data-testid="stats-optimization-section">
         <CardHeader>
-          <CardTitle className="text-sm">요청 로그</CardTitle>
+          <CardTitle className="text-base font-semibold">최적화</CardTitle>
+          <p className="text-sm text-muted-foreground">도메인 생성 이후 전체 누적</p>
         </CardHeader>
         <CardContent>
-          <DomainLogTable host={host} />
+          <DomainOptimizationStats host={host} />
         </CardContent>
       </Card>
     </div>
@@ -153,15 +155,9 @@ function HitMissBarChart({
                 style={{ height: `${heightPct}%`, minHeight: total > 0 ? 2 : 0 }}
               >
                 {/* MISS (위) */}
-                <div
-                  className="w-full bg-destructive/70"
-                  style={{ height: `${missPct}%` }}
-                />
+                <div className="w-full bg-destructive/70" style={{ height: `${missPct}%` }} />
                 {/* HIT (아래) */}
-                <div
-                  className="w-full bg-green-500/70"
-                  style={{ height: `${hitPct}%` }}
-                />
+                <div className="w-full bg-green-500/70" style={{ height: `${hitPct}%` }} />
               </div>
             </div>
           );
@@ -200,23 +196,13 @@ function BandwidthResponseChart({
       {/* 대역폭 에어리어 */}
       <div>
         <p className="text-xs text-muted-foreground mb-1">대역폭</p>
-        <MiniAreaChart
-          values={bandwidth}
-          maxValue={maxBw}
-          color="var(--color-primary)"
-          formatValue={formatBytes}
-        />
+        <MiniAreaChart values={bandwidth} maxValue={maxBw} color="var(--color-primary)" formatValue={formatBytes} />
       </div>
 
       {/* 응답 시간 에어리어 */}
       <div>
         <p className="text-xs text-muted-foreground mb-1">응답 시간</p>
-        <MiniAreaChart
-          values={responseTime}
-          maxValue={maxRt}
-          color="rgb(168 85 247)"
-          formatValue={(v) => `${v}ms`}
-        />
+        <MiniAreaChart values={responseTime} maxValue={maxRt} color="rgb(168 85 247)" formatValue={(v) => `${v}ms`} />
       </div>
 
       {/* X축 레이블 */}
