@@ -24,7 +24,8 @@ impl OptimizerService for OptimizerGrpc {
             content_type:   result.content_type,
             original_size:  result.original_size,
             optimized_size: result.optimized_size,
-            decision:       None,  // Phase 14 Task 2: 스키마만 추가, 실제 값 전달은 Task 8에서
+            // Phase 14: OptimizeDecision → proto 문자열 매핑. enabled=false는 None 유지(관찰 대상 X)
+            decision:       result.decision.map(|d| d.as_str().to_string()),
         }))
     }
 
@@ -149,5 +150,81 @@ mod tests {
         let (grpc, _dir) = make_grpc();
         let res = grpc.health(Request::new(Empty {})).await.unwrap().into_inner();
         assert!(res.online);
+    }
+
+    #[tokio::test]
+    async fn optimize_jpeg_결과는_decision_문자열_포함() {
+        let (grpc, _dir) = make_grpc();
+        let jpeg = make_test_jpeg();
+        let res = grpc.optimize(Request::new(OptimizeRequest {
+            data: jpeg,
+            content_type: "image/jpeg".to_string(),
+            domain: "example.com".to_string(),
+        })).await.unwrap().into_inner();
+        // enabled=true 기본 프로파일 → decision=Some(문자열)
+        // optimized 또는 passthrough_larger 둘 다 허용 (10x10 JPEG는 size-guard에 자주 걸림)
+        let d = res.decision.as_deref();
+        assert!(
+            matches!(d, Some("optimized") | Some("passthrough_larger")),
+            "decision이 optimized 또는 passthrough_larger여야 함: {:?}", d,
+        );
+    }
+
+    #[tokio::test]
+    async fn optimize_미지원_타입은_decision_passthrough_unsupported() {
+        let (grpc, _dir) = make_grpc();
+        let res = grpc.optimize(Request::new(OptimizeRequest {
+            data: b"irrelevant".to_vec(),
+            content_type: "application/octet-stream".to_string(),
+            domain: "example.com".to_string(),
+        })).await.unwrap().into_inner();
+        assert_eq!(res.decision.as_deref(), Some("passthrough_unsupported"));
+    }
+
+    #[tokio::test]
+    async fn optimize_손상_이미지는_decision_passthrough_error() {
+        let (grpc, _dir) = make_grpc();
+        let res = grpc.optimize(Request::new(OptimizeRequest {
+            data: b"\xFF\xD8 garbage".to_vec(),
+            content_type: "image/jpeg".to_string(),
+            domain: "example.com".to_string(),
+        })).await.unwrap().into_inner();
+        assert_eq!(res.decision.as_deref(), Some("passthrough_error"));
+    }
+
+    #[tokio::test]
+    async fn optimize_enabled_false는_decision_none() {
+        let (grpc, _dir) = make_grpc();
+        grpc.set_profile(Request::new(SetProfileRequest {
+            profile: Some(ProtoProfile {
+                domain: "dis.com".to_string(), quality: 85, max_width: 0, enabled: false,
+            }),
+        })).await.unwrap();
+        let jpeg = make_test_jpeg();
+        let res = grpc.optimize(Request::new(OptimizeRequest {
+            data: jpeg,
+            content_type: "image/jpeg".to_string(),
+            domain: "dis.com".to_string(),
+        })).await.unwrap().into_inner();
+        // disabled 프로파일 → 관찰 대상 X → decision=None
+        assert!(res.decision.is_none());
+    }
+
+    #[tokio::test]
+    async fn optimize_bmp는_decision_optimized_content_type_webp() {
+        let (grpc, _dir) = make_grpc();
+        let bmp = {
+            let img = image::DynamicImage::new_rgb8(32, 32);
+            let mut buf = Vec::new();
+            img.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Bmp).unwrap();
+            buf
+        };
+        let res = grpc.optimize(Request::new(OptimizeRequest {
+            data: bmp,
+            content_type: "image/bmp".to_string(),
+            domain: "example.com".to_string(),
+        })).await.unwrap().into_inner();
+        assert_eq!(res.decision.as_deref(), Some("optimized"));
+        assert_eq!(res.content_type, "image/webp");
     }
 }
