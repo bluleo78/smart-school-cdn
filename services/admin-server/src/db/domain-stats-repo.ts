@@ -87,8 +87,8 @@ export interface DomainSummary {
   today_bypass_rate: number;
 }
 
-/** period 허용 값 */
-export type StatsPeriod = '24h' | '7d' | '30d';
+/** period 허용 값 — 1h 추가, custom은 range 파라미터와 함께 사용 */
+export type StatsPeriod = '1h' | '24h' | '7d' | '30d' | 'custom';
 
 /**
  * 도메인 통계 리포지토리
@@ -138,16 +138,40 @@ export class DomainStatsRepository {
 
   /**
    * 기간별 도메인 통계 조회
+   * - '1h' : 60초 버킷으로 집계 (신규)
    * - '24h': 3600초(1시간) 버킷으로 집계
    * - '7d' / '30d': 86400초(1일) 버킷으로 집계
+   * - 'custom': range.from~range.to 구간을 스팬에 따라 버킷 자동 선택
    * summary는 기간 전체 합계/평균, timeseries는 버킷별 집계 배열을 반환한다.
    */
-  getStats(host: string, period: StatsPeriod): DomainStatsResult {
+  getStats(host: string, period: StatsPeriod, range?: { from: number; to: number }): DomainStatsResult {
     const now = Math.floor(Date.now() / 1000);
 
-    // 기간에 따른 시작 시각과 버킷 크기 결정
-    const bucketSize = period === '24h' ? 3600 : 86400;
-    const since = period === '24h' ? now - 86400 : period === '7d' ? now - 604800 : now - 2592000;
+    // 기간/버킷/시작·종료 시각 결정
+    let since: number;
+    let until: number;
+    let bucketSize: number;
+    if (period === 'custom') {
+      // custom은 반드시 유효한 range를 전달해야 한다
+      if (!range || range.to <= range.from) {
+        throw new Error('custom period requires valid from/to');
+      }
+      since = range.from;
+      until = range.to;
+      const span = until - since;
+      // 스팬에 따라 버킷 크기 자동 선택: 1시간 이내→60초, 하루 이내→3600초, 그 이상→86400초
+      bucketSize = span <= 3600 ? 60 : span <= 86400 ? 3600 : 86400;
+    } else if (period === '1h') {
+      // 1시간 기간: 60초 단위 버킷으로 세밀하게 집계
+      since = now - 3600;
+      until = now;
+      bucketSize = 60;
+    } else {
+      // 24h / 7d / 30d 기존 로직
+      until = now;
+      bucketSize = period === '24h' ? 3600 : 86400;
+      since = period === '24h' ? now - 86400 : period === '7d' ? now - 604800 : now - 2592000;
+    }
 
     // 버킷별 집계: timestamp를 버킷 크기로 내림하여 그룹화
     type TimeseriesRow = {
@@ -181,11 +205,11 @@ export class DomainStatsRepository {
            SUM(bypass_size)      AS bypass_size,
            SUM(bypass_other)     AS bypass_other
          FROM domain_stats
-         WHERE host = ? AND timestamp >= ?
+         WHERE host = ? AND timestamp >= ? AND timestamp < ?
          GROUP BY bucket
          ORDER BY bucket ASC`,
       )
-      .all(bucketSize, bucketSize, host, since) as TimeseriesRow[];
+      .all(bucketSize, bucketSize, host, since, until) as TimeseriesRow[];
 
     // 전체 요약 계산
     const totalRequests = rows.reduce((s, r) => s + r.requests, 0);
@@ -198,8 +222,8 @@ export class DomainStatsRepository {
         : 0;
     const hitRate = totalRequests > 0 ? totalCacheHits / totalRequests : 0;
 
-    // 이전 동일 기간 쿼리 (예: 24h면 48h~24h 전 구간)
-    const duration = now - since;
+    // 이전 동일 기간 쿼리 — duration을 until-since로 일반화하여 custom/1h도 올바르게 동작
+    const duration = until - since;
     const prevSince = since - duration;
 
     const prevRows = this.db
