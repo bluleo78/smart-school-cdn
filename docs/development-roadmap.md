@@ -279,10 +279,10 @@
 
 ### 7-1. Optimizer Service
 - [x] `proto/optimizer.proto` (Optimize, GetProfiles, SetProfile)
-- [x] PNG/JPEG → WebP 변환 + 리사이즈 + 품질 조정
+- [x] PNG/JPEG → WebP 변환 + 리사이즈 + 품질 조정 *(Phase 14에서 포맷 보존 + libwebp + size-guard로 개편)*
 - [x] Proxy가 캐시 MISS 시 Optimizer 경유 후 저장
 - [x] 이미 최적화된 포맷(WebP, AVIF) 바이패스
-- [x] 텍스트 압축 (gzip/brotli)
+- [ ] ~~텍스트 압축 (gzip/brotli)~~ → **Phase 15로 이관** (스펙·구현 모두 당시엔 미착수)
 
 ### 7-2. Admin API — 최적화 관리
 - [x] `GET /api/optimizer/profiles` — 프로파일 목록
@@ -532,6 +532,33 @@
 | 12 | 캐시 통계 재설계 | L1/L2/bypass 4분류 + 스택 차트 | 도메인별 비율 + X-Cache-Reason |
 | 13 | 미디어 Range + 관찰 인프라 | 206/416 + no-store override + optimization_events | decision 4종 수집 가능 |
 | 14 | Optimizer 포맷 보존 | JPEG/PNG/WebP 포맷 유지 + size-guard + libwebp | `image_optimize` 이벤트 발행 |
+
+---
+
+## Phase 15 (예정): 텍스트 Brotli/gzip 프리컴프레스
+
+> 목표: HTML/CSS/JS/JSON/SVG 등 텍스트 응답에 Brotli 또는 gzip 프리컴프레스 적용. `Accept-Encoding` 협상 지원. Phase 7에서 체크됐으나 실제로는 미구현된 항목을 정식 페이즈로 분리.
+
+### 15-1. 범위
+- 대상 content_type: `text/html`, `text/css`, `application/javascript`, `application/json`, `image/svg+xml`, `text/plain`, `application/xml`
+- 압축 알고리즘: **Brotli 우선 + gzip 폴백**
+- Accept-Encoding 협상 — 클라이언트 미지원 시 원본 전달
+- 캐시 저장 단위: 압축본 + 원본 둘 다 저장 vs 원본만 저장 후 응답 시 압축 (설계 결정 필요)
+
+### 15-2. 구현 포인트 (초안)
+- optimizer-service 역할 vs proxy 역할 분리 재검토 — 현재 이미지만 담당하는 optimizer에 텍스트까지 맡길지, proxy에서 직접 압축할지
+- `should_optimize`/`should_compress` 분리 — 이미지 판정과 텍스트 판정이 서로 다른 content_type 화이트리스트
+- size-guard — 작은 텍스트(< 수백 바이트)는 압축 이득보다 오버헤드가 크므로 최소 크기 기준
+- Phase 13 관찰 인프라에 `text_compress` 이벤트 발행 (`optimization_events.event_type` 화이트리스트에 이미 포함)
+
+### 15-3. 비목표
+- 이미 `Content-Encoding`이 붙은 응답 재압축 (이중 압축 방지)
+- 스트리밍 응답 압축 (현재 응답 버퍼링 가정)
+
+### 오픈 이슈
+- Brotli 레벨 선택 (pre-compress 기준 level 11 vs on-demand level 4~6)
+- 브라우저 Brotli 지원률 (iPad Safari 11+ — 실질 100%)
+- proxy 메모리 사용량 (압축 시 추가 버퍼)
 
 ---
 
