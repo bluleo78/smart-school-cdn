@@ -169,6 +169,8 @@ pub struct ProxyState {
     pub counters: DomainCounters,
     /// 최적화 이벤트 배치 push 송신자 — None이면 이벤트 수집 비활성화
     pub events: Option<events::EventsSender>,
+    /// Phase 15: 텍스트 압축 설정
+    pub text_compress: TextCompressConfig,
 }
 
 /// 관리 API 핸들러 상태
@@ -235,6 +237,30 @@ fn compute_cache_key(method: &str, host: &str, path: &str, query: &str) -> Strin
     let input = format!("{method}:{host}{path}?{query}");
     let hash = Sha256::digest(input.as_bytes());
     hex::encode(hash)
+}
+
+/// Phase 15: 텍스트 압축 설정 — 환경변수로만 조정.
+#[derive(Debug, Clone, Copy)]
+pub struct TextCompressConfig {
+    pub enabled:    bool,
+    pub min_bytes:  usize,
+    pub br_level:   u32,
+    pub gzip_level: u32,
+}
+
+impl TextCompressConfig {
+    pub fn from_env() -> Self {
+        let enabled = std::env::var("TEXT_COMPRESS_ENABLED")
+            .map(|v| v != "0" && v.to_ascii_lowercase() != "false")
+            .unwrap_or(true);
+        let min_bytes = std::env::var("TEXT_COMPRESS_MIN_BYTES")
+            .ok().and_then(|v| v.parse().ok()).unwrap_or(1024);
+        let br_level = std::env::var("TEXT_COMPRESS_BR_LEVEL")
+            .ok().and_then(|v| v.parse().ok()).unwrap_or(11);
+        let gzip_level = std::env::var("TEXT_COMPRESS_GZIP_LEVEL")
+            .ok().and_then(|v| v.parse().ok()).unwrap_or(6);
+        Self { enabled, min_bytes, br_level, gzip_level }
+    }
 }
 
 /// 이미지 콘텐츠 최적화 대상 여부 — optimizer-service가 디코드 가능한 포맷 전체.
@@ -2168,6 +2194,7 @@ mod tests {
             memory_cache: moka::future::Cache::builder().max_capacity(100).build(),
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
             events: None,
+            text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6 },
         };
 
         let router = build_proxy_router(ps);
@@ -2224,6 +2251,7 @@ mod tests {
             memory_cache: moka::future::Cache::builder().max_capacity(100).build(),
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
             events: None,
+            text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6 },
         };
 
         let router = build_proxy_router(ps);
@@ -2279,6 +2307,7 @@ mod tests {
             memory_cache: moka::future::Cache::builder().max_capacity(100).build(),
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
             events: None,
+            text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6 },
         };
 
         let router = build_proxy_router(ps);
@@ -2337,6 +2366,7 @@ mod tests {
             memory_cache: moka::future::Cache::builder().max_capacity(100).build(),
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
             events: None,
+            text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6 },
         };
 
         let router = build_proxy_router(ps);
@@ -2421,6 +2451,7 @@ mod tests {
             memory_cache: moka::future::Cache::builder().max_capacity(100).build(),
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
             events: None,
+            text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6 },
         };
 
         let router = build_proxy_router(ps);
@@ -2522,6 +2553,37 @@ mod tests {
         assert!(should_optimize(Some("image/jpeg; charset=utf-8")));
     }
 
+    // ─── Phase 15 Unit Tests ────────────────────────────────────────────
+
+    #[test]
+    fn text_compress_event_필드_매핑이_정확하다() {
+        let rec = crate::events::EventRecord {
+            event_type:   "text_compress",
+            host:         "a.test".into(),
+            url:          "https://a.test/app.js".into(),
+            decision:     "compressed_br".into(),
+            orig_size:    Some(10_000),
+            out_size:     Some(3_200),
+            range_header: None,
+            content_type: Some("application/javascript".into()),
+            elapsed_ms:   12,
+        };
+        let json = serde_json::to_value(&rec).unwrap();
+        assert_eq!(json["event_type"], "text_compress");
+        assert_eq!(json["decision"], "compressed_br");
+        assert_eq!(json["orig_size"], 10_000);
+        assert_eq!(json["out_size"], 3_200);
+        assert!(json.get("range_header").is_none());
+    }
+
+    #[test]
+    fn text_compress_config_기본값() {
+        // 환경변수 미설정 시 합리적 범위 확인
+        let cfg = TextCompressConfig::from_env();
+        assert!(cfg.br_level <= 11, "br_level 상한 11");
+        assert!(cfg.gzip_level <= 9, "gzip_level 상한 9");
+    }
+
     // ─── MISS 분기 테스트용 헬퍼 ────────────────────────────────────────
 
     /// 테스트용 간단한 HTTP 원본 서버 기동 — 모든 경로에 fake JPEG 응답
@@ -2583,6 +2645,7 @@ mod tests {
             memory_cache: moka::future::Cache::builder().max_capacity(100).build(),
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
             events: None,
+            text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6 },
         };
         let router = build_proxy_router(ps.clone());
         (ps, router)
@@ -2837,6 +2900,7 @@ mod tests {
             memory_cache,
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
             events: None,
+            text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6 },
         };
 
         let shared = ps.shared.clone();
@@ -2919,6 +2983,7 @@ mod tests {
             memory_cache,
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
             events: None,
+            text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6 },
         };
 
         let shared = ps.shared.clone();
@@ -3284,6 +3349,7 @@ mod tests {
             memory_cache,
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
             events: None,
+            text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6 },
         };
 
         let router = build_proxy_router(ps.clone());

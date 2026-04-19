@@ -7,7 +7,7 @@ use tracing_subscriber::EnvFilter;
 use rustls::{ServerConfig, server::{ClientHello, ResolvesServerCert}, sign::CertifiedKey};
 use axum_server::tls_rustls::RustlsConfig;
 
-use proxy::{DomainMap, MemoryCacheEntry, build_admin_router, build_proxy_router, ProxyState};
+use proxy::{DomainMap, MemoryCacheEntry, TextCompressConfig, build_admin_router, build_proxy_router, ProxyState};
 use proxy::clients::optimizer_client::OptimizerClient;
 use proxy::clients::storage_client::StorageClient;
 use proxy::clients::tls_client::{TlsClient, CertCache};
@@ -128,6 +128,7 @@ async fn main() {
         memory_cache: memory_cache.clone(),
         counters: counters.clone(),
         events: events_sender,
+        text_compress: TextCompressConfig::from_env(),
     };
 
     let proxy_router = build_proxy_router(ps);
