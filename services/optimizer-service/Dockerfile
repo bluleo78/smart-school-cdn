@@ -2,7 +2,7 @@
 # === Stage 1: Build ===
 FROM rust:1-alpine AS build
 # musl-dev: alpine C 링킹, protobuf-dev: protoc, libwebp-dev: WebP 인코더
-RUN apk add --no-cache musl-dev protobuf-dev libwebp-dev
+RUN apk add --no-cache musl-dev protobuf-dev libwebp-dev pkgconfig
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY crates/ ./crates/

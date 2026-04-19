@@ -15,7 +15,9 @@ prost.workspace        = true
 tracing.workspace      = true
 tracing-subscriber.workspace = true
 axum.workspace         = true
-image                  = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+image                  = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "bmp", "tiff"] }
+webp                   = "0.3"
+oxipng                 = { version = "9", default-features = false, features = ["parallel"] }
 rusqlite               = { version = "0.31", features = ["bundled"] }
 bytes                  = "1"
 
