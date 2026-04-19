@@ -83,14 +83,23 @@ export async function fetchDomainHostSummary(host: string): Promise<DomainHostSu
   return res.data;
 }
 
-/** 도메인 기간별 통계 조회 */
+/** 기간 타입 — 1h/24h/7d/30d 고정 또는 custom(from/to 직접 지정) */
+export type StatsPeriod = '1h' | '24h' | '7d' | '30d' | 'custom';
+
+/** 도메인 기간별 통계 조회 — 1h/custom(from·to) 지원 확장 */
 export async function fetchDomainStats(
   host: string,
-  period: '24h' | '7d' | '30d',
+  period: StatsPeriod,
+  range?: { from: number; to: number },
 ): Promise<DomainStats> {
+  const params: Record<string, string | number> = { period };
+  if (period === 'custom' && range) {
+    params.from = range.from;
+    params.to = range.to;
+  }
   const res = await axios.get<DomainStats>(
     `/api/domains/${encodeURIComponent(host)}/stats`,
-    { params: { period } },
+    { params },
   );
   return res.data;
 }

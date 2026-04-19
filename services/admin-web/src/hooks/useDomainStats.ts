@@ -1,13 +1,17 @@
-/// 도메인 기간별 통계 조회 훅 — 60초 간격 갱신
+/// 도메인 기간별 통계 조회 훅 — 1h/custom(from·to) 지원, 자동 갱신 없음
 import { useQuery } from '@tanstack/react-query';
-import { fetchDomainStats } from '../api/domains';
+import { fetchDomainStats, type StatsPeriod } from '../api/domains';
 import type { DomainStats } from '../api/domain-types';
 
-export function useDomainStats(host: string, period: '24h' | '7d' | '30d') {
+export function useDomainStats(
+  host: string,
+  period: StatsPeriod,
+  range?: { from: number; to: number },
+) {
   return useQuery<DomainStats>({
-    queryKey: ['domain', host, 'stats', period],
-    queryFn: () => fetchDomainStats(host, period),
-    enabled: !!host,
-    refetchInterval: 60_000,
+    queryKey: ['domain', host, 'stats', period, range ?? null],
+    queryFn: () => fetchDomainStats(host, period, range),
+    enabled: !!host && (period !== 'custom' || !!range),
+    refetchInterval: false,
   });
 }
