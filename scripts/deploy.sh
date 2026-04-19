@@ -57,43 +57,43 @@ build_and_push() {
   case $svc in
     proxy)
       log "Building + pushing proxy..."
-      docker buildx build --platform "$PLATFORM" --no-cache \
+      docker buildx build --platform "$PLATFORM" \
         -t "$REGISTRY/proxy:latest" \
         -f services/proxy/Dockerfile --push .
       ;;
     admin-server)
       log "Building + pushing admin-server..."
-      docker buildx build --platform "$PLATFORM" --no-cache \
+      docker buildx build --platform "$PLATFORM" \
         -t "$REGISTRY/admin-server:latest" \
         -f services/admin-server/Dockerfile --push .
       ;;
     storage-service)
       log "Building + pushing storage-service..."
-      docker buildx build --platform "$PLATFORM" --no-cache \
+      docker buildx build --platform "$PLATFORM" \
         -t "$REGISTRY/storage-service:latest" \
         -f services/storage-service/Dockerfile --push .
       ;;
     tls-service)
       log "Building + pushing tls-service..."
-      docker buildx build --platform "$PLATFORM" --no-cache \
+      docker buildx build --platform "$PLATFORM" \
         -t "$REGISTRY/tls-service:latest" \
         -f services/tls-service/Dockerfile --push .
       ;;
     dns-service)
       log "Building + pushing dns-service..."
-      docker buildx build --platform "$PLATFORM" --no-cache \
+      docker buildx build --platform "$PLATFORM" \
         -t "$REGISTRY/dns-service:latest" \
         -f services/dns-service/Dockerfile --push .
       ;;
     optimizer-service)
       log "Building + pushing optimizer-service..."
-      docker buildx build --platform "$PLATFORM" --no-cache \
+      docker buildx build --platform "$PLATFORM" \
         -t "$REGISTRY/optimizer-service:latest" \
         -f services/optimizer-service/Dockerfile --push .
       ;;
     admin-web)
       log "Building + pushing admin-web..."
-      docker buildx build --platform "$PLATFORM" --no-cache \
+      docker buildx build --platform "$PLATFORM" \
         -t "$REGISTRY/admin-web:latest" \
         -f services/admin-web/Dockerfile --push .
       ;;
