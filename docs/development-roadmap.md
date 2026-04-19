@@ -421,6 +421,97 @@
 
 ---
 
+## Phase 12: 캐시 통계 레이어 재설계 ✅
+
+> 목표: 단일 HIT/MISS 지표를 L1/L2/bypass 4분류로 분리하고 스택 차트·도메인별 표로 재구성. 운영에서 "어디서 얼마나 바이패스되는지" 가시화.
+
+### 12-1. Proxy outcome 분류
+- [x] `CacheOutcome` enum + 순수 함수 `classify_outcome` (L1 hit, L2 hit, Bypass_*, Miss)
+- [x] 요청 경로에 outcome 계산 주입 + `X-Cache-Reason` 응답 헤더 추가
+- [x] `DomainCounters` 확장 — L1/L2/bypass 4분류 AtomicU64 + `record_domain_outcome`
+
+### 12-2. 컨텐츠 화이트리스트·크기 상한 조정
+- [x] 컨텐츠 타입 화이트리스트 확대 (동영상 등)
+- [x] 캐시 엔트리 크기 상한 상향 (128MB), 중복 파서 제거
+
+### 12-3. Admin 통계 파이프라인 재작성
+- [x] `domain_stats` 테이블에 L1/L2/bypass 4분류 컬럼 마이그레이션
+- [x] `/api/cache/stats` 재작성 — domain_stats 집계 + 디스크 분리
+- [x] `/api/cache/series` 신규 — 스택 차트용 버킷 시계열
+- [x] 도메인 stats/summary에 L1/L2/bypass 비율 포함
+
+### 12-4. 대시보드 시각화
+- [x] L1/L2/bypass 스택 차트
+- [x] 도메인별 요청·히트율·4분류 비율 표
+
+### 검증
+> proxy test outcome 분류·X-Cache-Reason 헤더 통합 테스트 녹색
+> 머지 커밋 `65b1df6` (feat/cache-stats-redesign)
+
+---
+
+## Phase 13: 미디어 Range 캐싱 + 관찰 인프라 ✅
+
+> 목표: 비디오/오디오 Range 요청 대응 + Phase 7 이후 비어있던 최적화 관찰 파이프라인 구축. Cache-Control no-store override로 정적 확장자 캐시 복구.
+
+### 13-1. HTTP Range 슬라이싱
+- [x] `services/proxy/src/range.rs` — `ByteRange` enum, `parse_byte_range`/`resolve_range`/`format_content_range*`
+- [x] L1/L2/MISS 전 경로에서 `Bytes::slice` 제로카피 범위 응답 (206 Partial Content, 416 Range Not Satisfiable)
+- [x] 단일 range만 지원, multi-range는 파서 단계에서 reject → 호출자 200 fallback
+
+### 13-2. 정적 확장자 no-store override
+- [x] `is_static_extension` 화이트리스트 (mp4/mp3/png/js/css 등)
+- [x] origin의 `Cache-Control: no-store`에도 불구하고 정적 확장자는 캐시 저장 허용
+
+### 13-3. 관찰 인프라 (optimization_events)
+- [x] admin-server — `optimization_events` SQLite 테이블 + 마이그레이션
+- [x] admin-server — `POST /internal/events/batch` (proxy 전용) + `GET /api/optimization/events`/`GET /api/optimization/stats`
+- [x] proxy — `services/proxy/src/events.rs` 배치 push 모듈 (mpsc + 5s flush interval)
+- [x] proxy — 미디어 MISS/HIT 경로에서 `media_cache` 이벤트 발행 (`l1_hit_206`, `miss_416` 등 decision 스킴)
+
+### 검증
+> proxy 테스트 62 → 100개, admin-server 테스트 148 → 175개
+> 머지 커밋 `de94190` (feat/phase-13-media-range)
+
+---
+
+## Phase 14: 이미지 Optimizer 포맷 보존 + 리사이즈 전면화 ✅
+
+> 목표: `image` 크레이트 WebP lossless-only 회귀 해소. 포맷을 유지(JPEG→JPEG, PNG→PNG, WebP→WebP)하며 `profile.quality`를 실제 적용하고 size-guard로 역효과를 방지. `image_optimize` 이벤트로 관찰 파이프라인 연결.
+
+### 14-1. 크레이트 + Dockerfile
+- [x] `image` 0.25 features 확장 (`gif`, `bmp`, `tiff` 추가)
+- [x] `webp = "0.3"` (libwebp 래퍼) 신규
+- [x] `oxipng = "9"` (pure Rust lossless PNG 재압축) 신규
+- [x] optimizer-service Dockerfile — alpine `libwebp-dev`/`libwebp` + `pkgconfig`
+
+### 14-2. 순수 인코더 모듈 (`services/optimizer-service/src/encoder.rs`)
+- [x] `encode_jpeg(img, quality)` — image::JpegEncoder::new_with_quality
+- [x] `encode_png(img)` — image PngEncoder 1차 → oxipng(level 4, strip=Safe) 재압축
+- [x] `encode_webp_lossy(img, quality)` — libwebp
+- [x] `encode_webp_lossless(img)` — libwebp bit-exact 라운드트립
+- [x] 단위 테스트 12개 (시그니처/차원/quality 비교/bit-exact)
+
+### 14-3. optimize_preserving_format + size-guard
+- [x] `OptimizeDecision` enum — Optimized / PassthroughLarger / PassthroughError / PassthroughUnsupported
+- [x] 6개 content_type 디스패치: JPEG→JPEG, PNG→PNG, WebP→WebP(lossy), GIF(정지)/BMP/TIFF→WebP lossless
+- [x] animated GIF 선제 감지 (2번째 프레임 존재 여부)
+- [x] size-guard: `encoded.len() >= data.len()` 이면 원본 반환
+- [x] enabled=false 프로파일 → `decision=None` (관찰 대상 X)
+
+### 14-4. gRPC + proxy 연결
+- [x] proto `OptimizeResponse.decision` optional 필드 추가 (하위 호환)
+- [x] grpc.rs — `OptimizeDecision::as_str()` → 문자열 전파
+- [x] proxy `should_optimize` 6종으로 확장
+- [x] proxy MISS 경로에서 `image_optimize` 이벤트 발행 (decision/orig/out/elapsed_ms)
+
+### 검증
+> optimizer-service 테스트 15 → 36개 (encoder 12 + optimizer 14 + grpc 10)
+> proxy 100개 전부 녹색
+> 운영 배포 완료 (optimizer-service 먼저 → proxy 나중, `webdt.edunet.net` 반영)
+
+---
+
 ## 마일스톤 요약
 
 | Phase | 이름 | 누적 기능 | 대시보드 검증 |
@@ -438,6 +529,9 @@
 | 9 | E2E 테스트 | 자동화 검증 | Playwright 전 시나리오 통과 |
 | 10 | 도메인 재설계 + 메뉴 통합 | 풍부한 도메인 관리 + 3개 메뉴 | 목록+상세(3탭) + 캐시/최적화 흡수 |
 | 11 | 기능 완성 + 운영 품질 | 통계 파이프라인 + TLS 실시간 | E2E 68개 + 커버리지 83% |
+| 12 | 캐시 통계 재설계 | L1/L2/bypass 4분류 + 스택 차트 | 도메인별 비율 + X-Cache-Reason |
+| 13 | 미디어 Range + 관찰 인프라 | 206/416 + no-store override + optimization_events | decision 4종 수집 가능 |
+| 14 | Optimizer 포맷 보존 | JPEG/PNG/WebP 포맷 유지 + size-guard + libwebp | `image_optimize` 이벤트 발행 |
 
 ---
 
