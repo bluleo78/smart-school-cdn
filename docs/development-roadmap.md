@@ -561,14 +561,78 @@
 - 캐시 저장: **원본 + brotli 변형 둘 다 저장** — pre-compress 비용을 MISS 1회에 분할상환
 - 압축 레벨: **Brotli level 11** (pre-compress), 드문 미지원 클라이언트엔 저장된 br을 decompress 후 **gzip level 6** on-demand 폴백
 - 판별 규칙: 엄격 화이트리스트 + 원본 ≥ 1024 bytes + 응답에 `Content-Encoding` 존재 시 스킵 + 압축 후 > 원본×0.9면 스킵(size-guard)
-- 파라미터 관리: **환경변수만** (`TEXT_COMPRESS_ENABLED`, `TEXT_COMPRESS_MIN_BYTES`, `TEXT_COMPRESS_BR_LEVEL`, `TEXT_COMPRESS_GZIP_LEVEL`) — Admin UI/API는 Phase 17로 연기
+- 파라미터 관리: **환경변수만** (`TEXT_COMPRESS_ENABLED`, `TEXT_COMPRESS_MIN_BYTES`, `TEXT_COMPRESS_BR_LEVEL`, `TEXT_COMPRESS_GZIP_LEVEL`) — Admin UI/API는 Phase 18로 연기
 
 ### 오픈 이슈
 - proxy 메모리 사용량 (압축 시 추가 버퍼) — Phase 15 배포 후 관찰
 
 ---
 
-## Phase 16 (후보): 미디어 Chunk/Slice 캐싱
+## Phase 16 (차기 착수): 프록시 운영 품질 개선 + 도메인 상세 UX 재배치
+
+> 목표: Phase 15 배포 직후 실측으로 드러난 운영 이슈 두 건과 도메인 상세 페이지의 정보 구조 개선을 함께 묶어 처리한다. 관찰·튜닝성 후보 페이즈(17~19)와 달리 **즉시 착수 예정**.
+
+### 16-1. MISS 경로 TTFB 개선 (백그라운드 저장)
+
+**배경**
+- 현재 MISS 경로는 `origin fetch → optimize/brotli → storage.put → L1 insert → 응답` 순으로 블로킹. Phase 15 Brotli level 11은 수십~수백 ms, 큰 JS는 초 단위까지 지연.
+- 첫 요청자 TTFB = `origin_time + optimize/compress_time + storage_put_time` 누적.
+
+**채택 방향: Option A' — 백그라운드 spawn + 진행 중 키 레지스트리**
+- coalescer 클로저는 `origin fetch` 직후 **원본 body 즉시 반환**
+- `tokio::spawn`으로 background task: optimize/compress + storage.put + L1 insert
+- 진행 중 키 레지스트리(`Arc<Mutex<HashSet<String>>>`)로 동일 URL 2차 MISS가 **중복 origin fetch/저장을 수행하지 않도록 gate**
+- 2차 요청은 저장 완료 대기 옵션 또는 단순 원본 pass-through 중 구현 시점에 결정
+
+**검증**
+- 텍스트 응답의 MISS TTFB 실측(p50/p95) 50%+ 단축 목표
+- 동일 URL 버스트 요청(coalescer 밖 시점)에서 origin 중복 호출 0건 확인
+- 기존 통합 테스트(L1/L2 HIT, bypass, optimize)에 회귀 없음
+
+### 16-2. Proxy 재기동 시 도메인 sync 자동화
+
+**배경**
+- 현재 `pnpm ship:proxy`로 proxy만 재배포하면 admin-server는 재기동되지 않아 도메인맵 sync를 다시 보내지 않음
+- 결과: proxy의 `domain_map` 공란 → TLS SNI handshake "access denied" → 서비스 중단
+- 이번 Phase 15 핫픽스에서 admin-server 수동 재기동으로 우회했으나 정식 해결 필요
+
+**채택 방향**
+- **A. proxy 기동 시 pull** (권장) — proxy `main.rs` 기동 루틴에서 admin-server에 `GET /api/domains/internal/snapshot` 호출해 도메인맵 초기 수신
+  - admin-server에 신규 read-only 엔드포인트 추가
+  - TLS/DNS는 각각 기존 gRPC `SyncDomains` 호출로 초기화 — 같은 snapshot 재사용
+  - 장점: push 실패 시 proxy가 스스로 복구 가능
+- **B. admin-server가 proxy 헬스 변화 감지 후 push** — healthMonitor의 online 전환 시점에 `syncToProxy` 자동 재호출
+  - 장점: 기존 sync 경로 유지, 신규 엔드포인트 없음
+  - 단점: 헬스 체크 주기(5s) 내 sync 누락 창 존재
+
+**검증**
+- proxy만 재기동 시 1차 HTTPS 요청이 TLS access denied 없이 성공
+- admin-server를 건드리지 않고 ship:proxy 실행 후 도메인맵 count 로그 확인
+
+### 16-3. 도메인 상세 페이지 탭 · 내용 배치 개선
+
+**배경**
+- Phase 10 도메인 관리 재설계 후 도메인 상세 페이지는 3탭 구조. 운영 중 "어디 탭에 뭐가 있는지 헷갈림" · "같은 지표가 여러 탭에 분산" 등 불만 축적.
+- Phase 15 배포로 신규 관찰 지표(`text_compress` 이벤트, 로그탭 size 필드)도 추가되어 재배치 재검토 필요.
+
+**채택 방향**
+- 현행 탭 구성(캐시 / 최적화 / 로그) 사용자 피드백 수집
+- 재배치안 2~3개 브레인스토밍 → 디자인 승인 → 구현
+- 신규 카드/섹션 검토: Phase 15 텍스트 압축 절감 카드, 응답 바이트 분포 히스토그램, 에러율 추이
+- 기존 카드 재배치: 이미지 최적화 통계 · 도메인 stats · 로그 탭 컬럼 레이아웃
+
+**검증**
+- Playwright E2E 전 시나리오 통과
+- 키보드/스크린리더 접근성 회귀 없음
+- 대시보드 Bundle 크기 증가 5% 이하
+
+### 16-4. 범위 / 비범위
+- 범위: 16-1, 16-2, 16-3만 — 이번 페이즈 한 단위 작업으로 묶음
+- 비범위: 이미지 chunk 캐싱(Phase 17), 텍스트 압축 프로파일 API(Phase 18), access_logs 영속화(Phase 19)
+
+---
+
+## Phase 17 (후보): 미디어 Chunk/Slice 캐싱
 
 > 목표: 대용량 미디어 및 HLS/DASH 세그먼트까지 수용하기 위해 캐시 단위를 full body에서 고정 크기 chunk로 전환한다.
 
@@ -576,7 +640,7 @@
 
 다만 아래 조건 중 하나라도 충족되면 chunk(slice) 기반으로 전환이 필요하다.
 
-### 16-1. 전환 조건
+### 17-1. 전환 조건
 
 - 단일 미디어 크기가 수백 MB 이상으로 성장 (VOD 풀HD 장편 등)
 - HLS/DASH 세그먼트 스트리밍 도입
@@ -586,14 +650,14 @@
 
 판단 근거는 관찰 인프라(`optimization_events` 테이블 + `/api/optimization/stats` API)로 수집한다.
 
-### 16-2. chunk 정책 + 스토리지 스키마
+### 17-2. chunk 정책 + 스토리지 스키마
 
 - 고정 크기 chunk (기본 1 MB, nginx `proxy_cache_slice` 방식 참조)
 - 캐시 키 확장: `(url, chunk_idx)` 복합 키 / chunk 메타 테이블(보유 범위·TTL 추적)
 - storage-service gRPC 인터페이스에 `get_chunk`, `put_chunk`, `list_chunks` 추가
 - 기존 full-body 엔트리와의 마이그레이션 / 공존 정책
 
-### 16-3. 요청 경로 변경
+### 17-3. 요청 경로 변경
 
 - proxy: 요청 Range → 필요한 chunk 목록 계산
 - 누락 chunk만 origin에서 Range fetch (병렬 + 동시 요청 중복 방지)
@@ -601,13 +665,13 @@
 - 단일 응답으로 206 스트리밍 (전체를 메모리에 올리지 않도록 스트림 기반)
 - Range 파서(`services/proxy/src/range.rs`)를 재사용하되 chunk 경계 계산기 추가
 
-### 16-4. 관찰 인프라 확장
+### 17-4. 관찰 인프라 확장
 
 - `optimization_events.decision` 확장: `chunk_hit` · `chunk_partial_hit` · `chunk_miss` · `chunk_fetch_ok` · `chunk_fetch_fail`
 - admin API: `/api/optimization/chunks/:url` — chunk 점유 분포 조회
 - admin-web: 특정 URL의 chunk 보유 맵 시각화
 
-### 16-5. 검증
+### 17-5. 검증
 
 - 순차 재생 시나리오에서 full-body 대비 HIT 비율 유지 (≥ 95%)
 - 스크럽/점프 시나리오에서 불필요한 origin 왕복 감소 측정
@@ -616,31 +680,31 @@
 
 ---
 
-## Phase 17 (후보): 텍스트 압축 프로파일 관리 API / UI
+## Phase 18 (후보): 텍스트 압축 프로파일 관리 API / UI
 
 > 목표: Phase 15에서 환경변수로 고정한 텍스트 압축 파라미터를 런타임 조정 가능한 프로파일로 승격. Phase 14와 동일하게 "먼저 배포 → 관찰 → 필요 시 UI 추가" 패턴을 따른다.
 
-### 17-1. 승격 조건
+### 18-1. 승격 조건
 - Phase 15 배포 후 `optimization_events`(`event_type = 'text_compress'`) 실측으로 아래 중 하나 이상 확인
   - content-type별 압축 이득 편차가 커서 개별 레벨 차등이 필요
   - 특정 호스트/경로 대상만 on/off 하고 싶은 운영 요구
   - size-guard 임계값(원본×0.9, 최소 1024 bytes)을 현장에서 조정할 필요
 
-### 17-2. 범위
+### 18-2. 범위
 - `GET /api/compressor/profile` / `PUT /api/compressor/profile` — enabled, min_bytes, br_level, gzip_level, size_guard_ratio, content_type 화이트리스트
 - admin-server → proxy HTTP 설정 브로드캐스트 (이미지 프로파일과 동일 경로 재사용)
 - admin-web에 텍스트 압축 설정 섹션 추가 (이미지 프로파일 페이지 옆)
 
-### 17-3. 비목표
-- content-type별 레벨 차등은 17-1의 실측이 근거를 제공했을 때만 도입 (측정 전 도입 금지 — YAGNI)
+### 18-3. 비목표
+- content-type별 레벨 차등은 18-1의 실측이 근거를 제공했을 때만 도입 (측정 전 도입 금지 — YAGNI)
 
 ---
 
-## Phase 18 (후보): 액세스 로그 · DNS 쿼리 영속화 파이프라인
+## Phase 19 (후보): 액세스 로그 · DNS 쿼리 영속화 파이프라인
 
 > 목표: 현재 proxy/dns-service의 in-memory 링버퍼에만 존재하는 **개별** HTTP 요청 로그와 DNS 쿼리 로그를 admin-server SQLite로 영속화. 재시작 시 휘발 + 용량 제한(proxy 100건, dns 512건) 문제 해소. Phase 13 `optimization_events` 패턴을 복제한다.
 
-### 18-1. 현황과 승격 조건
+### 19-1. 현황과 승격 조건
 - 현재: 도메인 상세 로그탭이 proxy `/requests` 링버퍼(100건)에 위임 — **Task 17 Quick Fix** 상태
 - 승격 조건 중 하나 이상 충족 시 정식 착수
   - 운영자가 "어제/지난주" 요청/쿼리 조회 요구를 반복적으로 보고
@@ -648,7 +712,7 @@
   - 감사/컴플라이언스 요건(요청별 추적)이 생김
   - DNS NXDOMAIN 추세 조사에 분 집계 대신 원본 쿼리 히스토리 필요
 
-### 18-2. 범위
+### 19-2. 범위
 - `access_logs` 테이블 + `dns_query_logs` 테이블 추가 (admin-server SQLite)
 - proxy: 기존 `events.rs` 배치 push 패턴 재사용 — `/internal/requests/batch` 엔드포인트로 HTTP 배치 전송
 - dns-service: 동일 패턴으로 배치 push (현재 1분 폴링 집계 외 추가)
@@ -656,11 +720,11 @@
 - 유지 정책: 기본 **7일 보관 + 주기 vacuum** — config 환경변수로 조정 가능
 - admin-web: 기존 로그 탭 그대로 SQL 소스로 전환
 
-### 18-3. 비목표
+### 19-3. 비목표
 - 전문(Full-text) 검색 — 단순 LIKE 충분
 - 분산 로그 수집 (ELK/Loki) — 단일 노드 전제
 - body·헤더 원문 저장 — 용량·프라이버시 리스크로 영구 제외
 
-### 18-4. 관찰·롤백
+### 19-4. 관찰·롤백
 - 영속화 전후 proxy 응답 지연(p99) 비교 — 배치 push가 응답 경로에 영향 주지 않아야 함(기존 events.rs 패턴 유지)
 - 쓰기 부하로 SQLite가 락이 길어지는지 7일 후 재검토
