@@ -552,7 +552,7 @@ async fn proxy_handler(
 
     // ── L2 디스크 캐시 확인 (storage gRPC) ───────────────────────
     if let Some(ref key) = cache_key {
-        if let Some((cached_bytes, content_type)) = ps.storage.lock().await.get(key).await {
+        if let Some((cached_bytes, content_type, _cached_br)) = ps.storage.lock().await.get(key).await {
             // Vec<u8> → Bytes로 한 번 변환 (이후 clone은 Arc refcount 증가라 저렴)
             let body_bytes: Bytes = Bytes::from(cached_bytes);
             let total = body_bytes.len() as u64;
@@ -767,7 +767,7 @@ async fn proxy_handler(
                 };
 
                 ps_c.storage.lock().await
-                    .put(&key_for_put, &full_url, &host_c, store_ct.clone(), store_bytes.clone(), Some(ttl))
+                    .put(&key_for_put, &full_url, &host_c, store_ct.clone(), store_bytes.clone(), Some(ttl), None)
                     .await;
 
                 // L1 메모리 캐시 저장 (16MB 이하만)
@@ -1443,8 +1443,8 @@ mod tests {
     /// Mock Storage gRPC 서비스 — 인메모리 맵으로 get/put/purge/stats/popular 구현
     #[derive(Default)]
     struct MockStorage {
-        /// key → (body, content_type)
-        data: StdMutex<HashMap<String, (Vec<u8>, String)>>,
+        /// key → (body, content_type, body_br)
+        data: StdMutex<HashMap<String, (Vec<u8>, String, Vec<u8>)>>,
     }
 
     #[tonic::async_trait]
@@ -1456,15 +1456,17 @@ mod tests {
             let data = self.data.lock().unwrap();
             let key = &req.into_inner().key;
             match data.get(key) {
-                Some((body, ct)) => Ok(tonic::Response::new(GetResponse {
+                Some((body, ct, br)) => Ok(tonic::Response::new(GetResponse {
                     hit: true,
                     body: body.clone(),
                     content_type: ct.clone(),
+                    body_br: br.clone(),
                 })),
                 None => Ok(tonic::Response::new(GetResponse {
                     hit: false,
                     body: vec![],
                     content_type: String::new(),
+                    body_br: vec![],
                 })),
             }
         }
@@ -1477,7 +1479,7 @@ mod tests {
             self.data
                 .lock()
                 .unwrap()
-                .insert(inner.key, (inner.body, inner.content_type));
+                .insert(inner.key, (inner.body, inner.content_type, inner.body_br));
             Ok(tonic::Response::new(PutResponse {}))
         }
 
@@ -2382,6 +2384,7 @@ mod tests {
                 Some("image/jpeg".to_string()),
                 bytes::Bytes::from("fake-image-data"),
                 None,
+                None,
             )
             .await;
         }
@@ -2890,7 +2893,7 @@ mod tests {
                     Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
                 }
             };
-            s.put(&key, "https://test.com/disk-item", "test.com", Some("text/html".to_string()), vec![60, 104, 49, 62].into(), Some(std::time::Duration::from_secs(3600))).await;
+            s.put(&key, "https://test.com/disk-item", "test.com", Some("text/html".to_string()), vec![60, 104, 49, 62].into(), Some(std::time::Duration::from_secs(3600)), None).await;
         }
 
         let memory_cache: moka::future::Cache<String, Arc<MemoryCacheEntry>> =
