@@ -4,6 +4,42 @@
 
 use std::io::{Read, Write};
 
+/// Accept-Encoding 협상 결과 — 클라이언트가 수락하는 인코딩 우선순위.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Encoding { Br, Gzip, Identity }
+
+/// Accept-Encoding 헤더를 파싱해 최적 인코딩을 반환한다.
+/// br > gzip > identity 순으로 우선순위를 적용한다.
+pub fn negotiate_encoding(accept_encoding: Option<&str>) -> Encoding {
+    let Some(raw) = accept_encoding else { return Encoding::Identity; };
+    if raw.trim().is_empty() { return Encoding::Identity; }
+
+    let mut br_ok = false;
+    let mut gzip_ok = false;
+    let mut star_ok = false;
+    for item in raw.split(',').map(str::trim) {
+        if item.is_empty() { continue; }
+        let mut parts = item.split(';').map(str::trim);
+        let name = parts.next().unwrap_or("").to_ascii_lowercase();
+        let mut q: f32 = 1.0;
+        for p in parts {
+            if let Some(v) = p.strip_prefix("q=") {
+                if let Ok(parsed) = v.parse::<f32>() { q = parsed; }
+            }
+        }
+        let accepted = q > 0.0;
+        match name.as_str() {
+            "br" if accepted => br_ok = true,
+            "gzip" if accepted => gzip_ok = true,
+            "*" if accepted => star_ok = true,
+            _ => {}
+        }
+    }
+    if br_ok || star_ok { Encoding::Br }
+    else if gzip_ok     { Encoding::Gzip }
+    else                { Encoding::Identity }
+}
+
 const WHITELIST: &[&str] = &[
     "text/html", "text/css", "text/plain", "text/xml",
     "application/javascript", "application/json", "application/xml",
@@ -57,6 +93,34 @@ pub fn compress_brotli(body: &[u8], level: u32) -> std::io::Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn negotiate_encoding_br_우선() {
+        assert_eq!(negotiate_encoding(Some("br, gzip, deflate")), Encoding::Br);
+        assert_eq!(negotiate_encoding(Some("gzip, br")), Encoding::Br);
+        assert_eq!(negotiate_encoding(Some("*")), Encoding::Br);
+    }
+
+    #[test]
+    fn negotiate_encoding_gzip_폴백() {
+        assert_eq!(negotiate_encoding(Some("gzip")), Encoding::Gzip);
+        assert_eq!(negotiate_encoding(Some("gzip, deflate")), Encoding::Gzip);
+        assert_eq!(negotiate_encoding(Some("br;q=0, gzip")), Encoding::Gzip);
+    }
+
+    #[test]
+    fn negotiate_encoding_identity() {
+        assert_eq!(negotiate_encoding(None), Encoding::Identity);
+        assert_eq!(negotiate_encoding(Some("")), Encoding::Identity);
+        assert_eq!(negotiate_encoding(Some("deflate")), Encoding::Identity);
+        assert_eq!(negotiate_encoding(Some("br;q=0, gzip;q=0")), Encoding::Identity);
+    }
+
+    #[test]
+    fn negotiate_encoding_q_파싱() {
+        assert_eq!(negotiate_encoding(Some("gzip;q=0.8, br;q=0")), Encoding::Gzip);
+        assert_eq!(negotiate_encoding(Some("gzip;q=1.0, br;q=0.1")), Encoding::Br);
+    }
 
     #[test]
     fn should_compress_화이트리스트_통과() {
