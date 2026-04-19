@@ -96,7 +96,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn optimize_는_jpeg를_webp로_변환한다() {
+    async fn optimize_는_jpeg를_재인코딩한다() {
+        // Phase 14: 포맷 보존 재인코딩 → jpeg → jpeg 유지
         let (grpc, _dir) = make_grpc();
         let jpeg = make_test_jpeg();
         let res = grpc.optimize(Request::new(OptimizeRequest {
@@ -104,7 +105,7 @@ mod tests {
             content_type: "image/jpeg".to_string(),
             domain: "example.com".to_string(),
         })).await.unwrap().into_inner();
-        assert_eq!(res.content_type, "image/webp");
+        assert_eq!(res.content_type, "image/jpeg");
         assert_eq!(res.original_size, jpeg.len() as i64);
     }
 
