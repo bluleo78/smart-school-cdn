@@ -438,3 +438,51 @@
 | 9 | E2E 테스트 | 자동화 검증 | Playwright 전 시나리오 통과 |
 | 10 | 도메인 재설계 + 메뉴 통합 | 풍부한 도메인 관리 + 3개 메뉴 | 목록+상세(3탭) + 캐시/최적화 흡수 |
 | 11 | 기능 완성 + 운영 품질 | 통계 파이프라인 + TLS 실시간 | E2E 68개 + 커버리지 83% |
+
+---
+
+## Phase 16 (후보): 미디어 Chunk/Slice 캐싱
+
+> 목표: 대용량 미디어 및 HLS/DASH 세그먼트까지 수용하기 위해 캐시 단위를 full body에서 고정 크기 chunk로 전환한다.
+
+현재 미디어 Range 지원은 origin에서 full body를 받아 저장하고 응답 시 슬라이싱하는 **full-body caching** 방식이다. 교과서 mp4 규모(수십 MB) · 순차 재생 패턴에서는 구현 단순성·HIT 효율 관점의 ROI가 높아 우선 채택했다.
+
+다만 아래 조건 중 하나라도 충족되면 chunk(slice) 기반으로 전환이 필요하다.
+
+### 16-1. 전환 조건
+
+- 단일 미디어 크기가 수백 MB 이상으로 성장 (VOD 풀HD 장편 등)
+- HLS/DASH 세그먼트 스트리밍 도입
+- 첫 바이트 지연이 체감 이슈로 보고됨
+- 사용자 스크럽/점프 패턴으로 뒷부분 재생률이 낮다는 실측
+- 캐시 용량 대비 "미처 캐시 못 한 전체 파일" 비율이 과도하게 높아짐
+
+판단 근거는 관찰 인프라(`optimization_events` 테이블 + `/api/optimization/stats` API)로 수집한다.
+
+### 16-2. chunk 정책 + 스토리지 스키마
+
+- 고정 크기 chunk (기본 1 MB, nginx `proxy_cache_slice` 방식 참조)
+- 캐시 키 확장: `(url, chunk_idx)` 복합 키 / chunk 메타 테이블(보유 범위·TTL 추적)
+- storage-service gRPC 인터페이스에 `get_chunk`, `put_chunk`, `list_chunks` 추가
+- 기존 full-body 엔트리와의 마이그레이션 / 공존 정책
+
+### 16-3. 요청 경로 변경
+
+- proxy: 요청 Range → 필요한 chunk 목록 계산
+- 누락 chunk만 origin에서 Range fetch (병렬 + 동시 요청 중복 방지)
+- chunk 간 merge 및 hole 처리 로직
+- 단일 응답으로 206 스트리밍 (전체를 메모리에 올리지 않도록 스트림 기반)
+- Range 파서(`services/proxy/src/range.rs`)를 재사용하되 chunk 경계 계산기 추가
+
+### 16-4. 관찰 인프라 확장
+
+- `optimization_events.decision` 확장: `chunk_hit` · `chunk_partial_hit` · `chunk_miss` · `chunk_fetch_ok` · `chunk_fetch_fail`
+- admin API: `/api/optimization/chunks/:url` — chunk 점유 분포 조회
+- admin-web: 특정 URL의 chunk 보유 맵 시각화
+
+### 16-5. 검증
+
+- 순차 재생 시나리오에서 full-body 대비 HIT 비율 유지 (≥ 95%)
+- 스크럽/점프 시나리오에서 불필요한 origin 왕복 감소 측정
+- 첫 바이트 지연(TTFB) 개선 수치 확보
+- 다중 동시 요청 중복 fetch 없음 확인

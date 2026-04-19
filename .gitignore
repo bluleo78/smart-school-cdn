@@ -48,5 +48,8 @@ certs/
 docs/superpowers/
 .superpowers/
 
+# Phase 스펙 초안 (커밋 대상 아님)
+docs/specs/
+
 # Rust proxy 캐시 데이터 (테스트/런타임 생성)
 cache/

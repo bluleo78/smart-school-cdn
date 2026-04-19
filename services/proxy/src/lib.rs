@@ -2,6 +2,8 @@
 pub mod clients;
 pub mod coalescer;
 pub mod config;
+pub mod events;
+pub mod range;
 pub mod state;
 
 use std::collections::HashMap;
@@ -163,6 +165,8 @@ pub struct ProxyState {
     pub memory_cache: moka::future::Cache<String, Arc<MemoryCacheEntry>>,
     /// 도메인별 요청 통계 카운터
     pub counters: DomainCounters,
+    /// 최적화 이벤트 배치 push 송신자 — None이면 이벤트 수집 비활성화
+    pub events: Option<events::EventsSender>,
 }
 
 /// 관리 API 핸들러 상태
@@ -276,6 +280,123 @@ fn parse_cache_control(cache_control: Option<&str>, pragma: Option<&str>) -> Cac
     CacheDirective::Cacheable(None)
 }
 
+/// 정적 자원 확장자 화이트리스트 — origin `Cache-Control: no-store` override 대상.
+/// URL 확장자 기반만 사용해 동적 API 경로(`/api/xxx`)나 확장자 없는 경로는 절대 영향받지 않는다.
+fn is_static_extension(path: &str) -> bool {
+    let ext = path
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    matches!(
+        ext.as_str(),
+        // 오디오·비디오
+        "mp4" | "m4v" | "mov" | "avi" | "webm" | "mpg" | "mpeg"
+            | "mp3" | "m4a" | "aac" | "flac" | "wav" | "ogg"
+        // 이미지
+            | "png" | "jpg" | "jpeg" | "gif" | "ico" | "svg" | "webp"
+        // 폰트
+            | "woff" | "woff2" | "ttf" | "otf"
+        // 스크립트·스타일·WASM
+            | "js" | "css" | "wasm"
+    )
+}
+
+/// Range 헤더 평가 결과 — 응답 상태/body 슬라이스 결정의 근거가 된다.
+#[derive(Debug, PartialEq, Eq)]
+enum RangeOutcome {
+    /// Range 헤더 없음 또는 파싱 실패(멀티레인지 등) → 200 + 전체 body
+    Full,
+    /// 정상 단일 범위 → 206 + (start, end_inclusive)
+    Partial { start: u64, end: u64 },
+    /// 파싱은 성공했으나 총 크기를 벗어남 → 416 Range Not Satisfiable
+    Invalid,
+}
+
+/// 요청 헤더와 전체 바이트 크기를 받아 RangeOutcome 계산.
+fn evaluate_range(headers: &HeaderMap, total_size: u64) -> RangeOutcome {
+    let Some(raw) = headers
+        .get(axum::http::header::RANGE)
+        .and_then(|v| v.to_str().ok())
+    else {
+        return RangeOutcome::Full;
+    };
+    // parse 실패(멀티레인지·비표준 단위)는 RFC 7233 §3.1 권고대로 200 fallback
+    let Some(byte_range) = range::parse_byte_range(raw) else {
+        return RangeOutcome::Full;
+    };
+    match range::resolve_range(byte_range, total_size) {
+        Some((start, end)) => RangeOutcome::Partial { start, end },
+        None => RangeOutcome::Invalid,
+    }
+}
+
+/// Phase 13 관찰 대상 — 미디어(오디오/비디오) 요청 여부 판정.
+/// URL 확장자 우선, 차선으로 Content-Type 의 base가 video/·audio/ 로 시작하는지 확인한다.
+fn is_media_request(path: &str, content_type: Option<&str>) -> bool {
+    // path 마지막 `.` 이후 → 알파뉴메릭 prefix 추출 (쿼리·프래그먼트 방어)
+    let ext = path
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if matches!(
+        ext.as_str(),
+        "mp4" | "m4v" | "mov" | "avi" | "webm" | "mpg" | "mpeg"
+            | "mp3" | "m4a" | "aac" | "flac" | "wav" | "ogg"
+    ) {
+        return true;
+    }
+    if let Some(ct) = content_type {
+        let base = ct.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
+        if base.starts_with("video/") || base.starts_with("audio/") {
+            return true;
+        }
+    }
+    false
+}
+
+/// 미디어 요청이면 배치 푸셔로 이벤트 송출 — Phase 13 범위에서는 `media_cache`만 대상.
+/// `decision`은 Range 결과까지 포함해 호출자가 구체적인 문자열을 지정한다
+/// (예: "l1_hit", "l1_hit_206", "l1_hit_416").
+fn emit_media_cache_event(
+    events_sender: &Option<events::EventsSender>,
+    host: &str,
+    uri: &Uri,
+    decision: &str,
+    orig_size: Option<u64>,
+    out_size: Option<u64>,
+    headers: &HeaderMap,
+    content_type: Option<&str>,
+    elapsed_ms: u64,
+) {
+    let Some(sender) = events_sender else { return };
+    if !is_media_request(uri.path(), content_type) {
+        return;
+    }
+    let range_header = headers
+        .get(axum::http::header::RANGE)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+    sender.emit(events::EventRecord {
+        event_type: "media_cache",
+        host: host.to_string(),
+        url: uri.to_string(),
+        decision: decision.to_string(),
+        orig_size,
+        out_size,
+        range_header,
+        content_type: content_type.map(str::to_string),
+        elapsed_ms,
+    });
+}
+
 /// 응답이 캐시 가능한 콘텐츠 타입인지 판정.
 /// 학교 교과서 CDN 워크로드(이미지·텍스트·폰트·JS/JSON·PDF·EPUB·오디오/비디오·WASM)를 대상으로 한다.
 fn is_cacheable_content_type(content_type: &str) -> bool {
@@ -363,6 +484,30 @@ async fn proxy_handler(
     if let Some(ref key) = cache_key {
         if let Some(entry) = ps.memory_cache.get(key).await {
             let elapsed_ms = start.elapsed().as_millis() as u64;
+            // Range 헤더 평가 — 있으면 206 슬라이스, 범위 초과면 416, 없거나 파싱 실패면 200
+            let total = entry.body.len() as u64;
+            let (resp_status, resp_body, content_range_hdr, decision, out_bytes) =
+                match evaluate_range(&headers, total) {
+                    RangeOutcome::Full => (
+                        StatusCode::OK, entry.body.clone(), None,
+                        CacheOutcome::L1Hit.as_header().to_string(), total,
+                    ),
+                    RangeOutcome::Partial { start, end } => {
+                        let sliced = entry.body.slice(start as usize..=end as usize);
+                        let len = sliced.len() as u64;
+                        (
+                            StatusCode::PARTIAL_CONTENT, sliced,
+                            Some(range::format_content_range(start, end, total)),
+                            format!("{}_206", CacheOutcome::L1Hit.as_header()), len,
+                        )
+                    }
+                    RangeOutcome::Invalid => (
+                        StatusCode::RANGE_NOT_SATISFIABLE, Bytes::new(),
+                        Some(range::format_content_range_unsatisfied(total)),
+                        format!("{}_416", CacheOutcome::L1Hit.as_header()), 0,
+                    ),
+                };
+
             {
                 let mut app_state = state.write().await;
                 app_state.record_memory_hit();
@@ -370,24 +515,34 @@ async fn proxy_handler(
                     method: method.to_string(),
                     host: host.clone(),
                     url: uri.to_string(),
-                    status_code: 200,
+                    status_code: resp_status.as_u16(),
                     response_time_ms: elapsed_ms,
                     timestamp: chrono::Utc::now(),
                     cache_status: "HIT".to_string(),
                 });
             }
-            tracing::info!(host=%host, url=%uri, elapsed_ms=%elapsed_ms, "L1 메모리 캐시 HIT");
-            record_domain_outcome(&ps.counters, &host, CacheOutcome::L1Hit, entry.body.len() as u64, elapsed_ms);
+            tracing::info!(host=%host, url=%uri, elapsed_ms=%elapsed_ms, status=%resp_status.as_u16(), "L1 메모리 캐시 HIT");
+            record_domain_outcome(&ps.counters, &host, CacheOutcome::L1Hit, total, elapsed_ms);
+            emit_media_cache_event(
+                &ps.events, &host, &uri, &decision,
+                Some(total), Some(out_bytes),
+                &headers, entry.content_type.as_deref(), elapsed_ms,
+            );
 
-            let mut resp = Response::builder().status(StatusCode::OK);
+            let mut resp = Response::builder()
+                .status(resp_status)
+                .header("Accept-Ranges", "bytes");
             if let Some(ref ct) = entry.content_type {
                 resp = resp.header("Content-Type", ct.as_str());
+            }
+            if let Some(cr) = content_range_hdr {
+                resp = resp.header("Content-Range", cr);
             }
             return resp
                 .header("X-Cache-Status", HeaderValue::from_static("HIT"))
                 .header("X-Cache-Reason", HeaderValue::from_static(CacheOutcome::L1Hit.as_header()))
                 .header("X-Served-By", HeaderValue::from_static("smart-school-cdn"))
-                .body(Body::from(entry.body.clone()))
+                .body(Body::from(resp_body))
                 .unwrap();
         }
     }
@@ -395,16 +550,44 @@ async fn proxy_handler(
     // ── L2 디스크 캐시 확인 (storage gRPC) ───────────────────────
     if let Some(ref key) = cache_key {
         if let Some((cached_bytes, content_type)) = ps.storage.lock().await.get(key).await {
+            // Vec<u8> → Bytes로 한 번 변환 (이후 clone은 Arc refcount 증가라 저렴)
+            let body_bytes: Bytes = Bytes::from(cached_bytes);
+            let total = body_bytes.len() as u64;
+
             // L2 HIT → L1 승격 (16MB 이하만)
             const MAX_MEMORY_ENTRY_BYTES: usize = 16 * 1024 * 1024;
-            if cached_bytes.len() <= MAX_MEMORY_ENTRY_BYTES {
+            if body_bytes.len() <= MAX_MEMORY_ENTRY_BYTES {
                 ps.memory_cache.insert(key.clone(), Arc::new(MemoryCacheEntry {
-                    body: Bytes::from(cached_bytes.clone()),
+                    body: body_bytes.clone(),
                     content_type: content_type.clone(),
                 })).await;
             }
 
             let elapsed_ms = start.elapsed().as_millis() as u64;
+
+            // Range 헤더 평가 — 있으면 206 슬라이스, 범위 초과면 416
+            let (resp_status, resp_body, content_range_hdr, decision, out_bytes) =
+                match evaluate_range(&headers, total) {
+                    RangeOutcome::Full => (
+                        StatusCode::OK, body_bytes.clone(), None,
+                        CacheOutcome::L2Hit.as_header().to_string(), total,
+                    ),
+                    RangeOutcome::Partial { start, end } => {
+                        let sliced = body_bytes.slice(start as usize..=end as usize);
+                        let len = sliced.len() as u64;
+                        (
+                            StatusCode::PARTIAL_CONTENT, sliced,
+                            Some(range::format_content_range(start, end, total)),
+                            format!("{}_206", CacheOutcome::L2Hit.as_header()), len,
+                        )
+                    }
+                    RangeOutcome::Invalid => (
+                        StatusCode::RANGE_NOT_SATISFIABLE, Bytes::new(),
+                        Some(range::format_content_range_unsatisfied(total)),
+                        format!("{}_416", CacheOutcome::L2Hit.as_header()), 0,
+                    ),
+                };
+
             {
                 let mut app_state = state.write().await;
                 app_state.record_disk_hit();
@@ -412,24 +595,34 @@ async fn proxy_handler(
                     method: method.to_string(),
                     host: host.clone(),
                     url: uri.to_string(),
-                    status_code: 200,
+                    status_code: resp_status.as_u16(),
                     response_time_ms: elapsed_ms,
                     timestamp: chrono::Utc::now(),
                     cache_status: "HIT".to_string(),
                 });
             }
-            tracing::info!(host=%host, url=%uri, elapsed_ms=%elapsed_ms, "L2 디스크 캐시 HIT (L1 승격)");
-            record_domain_outcome(&ps.counters, &host, CacheOutcome::L2Hit, cached_bytes.len() as u64, elapsed_ms);
+            tracing::info!(host=%host, url=%uri, elapsed_ms=%elapsed_ms, status=%resp_status.as_u16(), "L2 디스크 캐시 HIT (L1 승격)");
+            record_domain_outcome(&ps.counters, &host, CacheOutcome::L2Hit, total, elapsed_ms);
+            emit_media_cache_event(
+                &ps.events, &host, &uri, &decision,
+                Some(total), Some(out_bytes),
+                &headers, content_type.as_deref(), elapsed_ms,
+            );
 
-            let mut resp = Response::builder().status(StatusCode::OK);
+            let mut resp = Response::builder()
+                .status(resp_status)
+                .header("Accept-Ranges", "bytes");
             if let Some(ct) = content_type {
                 resp = resp.header("Content-Type", ct);
+            }
+            if let Some(cr) = content_range_hdr {
+                resp = resp.header("Content-Range", cr);
             }
             return resp
                 .header("X-Cache-Status", HeaderValue::from_static("HIT"))
                 .header("X-Cache-Reason", HeaderValue::from_static(CacheOutcome::L2Hit.as_header()))
                 .header("X-Served-By", HeaderValue::from_static("smart-school-cdn"))
-                .body(Body::from(cached_bytes))
+                .body(Body::from(resp_body))
                 .unwrap();
         }
     }
@@ -445,6 +638,10 @@ async fn proxy_handler(
         let path_and_query = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/").to_string();
         let origin_url = format!("{}{}", origin, path_and_query);
 
+        // 정적 확장자(mp4/png/js/css 등)는 origin의 Cache-Control: no-store 를 CDN이 override
+        // — 클로저 진입 전에 계산해 move 캡처 (path 매칭만 사용, API 경로 오염 없음)
+        let is_static = is_static_extension(uri.path());
+
         let key_c        = key.clone();
         let host_c       = host.clone();
         let uri_str      = uri.to_string();
@@ -458,6 +655,8 @@ async fn proxy_handler(
         let coalesced = ps.coalescer.get_or_fetch(key.clone(), move || async move {
             let key_for_put = key_c;
             // 헤더 필터링 후 원본 요청 빌드
+            // Range/If-Range는 제거해 origin에서 항상 full body를 받아온다
+            // (클라이언트별 Range는 수신 후 슬라이싱으로 처리)
             let mut req_builder = client_c.request(method_c, &origin_url);
             for (k, v) in headers_c.iter() {
                 let name = k.as_str();
@@ -465,6 +664,7 @@ async fn proxy_handler(
                     name,
                     "host" | "connection" | "transfer-encoding" | "proxy-connection"
                         | "keep-alive" | "upgrade" | "te" | "trailer"
+                        | "range" | "if-range"
                 ) {
                     req_builder = req_builder.header(k, v);
                 }
@@ -502,7 +702,8 @@ async fn proxy_handler(
 
             // outcome 분류에 필요한 조건 계산
             // parse_cache_control()이 이미 파싱한 cache_directive를 재사용해 중복 파싱 방지
-            let origin_no_cache = matches!(cache_directive, CacheDirective::NoStore);
+            // 정적 확장자는 no-store override — 학교 환경에서는 정적 자원의 반복 origin 왕복을 차단
+            let origin_no_cache = matches!(cache_directive, CacheDirective::NoStore) && !is_static;
             // 응답 크기가 단일 캐시 항목 최대치 초과 여부
             let size_exceeded = resp_body.len() as u64 > MAX_CACHE_ENTRY_BYTES;
             // 캐시 가능한 Content-Type 여부 — is_cacheable_content_type() 헬퍼로 위임
@@ -571,13 +772,42 @@ async fn proxy_handler(
         match coalesced {
             Ok(resp) => {
                 let (body, ct, status, outcome) = resp.as_ref();
+                let total = body.len() as u64;
+
+                // Range 슬라이싱은 200 OK 응답에만 적용 — 오류 상태는 그대로 통과
+                let (resp_status, resp_body, content_range_hdr, decision, out_bytes) =
+                    if *status == StatusCode::OK {
+                        match evaluate_range(&headers, total) {
+                            RangeOutcome::Full => (
+                                *status, body.clone(), None,
+                                outcome.as_header().to_string(), total,
+                            ),
+                            RangeOutcome::Partial { start, end } => {
+                                let sliced = body.slice(start as usize..=end as usize);
+                                let len = sliced.len() as u64;
+                                (
+                                    StatusCode::PARTIAL_CONTENT, sliced,
+                                    Some(range::format_content_range(start, end, total)),
+                                    format!("{}_206", outcome.as_header()), len,
+                                )
+                            }
+                            RangeOutcome::Invalid => (
+                                StatusCode::RANGE_NOT_SATISFIABLE, Bytes::new(),
+                                Some(range::format_content_range_unsatisfied(total)),
+                                format!("{}_416", outcome.as_header()), 0,
+                            ),
+                        }
+                    } else {
+                        (*status, body.clone(), None, outcome.as_header().to_string(), total)
+                    };
+
                 {
                     let mut app_state = state.write().await;
                     app_state.record_request(RequestLog {
                         method: method.to_string(),
                         host: host.clone(),
                         url: uri.to_string(),
-                        status_code: status.as_u16(),
+                        status_code: resp_status.as_u16(),
                         response_time_ms: elapsed_ms,
                         timestamp: chrono::Utc::now(),
                         cache_status: "MISS".to_string(),
@@ -585,19 +815,29 @@ async fn proxy_handler(
                 }
                 tracing::info!(
                     method=%method, host=%host, url=%uri,
-                    status=%status.as_u16(), elapsed_ms=%elapsed_ms,
+                    status=%resp_status.as_u16(), elapsed_ms=%elapsed_ms,
                     cache="MISS", "프록시 요청 처리 완료"
                 );
-                record_domain_outcome(&ps.counters, &host, *outcome, body.len() as u64, elapsed_ms);
-                let mut response = Response::builder().status(*status);
+                record_domain_outcome(&ps.counters, &host, *outcome, total, elapsed_ms);
+                emit_media_cache_event(
+                    &ps.events, &host, &uri, &decision,
+                    Some(total), Some(out_bytes),
+                    &headers, ct.as_deref(), elapsed_ms,
+                );
+                let mut response = Response::builder()
+                    .status(resp_status)
+                    .header("Accept-Ranges", "bytes");
                 if let Some(ct_str) = ct {
                     response = response.header("Content-Type", ct_str.as_str());
+                }
+                if let Some(cr) = content_range_hdr {
+                    response = response.header("Content-Range", cr);
                 }
                 return response
                     .header("X-Cache-Status", HeaderValue::from_static("MISS"))
                     .header("X-Cache-Reason", HeaderValue::from_static(outcome.as_header()))
                     .header("X-Served-By", HeaderValue::from_static("smart-school-cdn"))
-                    .body(Body::from(body.clone()))
+                    .body(Body::from(resp_body))
                     .unwrap();
             }
             Err(()) => {
@@ -615,6 +855,10 @@ async fn proxy_handler(
                     });
                 }
                 record_domain_outcome(&ps.counters, &host, CacheOutcome::BypassOther, 0, elapsed_ms);
+                emit_media_cache_event(
+                    &ps.events, &host, &uri, CacheOutcome::BypassOther.as_header(),
+                    None, None, &headers, None, elapsed_ms,
+                );
                 return Response::builder()
                     .status(StatusCode::BAD_GATEWAY)
                     .header("X-Cache-Status", HeaderValue::from_static("BYPASS"))
@@ -691,6 +935,17 @@ async fn proxy_handler(
         });
     }
     record_domain_outcome(&ps.counters, &host, CacheOutcome::BypassMethod, response_body.len() as u64, elapsed_ms);
+    {
+        // non-GET 경로는 response_headers에서 Content-Type을 추출하여 미디어 여부 판정
+        let ct = response_headers
+            .get("content-type")
+            .and_then(|v| v.to_str().ok());
+        emit_media_cache_event(
+            &ps.events, &host, &uri, CacheOutcome::BypassMethod.as_header(),
+            Some(response_body.len() as u64), Some(response_body.len() as u64),
+            &headers, ct, elapsed_ms,
+        );
+    }
 
     tracing::info!(
         method = %method, host = %host, url = %uri,
@@ -1880,6 +2135,7 @@ mod tests {
             coalescer: Arc::new(coalescer::Coalescer::new()),
             memory_cache: moka::future::Cache::builder().max_capacity(100).build(),
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            events: None,
         };
 
         let router = build_proxy_router(ps);
@@ -1935,6 +2191,7 @@ mod tests {
             coalescer: Arc::new(coalescer::Coalescer::new()),
             memory_cache: moka::future::Cache::builder().max_capacity(100).build(),
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            events: None,
         };
 
         let router = build_proxy_router(ps);
@@ -1989,6 +2246,7 @@ mod tests {
             coalescer: Arc::new(coalescer::Coalescer::new()),
             memory_cache: moka::future::Cache::builder().max_capacity(100).build(),
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            events: None,
         };
 
         let router = build_proxy_router(ps);
@@ -2046,6 +2304,7 @@ mod tests {
             coalescer: Arc::new(coalescer::Coalescer::new()),
             memory_cache: moka::future::Cache::builder().max_capacity(100).build(),
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            events: None,
         };
 
         let router = build_proxy_router(ps);
@@ -2128,6 +2387,7 @@ mod tests {
             coalescer: Arc::new(coalescer::Coalescer::new()),
             memory_cache: moka::future::Cache::builder().max_capacity(100).build(),
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            events: None,
         };
 
         let router = build_proxy_router(ps);
@@ -2282,6 +2542,7 @@ mod tests {
             coalescer: Arc::new(coalescer::Coalescer::new()),
             memory_cache: moka::future::Cache::builder().max_capacity(100).build(),
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            events: None,
         };
         let router = build_proxy_router(ps.clone());
         (ps, router)
@@ -2532,6 +2793,7 @@ mod tests {
             coalescer: Arc::new(coalescer::Coalescer::new()),
             memory_cache,
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            events: None,
         };
 
         let shared = ps.shared.clone();
@@ -2613,6 +2875,7 @@ mod tests {
             coalescer: Arc::new(coalescer::Coalescer::new()),
             memory_cache,
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            events: None,
         };
 
         let shared = ps.shared.clone();
@@ -2642,6 +2905,124 @@ mod tests {
     }
 
     // ─── is_cacheable_content_type 단위 테스트 ───────────────────────
+
+    // ─── is_media_request 단위 테스트 ───────────────────────────────────
+
+    #[test]
+    fn is_media_request_video_audio_extensions() {
+        // 비디오
+        assert!(is_media_request("/foo/p34.mp4", None));
+        assert!(is_media_request("/x/y/trailer.m4v", None));
+        assert!(is_media_request("/clip.webm", None));
+        // 오디오
+        assert!(is_media_request("/media/mp3/page-flip.mp3", None));
+        assert!(is_media_request("/clip.m4a", None));
+        assert!(is_media_request("/beep.wav", None));
+    }
+
+    #[test]
+    fn is_media_request_respects_content_type_when_extension_missing() {
+        // 확장자 없는 path라도 Content-Type으로 판정
+        assert!(is_media_request("/stream/abc", Some("video/mp4")));
+        assert!(is_media_request("/stream/def", Some("audio/mpeg; charset=binary")));
+    }
+
+    #[test]
+    fn is_media_request_rejects_non_media() {
+        // 이미지·텍스트 자산은 Phase 13 범위 밖
+        assert!(!is_media_request("/icon.png", None));
+        assert!(!is_media_request("/script.js", Some("application/javascript")));
+        assert!(!is_media_request("/page.xhtml", Some("text/html")));
+        assert!(!is_media_request("/font.woff2", None));
+        // 확장자 없음 + content-type 없음
+        assert!(!is_media_request("/api/annotation", None));
+    }
+
+    #[test]
+    fn is_media_request_handles_query_and_fragment() {
+        // 확장자 뒤 쿼리/프래그먼트가 붙어도 정상 판정
+        assert!(is_media_request("/p34.mp4?token=abc", None));
+        assert!(is_media_request("/p34.mp4#t=10", None));
+    }
+
+    // ─── is_static_extension 단위 테스트 ────────────────────────────────
+
+    #[test]
+    fn is_static_extension_recognizes_media() {
+        assert!(is_static_extension("/foo/p34.mp4"));
+        assert!(is_static_extension("/sound/bell.mp3"));
+        assert!(is_static_extension("/x/clip.webm"));
+    }
+
+    #[test]
+    fn is_static_extension_recognizes_images_fonts_scripts() {
+        assert!(is_static_extension("/a/b.png"));
+        assert!(is_static_extension("/a/b.jpg"));
+        assert!(is_static_extension("/a/b.webp"));
+        assert!(is_static_extension("/fonts/Nanum.woff2"));
+        assert!(is_static_extension("/scripts/main.js"));
+        assert!(is_static_extension("/styles/app.css"));
+        assert!(is_static_extension("/wasm/pkg.wasm"));
+    }
+
+    #[test]
+    fn is_static_extension_rejects_api_and_extensionless() {
+        assert!(!is_static_extension("/api/annotation"));
+        assert!(!is_static_extension("/api/something.json")); // json은 화이트리스트 밖
+        assert!(!is_static_extension("/dynamic/thing"));
+        assert!(!is_static_extension("/"));
+        assert!(!is_static_extension(""));
+    }
+
+    #[test]
+    fn is_static_extension_handles_query_and_fragment() {
+        assert!(is_static_extension("/p34.mp4?token=abc"));
+        assert!(is_static_extension("/style.css#x"));
+    }
+
+    // ─── evaluate_range 단위 테스트 ────────────────────────────────────
+    // (실제 proxy 핸들러가 의존하는 통합 동작 — HeaderMap + total_size 기반)
+
+    fn headers_with_range(value: &str) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        h.insert(axum::http::header::RANGE, HeaderValue::from_str(value).unwrap());
+        h
+    }
+
+    #[test]
+    fn evaluate_range_no_header_returns_full() {
+        let h = HeaderMap::new();
+        assert_eq!(evaluate_range(&h, 1000), RangeOutcome::Full);
+    }
+
+    #[test]
+    fn evaluate_range_parse_failure_falls_back_to_full() {
+        // multi-range는 파싱 실패 → RFC 권고대로 Full (200 응답)
+        let h = headers_with_range("bytes=0-99,200-299");
+        assert_eq!(evaluate_range(&h, 1000), RangeOutcome::Full);
+
+        // 비표준 단위도 Full
+        let h = headers_with_range("pages=1-2");
+        assert_eq!(evaluate_range(&h, 1000), RangeOutcome::Full);
+    }
+
+    #[test]
+    fn evaluate_range_bounded_in_total_returns_partial() {
+        let h = headers_with_range("bytes=0-99");
+        assert_eq!(evaluate_range(&h, 1000), RangeOutcome::Partial { start: 0, end: 99 });
+    }
+
+    #[test]
+    fn evaluate_range_start_beyond_total_returns_invalid() {
+        let h = headers_with_range("bytes=5000-5099");
+        assert_eq!(evaluate_range(&h, 1000), RangeOutcome::Invalid);
+    }
+
+    #[test]
+    fn evaluate_range_suffix_within_total_returns_partial() {
+        let h = headers_with_range("bytes=-200");
+        assert_eq!(evaluate_range(&h, 1000), RangeOutcome::Partial { start: 800, end: 999 });
+    }
 
     #[test]
     fn is_cacheable_content_type_checks() {
@@ -2858,6 +3239,7 @@ mod tests {
             coalescer: Arc::new(coalescer::Coalescer::new()),
             memory_cache,
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            events: None,
         };
 
         let router = build_proxy_router(ps.clone());

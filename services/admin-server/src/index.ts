@@ -10,6 +10,7 @@ import { systemRoutes } from './routes/system.js';
 import { DomainRepository, DOMAIN_SCHEMA } from './db/domain-repo.js';
 import { DomainStatsRepository } from './db/domain-stats-repo.js';
 import { DnsMetricsRepository, DNS_METRICS_SCHEMA } from './db/dns-metrics-repo.js';
+import { OPTIMIZATION_EVENTS_SCHEMA } from './db/optimization-events-repo.js';
 import { startStatsCollector } from './stats-collector.js';
 import { startDnsMetricsCollector } from './dns-metrics-collector.js';
 import { createStorageClient } from './grpc/storage_client.js';
@@ -19,6 +20,7 @@ import { createOptimizerClient } from './grpc/optimizer_client.js';
 import { optimizerRoutes } from './routes/optimizer.js';
 import { dnsRoutes } from './routes/dns.js';
 import { logRoutes } from './routes/logs.js';
+import { optimizationEventsRoutes } from './routes/optimization-events.js';
 
 // SQLite DB 초기화 — 앱 기동 시 1회 실행
 const db = new Database(process.env.DB_PATH || './data/admin.db');
@@ -58,6 +60,9 @@ if (!colsStats.includes('bypass_other'))   db.exec('ALTER TABLE domain_stats ADD
 
 // DNS 메트릭 버킷 테이블 생성 — Phase A: 1분 단위 카운터 델타 저장
 db.exec(DNS_METRICS_SCHEMA);
+
+// 최적화 이벤트 테이블 생성 — Phase 13/14/15 공용 관찰 인프라
+db.exec(OPTIMIZATION_EVENTS_SCHEMA);
 
 // 외래 키 제약 활성화 — 도메인 삭제 시 cascade 동작에 필요
 db.pragma('foreign_keys = ON');
@@ -127,6 +132,9 @@ await app.register(dnsRoutes);
 
 /** 실시간 로그 스트리밍 SSE 라우트 등록 */
 await app.register(logRoutes);
+
+/** 최적화 이벤트 관찰 API 라우트 등록 (Phase 13/14/15 공용) */
+await app.register(optimizationEventsRoutes);
 
 const port = Number(process.env.PORT) || 4001;
 
