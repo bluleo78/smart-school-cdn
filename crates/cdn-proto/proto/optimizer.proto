@@ -19,6 +19,9 @@ message OptimizeResponse {
   string content_type   = 2;
   int64  original_size  = 3;
   int64  optimized_size = 4;
+  // Phase 14: 최적화 결정 사유 — "optimized" / "passthrough_larger" / "passthrough_error" / "passthrough_unsupported"
+  // enabled=false 프로파일은 None으로 유지(이벤트 발행 대상 아님). proto3 optional 사용으로 하위 호환.
+  optional string decision = 5;
 }
 
 message Profile {

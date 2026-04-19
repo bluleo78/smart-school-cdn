@@ -24,6 +24,7 @@ impl OptimizerService for OptimizerGrpc {
             content_type:   result.content_type,
             original_size:  result.original_size,
             optimized_size: result.optimized_size,
+            decision:       None,  // Phase 14 Task 2: 스키마만 추가, 실제 값 전달은 Task 8에서
         }))
     }
 
