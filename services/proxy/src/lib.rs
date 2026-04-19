@@ -28,10 +28,11 @@ use clients::optimizer_client::OptimizerClient;
 use clients::storage_client::StorageClient;
 use clients::tls_client::{TlsClient, CertCache};
 
-/// L1 메모리 캐시 항목 — body + content_type
+/// L1 메모리 캐시 항목 — body + content_type + Phase 15 brotli 변형(옵셔널)
 pub struct MemoryCacheEntry {
     pub body: Bytes,
     pub content_type: Option<String>,
+    pub body_br: Option<Bytes>,
 }
 
 /// 런타임에 교체 가능한 도메인→원본서버 맵
@@ -563,6 +564,7 @@ async fn proxy_handler(
                 ps.memory_cache.insert(key.clone(), Arc::new(MemoryCacheEntry {
                     body: body_bytes.clone(),
                     content_type: content_type.clone(),
+                    body_br: _cached_br.clone(),
                 })).await;
             }
 
@@ -776,6 +778,7 @@ async fn proxy_handler(
                     ps_c.memory_cache.insert(key_for_put.clone(), Arc::new(MemoryCacheEntry {
                         body: Bytes::from(store_bytes.clone()),
                         content_type: store_ct.clone(),
+                        body_br: None, // Task 12에서 brotli 통합 시 채워짐
                     })).await;
                 }
 
@@ -2028,6 +2031,7 @@ mod tests {
         memory_cache.insert("test-key".to_string(), Arc::new(MemoryCacheEntry {
             body: Bytes::from("data"),
             content_type: Some("text/plain".to_string()),
+            body_br: None,
         })).await;
 
         let memory_cache_check = memory_cache.clone();
@@ -2074,10 +2078,12 @@ mod tests {
         memory_cache.insert("k1".to_string(), Arc::new(MemoryCacheEntry {
             body: Bytes::from("aaa"),
             content_type: None,
+            body_br: None,
         })).await;
         memory_cache.insert("k2".to_string(), Arc::new(MemoryCacheEntry {
             body: Bytes::from("bbb"),
             content_type: None,
+            body_br: None,
         })).await;
         // moka 비동기 캐시는 pending tasks 실행 후 entry_count 반영
         memory_cache.run_pending_tasks().await;
@@ -2816,6 +2822,7 @@ mod tests {
         memory_cache.insert(key, Arc::new(MemoryCacheEntry {
             body: Bytes::from("cached-in-memory"),
             content_type: Some("text/plain".to_string()),
+            body_br: None,
         })).await;
 
         let ps = ProxyState {
@@ -3262,6 +3269,7 @@ mod tests {
         memory_cache.insert(key, Arc::new(MemoryCacheEntry {
             body: Bytes::from("l1-cached-body"),
             content_type: Some("text/html".to_string()),
+            body_br: None,
         })).await;
 
         let ps = ProxyState {
