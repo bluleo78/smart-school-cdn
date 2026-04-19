@@ -4,6 +4,14 @@
 
 use std::io::{Read, Write};
 
+/// gzip 인코딩 — br 미지원 클라이언트용 on-demand 폴백.
+pub fn encode_gzip(body: &[u8], level: u32) -> std::io::Result<Vec<u8>> {
+    use flate2::{write::GzEncoder, Compression};
+    let mut enc = GzEncoder::new(Vec::with_capacity(body.len() / 2), Compression::new(level));
+    enc.write_all(body)?;
+    enc.finish()
+}
+
 /// Brotli 스트림 디컴프레션 — HIT 경로에서 gzip 폴백 시 역변환용.
 pub fn decompress_brotli(br: &[u8]) -> std::io::Result<Vec<u8>> {
     let mut out = Vec::new();
@@ -27,6 +35,16 @@ pub fn compress_brotli(body: &[u8], level: u32) -> std::io::Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gzip_라운드트립() {
+        use flate2::read::GzDecoder;
+        let body = b"text/html content ".repeat(80);
+        let gz = encode_gzip(&body, 6).unwrap();
+        let mut out = Vec::new();
+        GzDecoder::new(&gz[..]).read_to_end(&mut out).unwrap();
+        assert_eq!(out, body);
+    }
 
     #[test]
     fn brotli_라운드트립_원본_복원() {
