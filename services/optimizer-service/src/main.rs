@@ -2,6 +2,7 @@
 /// - gRPC 서버(:50054), HTTP 헬스체크(:8083) 병행 기동
 mod optimizer;
 mod grpc;
+mod encoder;
 
 use std::sync::Arc;
 use axum::{Router, routing::get};
