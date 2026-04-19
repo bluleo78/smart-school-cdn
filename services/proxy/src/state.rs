@@ -21,6 +21,9 @@ pub struct RequestLog {
     pub timestamp: DateTime<Utc>,
     /// X-Cache-Status 값: "HIT", "MISS", "BYPASS"
     pub cache_status: String,
+    /// 클라이언트에 실제 전송된 응답 바이트 (Range면 슬라이스, br이면 압축본 크기).
+    /// 오류/BYPASS 등 body 없는 경우 0.
+    pub size: u64,
 }
 
 /// 프록시 상태 정보 (관리 API 응답용)
@@ -157,6 +160,7 @@ mod tests {
         RequestLog {
             method: "GET".to_string(),
             host: "test.com".to_string(),
+            size: 0,
             url: url.to_string(),
             status_code: status,
             response_time_ms: 100,

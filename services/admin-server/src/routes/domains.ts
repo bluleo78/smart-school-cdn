@@ -43,6 +43,7 @@ async function fetchProxyLogs(filters: ProxyLogFilters): Promise<DomainLogRow[]>
     response_time_ms: number;
     timestamp: string;   // ISO8601
     cache_status: string;
+    size?: number;       // 응답 전송 바이트 (구 proxy 버전 호환 위해 optional)
   }
 
   let raw: ProxyRequestLog[];
@@ -74,7 +75,7 @@ async function fetchProxyLogs(filters: ProxyLogFilters): Promise<DomainLogRow[]>
       status_code: r.status_code,
       cache_status: r.cache_status,
       path,
-      size: 0,  // proxy RequestLog에 응답 크기 미포함 — 0으로 고정
+      size: typeof r.size === 'number' ? r.size : 0,
     });
   }
 

@@ -97,10 +97,10 @@ export function DomainLogTable({ host, period, range, refetchIntervalMs = false 
             <thead>
               <tr className="border-b border-border/40 bg-muted/30">
                 <th className="px-3 py-2 text-left font-medium text-muted-foreground">시간</th>
-                <th className="px-3 py-2 text-left font-medium text-muted-foreground">상태</th>
-                <th className="px-3 py-2 text-left font-medium text-muted-foreground">캐시</th>
                 <th className="px-3 py-2 text-left font-medium text-muted-foreground">경로</th>
+                <th className="px-3 py-2 text-left font-medium text-muted-foreground">상태</th>
                 <th className="px-3 py-2 text-right font-medium text-muted-foreground">크기</th>
+                <th className="px-3 py-2 text-left font-medium text-muted-foreground">캐시</th>
               </tr>
             </thead>
             <tbody>
@@ -118,17 +118,17 @@ export function DomainLogTable({ host, period, range, refetchIntervalMs = false 
                       hour12: false,
                     })}
                   </td>
-                  <td className={`px-3 py-1.5 font-medium ${statusColor(log.status_code)}`}>
-                    {log.status_code}
-                  </td>
-                  <td className={`px-3 py-1.5 font-medium ${cacheColor(log.cache_status)}`}>
-                    {log.cache_status}
-                  </td>
                   <td className="px-3 py-1.5 text-foreground max-w-[320px] truncate">
                     {log.path}
                   </td>
+                  <td className={`px-3 py-1.5 font-medium ${statusColor(log.status_code)}`}>
+                    {log.status_code}
+                  </td>
                   <td className="px-3 py-1.5 text-right text-muted-foreground">
                     {formatBytes(log.size)}
+                  </td>
+                  <td className={`px-3 py-1.5 font-medium ${cacheColor(log.cache_status)}`}>
+                    {log.cache_status}
                   </td>
                 </tr>
               ))}

@@ -596,6 +596,7 @@ async fn proxy_handler(
                     response_time_ms: elapsed_ms,
                     timestamp: chrono::Utc::now(),
                     cache_status: "HIT".to_string(),
+                    size: out_bytes,
                 });
             }
             tracing::info!(host=%host, url=%uri, elapsed_ms=%elapsed_ms, status=%resp_status.as_u16(), "L1 메모리 캐시 HIT");
@@ -708,6 +709,7 @@ async fn proxy_handler(
                     response_time_ms: elapsed_ms,
                     timestamp: chrono::Utc::now(),
                     cache_status: "HIT".to_string(),
+                    size: out_bytes,
                 });
             }
             tracing::info!(host=%host, url=%uri, elapsed_ms=%elapsed_ms, status=%resp_status.as_u16(), "L2 디스크 캐시 HIT (L1 승격)");
@@ -1039,6 +1041,7 @@ async fn proxy_handler(
                         response_time_ms: elapsed_ms,
                         timestamp: chrono::Utc::now(),
                         cache_status: "MISS".to_string(),
+                        size: out_bytes,
                     });
                 }
                 tracing::info!(
@@ -1080,6 +1083,7 @@ async fn proxy_handler(
                         response_time_ms: elapsed_ms,
                         timestamp: chrono::Utc::now(),
                         cache_status: "BYPASS".to_string(),
+                        size: 0,
                     });
                 }
                 record_domain_outcome(&ps.counters, &host, CacheOutcome::BypassOther, 0, elapsed_ms);
@@ -1130,6 +1134,7 @@ async fn proxy_handler(
                     response_time_ms: elapsed_ms,
                     timestamp: chrono::Utc::now(),
                     cache_status: "BYPASS".to_string(),
+                    size: 0,
                 });
             }
             return (StatusCode::BAD_GATEWAY, "Origin server unreachable").into_response();
@@ -1160,6 +1165,7 @@ async fn proxy_handler(
             response_time_ms: elapsed_ms,
             timestamp: chrono::Utc::now(),
             cache_status: "BYPASS".to_string(),
+            size: response_body.len() as u64,
         });
     }
     record_domain_outcome(&ps.counters, &host, CacheOutcome::BypassMethod, response_body.len() as u64, elapsed_ms);
