@@ -173,7 +173,7 @@ export class DomainStatsRepository {
       // custom은 반드시 유효한 range를 전달해야 한다 — validateRange가 검증
       validateRange(period, range);
       since = range!.from;
-      until = range.to;
+      until = range!.to;
       const span = until - since;
       // 스팬에 따라 버킷 크기 자동 선택: 1시간 이내→60초, 하루 이내→3600초, 그 이상→86400초
       bucketSize = span <= HOUR_SECONDS ? MINUTE_SECONDS : span <= DAY_SECONDS ? HOUR_SECONDS : DAY_SECONDS;
