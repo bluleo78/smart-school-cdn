@@ -26,18 +26,25 @@ impl OptimizerClient {
         })
     }
 
-    /// 콘텐츠 최적화 — 실패 시 None 반환 (caller가 원본 사용)
+    /// 콘텐츠 최적화 — 성공 시 (bytes, content_type, decision, orig_size, out_size).
+    /// gRPC 실패 시 None (caller는 원본 사용, Phase 14 events 발행도 생략).
     pub async fn optimize(
         &mut self,
         data: Bytes,
         content_type: String,
         domain: &str,
-    ) -> Option<(Bytes, String)> {
+    ) -> Option<(Bytes, String, Option<String>, u64, u64)> {
         let resp = self.inner.optimize(OptimizeRequest {
             data: data.to_vec(),
             content_type,
             domain: domain.to_string(),
         }).await.ok()?.into_inner();
-        Some((Bytes::from(resp.data), resp.content_type))
+        Some((
+            Bytes::from(resp.data),
+            resp.content_type,
+            resp.decision,
+            resp.original_size as u64,
+            resp.optimized_size as u64,
+        ))
     }
 }

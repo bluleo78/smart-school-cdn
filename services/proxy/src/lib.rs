@@ -235,11 +235,13 @@ fn compute_cache_key(method: &str, host: &str, path: &str, query: &str) -> Strin
     hex::encode(hash)
 }
 
-/// 이미지 콘텐츠 최적화 대상 여부 — image/jpeg, image/png만 optimizer 호출
+/// 이미지 콘텐츠 최적화 대상 여부 — optimizer-service가 디코드 가능한 포맷 전체.
+/// Phase 14: JPEG/PNG 외에 WebP/GIF/BMP/TIFF도 포함(리사이즈·size-guard 대상).
 fn should_optimize(content_type: Option<&str>) -> bool {
     matches!(
         content_type.unwrap_or("").split(';').next().unwrap_or("").trim(),
-        "image/jpeg" | "image/png"
+        "image/jpeg" | "image/png" | "image/webp"
+        | "image/gif"  | "image/bmp" | "image/tiff"
     )
 }
 
@@ -733,8 +735,27 @@ async fn proxy_handler(
                 let (store_bytes, store_ct) = if should_optimize(content_type.as_deref()) {
                     if let Some(ref opt) = ps_c.optimizer {
                         let ct = content_type.clone().unwrap_or_default();
-                        match opt.lock().await.optimize(resp_body.clone(), ct, &domain).await {
-                            Some((ob, oct)) => (ob, Some(oct)),
+                        let started = std::time::Instant::now();
+                        match opt.lock().await.optimize(resp_body.clone(), ct.clone(), &domain).await {
+                            Some((ob, oct, decision, orig_sz, out_sz)) => {
+                                let elapsed_ms = started.elapsed().as_millis() as u64;
+                                // Phase 14: decision이 Some일 때만 image_optimize 이벤트 발행.
+                                // enabled=false 프로파일은 server가 None 반환 → 관찰 대상 X (노이즈 회피).
+                                if let (Some(events), Some(dec)) = (ps_c.events.as_ref(), decision) {
+                                    events.emit(crate::events::EventRecord {
+                                        event_type:   "image_optimize",
+                                        host:         host_c.clone(),
+                                        url:          format!("https://{}{}", host_c, uri_str),
+                                        decision:     dec,
+                                        orig_size:    Some(orig_sz),
+                                        out_size:     Some(out_sz),
+                                        range_header: None,
+                                        content_type: Some(oct.clone()),
+                                        elapsed_ms,
+                                    });
+                                }
+                                (ob, Some(oct))
+                            }
                             None => (resp_body.clone(), content_type.clone()),
                         }
                     } else {
@@ -1614,11 +1635,13 @@ mod tests {
             let inner = req.into_inner();
             let size = inner.data.len() as i64;
             // 테스트에서는 원본 그대로 반환 — 기존 테스트 동작에 영향 없음
+            // Phase 14: decision은 None — 패스스루 mock이라 events 발행 대상 아님
             Ok(tonic::Response::new(OptimizeResponse {
                 data: inner.data,
                 content_type: inner.content_type,
                 original_size: size,
                 optimized_size: size,
+                decision: None,
             }))
         }
 
@@ -2470,15 +2493,22 @@ mod tests {
     }
 
     #[test]
-    fn should_optimize_은_이미지_타입만_true를_반환한다() {
+    fn should_optimize_은_디코드_가능한_이미지_타입만_true를_반환한다() {
+        // Phase 14: optimizer-service가 디코드 가능한 6종 + charset 파라미터 허용
         assert!(should_optimize(Some("image/jpeg")));
         assert!(should_optimize(Some("image/png")));
-        assert!(!should_optimize(Some("image/webp")));
+        assert!(should_optimize(Some("image/webp")));
+        assert!(should_optimize(Some("image/gif")));
+        assert!(should_optimize(Some("image/bmp")));
+        assert!(should_optimize(Some("image/tiff")));
+        // 디코드 미지원 포맷은 false
         assert!(!should_optimize(Some("image/avif")));
+        assert!(!should_optimize(Some("image/heic")));
+        assert!(!should_optimize(Some("image/svg+xml")));
         assert!(!should_optimize(Some("text/html")));
         assert!(!should_optimize(Some("application/javascript")));
         assert!(!should_optimize(None));
-        // content-type with charset
+        // charset 파라미터가 붙어도 잘라낸 뒤 비교
         assert!(should_optimize(Some("image/jpeg; charset=utf-8")));
     }
 
@@ -2562,11 +2592,13 @@ mod tests {
             let original_size = inner.data.len() as i64;
             let optimized = b"OPTIMIZED_WEBP".to_vec();
             let optimized_size = optimized.len() as i64;
+            // Phase 14: decision은 None — 테스트는 proxy 응답만 검증, events 발행 경로 확인 X
             Ok(tonic::Response::new(OptimizeResponse {
                 data: optimized,
                 content_type: "image/webp".to_string(),
                 original_size,
                 optimized_size,
+                decision: None,
             }))
         }
         async fn get_profiles(&self, _: tonic::Request<OptimizerEmpty>) -> Result<tonic::Response<GetProfilesResponse>, tonic::Status> {
