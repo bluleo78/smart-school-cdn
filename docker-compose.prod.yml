@@ -81,6 +81,11 @@ services:
       - STORAGE_GRPC_URL=http://storage-service:50051
       - TLS_GRPC_URL=http://tls-service:50052
       - RUST_LOG=info
+      # Phase 15 — 텍스트 압축 (비활성화 시 false 또는 0)
+      - TEXT_COMPRESS_ENABLED=true
+      - TEXT_COMPRESS_MIN_BYTES=1024
+      - TEXT_COMPRESS_BR_LEVEL=11
+      - TEXT_COMPRESS_GZIP_LEVEL=6
     depends_on:
       storage-service:
         condition: service_healthy

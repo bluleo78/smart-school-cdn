@@ -532,10 +532,11 @@
 | 12 | 캐시 통계 재설계 | L1/L2/bypass 4분류 + 스택 차트 | 도메인별 비율 + X-Cache-Reason |
 | 13 | 미디어 Range + 관찰 인프라 | 206/416 + no-store override + optimization_events | decision 4종 수집 가능 |
 | 14 | Optimizer 포맷 보존 | JPEG/PNG/WebP 포맷 유지 + size-guard + libwebp | `image_optimize` 이벤트 발행 |
+| 15 | 텍스트 Brotli 프리컴프레스 | HTML/JS/CSS level 11 + Accept-Encoding 협상 + size-guard | `text_compress` 이벤트 발행 |
 
 ---
 
-## Phase 15 (예정): 텍스트 Brotli/gzip 프리컴프레스
+## Phase 15: 텍스트 Brotli/gzip 프리컴프레스 — 완료 (2026-04-19)
 
 > 목표: HTML/CSS/JS/JSON/SVG 등 텍스트 응답에 Brotli 또는 gzip 프리컴프레스 적용. `Accept-Encoding` 협상 지원. Phase 7에서 체크됐으나 실제로는 미구현된 항목을 정식 페이즈로 분리.
 
@@ -555,10 +556,15 @@
 - 이미 `Content-Encoding`이 붙은 응답 재압축 (이중 압축 방지)
 - 스트리밍 응답 압축 (현재 응답 버퍼링 가정)
 
+### 15-4. 설계 결정 (2026-04-19 브레인스토밍 확정)
+- 실행 주체: **proxy 직접 압축** (optimizer-service 경유 X) — 텍스트는 순수 CPU 작업이라 gRPC 왕복 불필요
+- 캐시 저장: **원본 + brotli 변형 둘 다 저장** — pre-compress 비용을 MISS 1회에 분할상환
+- 압축 레벨: **Brotli level 11** (pre-compress), 드문 미지원 클라이언트엔 저장된 br을 decompress 후 **gzip level 6** on-demand 폴백
+- 판별 규칙: 엄격 화이트리스트 + 원본 ≥ 1024 bytes + 응답에 `Content-Encoding` 존재 시 스킵 + 압축 후 > 원본×0.9면 스킵(size-guard)
+- 파라미터 관리: **환경변수만** (`TEXT_COMPRESS_ENABLED`, `TEXT_COMPRESS_MIN_BYTES`, `TEXT_COMPRESS_BR_LEVEL`, `TEXT_COMPRESS_GZIP_LEVEL`) — Admin UI/API는 Phase 17로 연기
+
 ### 오픈 이슈
-- Brotli 레벨 선택 (pre-compress 기준 level 11 vs on-demand level 4~6)
-- 브라우저 Brotli 지원률 (iPad Safari 11+ — 실질 100%)
-- proxy 메모리 사용량 (압축 시 추가 버퍼)
+- proxy 메모리 사용량 (압축 시 추가 버퍼) — Phase 15 배포 후 관찰
 
 ---
 
@@ -607,3 +613,23 @@
 - 스크럽/점프 시나리오에서 불필요한 origin 왕복 감소 측정
 - 첫 바이트 지연(TTFB) 개선 수치 확보
 - 다중 동시 요청 중복 fetch 없음 확인
+
+---
+
+## Phase 17 (후보): 텍스트 압축 프로파일 관리 API / UI
+
+> 목표: Phase 15에서 환경변수로 고정한 텍스트 압축 파라미터를 런타임 조정 가능한 프로파일로 승격. Phase 14와 동일하게 "먼저 배포 → 관찰 → 필요 시 UI 추가" 패턴을 따른다.
+
+### 17-1. 승격 조건
+- Phase 15 배포 후 `optimization_events`(`event_type = 'text_compress'`) 실측으로 아래 중 하나 이상 확인
+  - content-type별 압축 이득 편차가 커서 개별 레벨 차등이 필요
+  - 특정 호스트/경로 대상만 on/off 하고 싶은 운영 요구
+  - size-guard 임계값(원본×0.9, 최소 1024 bytes)을 현장에서 조정할 필요
+
+### 17-2. 범위
+- `GET /api/compressor/profile` / `PUT /api/compressor/profile` — enabled, min_bytes, br_level, gzip_level, size_guard_ratio, content_type 화이트리스트
+- admin-server → proxy HTTP 설정 브로드캐스트 (이미지 프로파일과 동일 경로 재사용)
+- admin-web에 텍스트 압축 설정 섹션 추가 (이미지 프로파일 페이지 옆)
+
+### 17-3. 비목표
+- content-type별 레벨 차등은 17-1의 실측이 근거를 제공했을 때만 도입 (측정 전 도입 금지 — YAGNI)
