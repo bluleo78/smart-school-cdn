@@ -464,6 +464,54 @@ export async function domainRoutes(
     }
   });
 
+  /** 기간 내 상위 URL 집계 — 요청 수 내림차순으로 limit개 반환 */
+  app.get<{
+    Params: { host: string };
+    Querystring: {
+      period?: string; from?: string; to?: string; limit?: string;
+    };
+  }>(
+    '/api/domains/:host/top-urls',
+    async (request, reply) => {
+      const { host } = request.params;
+      const q = request.query;
+      // limit 방어: 1~20, 기본 5
+      const limit = Math.min(Math.max(Number(q.limit ?? 5) || 5, 1), 20);
+
+      // 기간별 since/until 결정 — 명명 상수 재사용
+      const now = Math.floor(Date.now() / 1000);
+      let since: number, until: number;
+      if (q.period === '1h') {
+        // 최근 1시간
+        since = now - LOG_HOUR_SECONDS; until = now;
+      } else if (q.period === '24h') {
+        since = now - LOG_DAY_SECONDS; until = now;
+      } else if (q.period === '7d') {
+        since = now - LOG_WEEK_SECONDS; until = now;
+      } else if (q.period === '30d') {
+        since = now - LOG_MONTH_SECONDS; until = now;
+      } else if (q.period === 'custom') {
+        // custom: from/to 필수 — 누락·비정수·역전 시 400 반환
+        const f = Number(q.from), t = Number(q.to);
+        if (!Number.isFinite(f) || !Number.isFinite(t) || t <= f) {
+          return reply.code(400).send({ error: 'period=custom requires numeric from < to' });
+        }
+        since = f; until = t;
+      } else {
+        // 기본 24h
+        since = now - LOG_DAY_SECONDS; until = now;
+      }
+
+      const rows = domainRepo.database.prepare(
+        `SELECT path, COUNT(*) AS count FROM access_logs
+         WHERE host = ? AND timestamp >= ? AND timestamp < ?
+         GROUP BY path ORDER BY count DESC LIMIT ?`
+      ).all(host, since, until, limit) as Array<{ path: string; count: number }>;
+
+      return { urls: rows };
+    },
+  );
+
   /** 도메인 삭제 */
   app.delete<{ Params: { host: string } }>('/api/domains/:host', async (request, reply) => {
     // URL 인코딩된 호스트 디코딩 (*.textbook.com → %2A.textbook.com으로 전달됨)

@@ -338,6 +338,38 @@ describe('GET /api/domains/summary — L1/L2/bypass 비율', () => {
   });
 });
 
+describe('GET /api/domains/:host/top-urls', () => {
+  it('GET /api/domains/:host/top-urls — 기간 내 상위 5 URL 반환', async () => {
+    const repo = makeRepo();
+    repo.upsert('a.test', 'https://a.test');
+    const app = buildApp(repo);
+    const now = Math.floor(Date.now() / 1000);
+    const stmt = repo.database.prepare(
+      `INSERT INTO access_logs (timestamp, host, method, path, status_code, cache_status, size)
+       VALUES (?, 'a.test', 'GET', ?, 200, 'HIT', 100)`
+    );
+    // /a x3, /b x2, /c x1 (전부 최근 1시간 내)
+    ['/a','/a','/a','/b','/b','/c'].forEach((p) => stmt.run(now - 300, p));
+
+    const res = await app.inject({ method: 'GET', url: '/api/domains/a.test/top-urls?period=1h&limit=3' });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body) as { urls: Array<{ path: string; count: number }> };
+    expect(body.urls).toEqual([
+      { path: '/a', count: 3 },
+      { path: '/b', count: 2 },
+      { path: '/c', count: 1 },
+    ]);
+  });
+
+  it('GET /api/domains/:host/top-urls — custom + 잘못된 from/to 는 400', async () => {
+    const repo = makeRepo();
+    repo.upsert('a.test', 'https://a.test');
+    const app = buildApp(repo);
+    const res = await app.inject({ method: 'GET', url: '/api/domains/a.test/top-urls?period=custom&from=1&to=1' });
+    expect(res.statusCode).toBe(400);
+  });
+});
+
 describe('GET /api/domains/:host/logs — period/from/to/q 필터', () => {
   it('period=1h 으로 최근 1시간만 반환', async () => {
     const repo = makeRepo();
