@@ -346,6 +346,34 @@ enum RangeOutcome {
     Invalid,
 }
 
+/// HIT 응답 바디 선택 — Accept-Encoding 협상 결과에 따라 원본/br/gzip 중 하나 반환.
+/// Range 요청 또는 body_br 부재 시 원본(identity) 반환.
+/// 반환: (body_to_send, Option<content_encoding_header_value>)
+fn select_encoded_body(
+    body: &Bytes,
+    body_br: Option<&Bytes>,
+    has_range: bool,
+    gzip_level: u32,
+    accept_encoding: Option<&str>,
+) -> (Bytes, Option<&'static str>) {
+    if has_range || body_br.is_none() {
+        return (body.clone(), None);
+    }
+    match compress::negotiate_encoding(accept_encoding) {
+        compress::Encoding::Br => (body_br.unwrap().clone(), Some("br")),
+        compress::Encoding::Gzip => {
+            match compress::decompress_brotli(body_br.unwrap()) {
+                Ok(raw) => match compress::encode_gzip(&raw, gzip_level) {
+                    Ok(gz) => (Bytes::from(gz), Some("gzip")),
+                    Err(_) => (body.clone(), None),
+                },
+                Err(_) => (body.clone(), None),
+            }
+        }
+        compress::Encoding::Identity => (body.clone(), None),
+    }
+}
+
 /// 요청 헤더와 전체 바이트 크기를 받아 RangeOutcome 계산.
 fn evaluate_range(headers: &HeaderMap, total_size: u64) -> RangeOutcome {
     let Some(raw) = headers
@@ -516,25 +544,38 @@ async fn proxy_handler(
             let elapsed_ms = start.elapsed().as_millis() as u64;
             // Range 헤더 평가 — 있으면 206 슬라이스, 범위 초과면 416, 없거나 파싱 실패면 200
             let total = entry.body.len() as u64;
-            let (resp_status, resp_body, content_range_hdr, decision, out_bytes) =
+            let has_range_req = headers.get(axum::http::header::RANGE).is_some();
+            let ae = headers.get(axum::http::header::ACCEPT_ENCODING).and_then(|v| v.to_str().ok());
+
+            let (resp_status, resp_body, content_range_hdr, decision, out_bytes, content_encoding) =
                 match evaluate_range(&headers, total) {
-                    RangeOutcome::Full => (
-                        StatusCode::OK, entry.body.clone(), None,
-                        CacheOutcome::L1Hit.as_header().to_string(), total,
-                    ),
+                    RangeOutcome::Full => {
+                        let (negotiated_body, ce) = select_encoded_body(
+                            &entry.body,
+                            entry.body_br.as_ref(),
+                            has_range_req,
+                            ps.text_compress.gzip_level,
+                            ae,
+                        );
+                        let out = negotiated_body.len() as u64;
+                        (
+                            StatusCode::OK, negotiated_body, None,
+                            CacheOutcome::L1Hit.as_header().to_string(), out, ce,
+                        )
+                    }
                     RangeOutcome::Partial { start, end } => {
                         let sliced = entry.body.slice(start as usize..=end as usize);
                         let len = sliced.len() as u64;
                         (
                             StatusCode::PARTIAL_CONTENT, sliced,
                             Some(range::format_content_range(start, end, total)),
-                            format!("{}_206", CacheOutcome::L1Hit.as_header()), len,
+                            format!("{}_206", CacheOutcome::L1Hit.as_header()), len, None,
                         )
                     }
                     RangeOutcome::Invalid => (
                         StatusCode::RANGE_NOT_SATISFIABLE, Bytes::new(),
                         Some(range::format_content_range_unsatisfied(total)),
-                        format!("{}_416", CacheOutcome::L1Hit.as_header()), 0,
+                        format!("{}_416", CacheOutcome::L1Hit.as_header()), 0, None,
                     ),
                 };
 
@@ -568,6 +609,13 @@ async fn proxy_handler(
             if let Some(cr) = content_range_hdr {
                 resp = resp.header("Content-Range", cr);
             }
+            // Phase 15: Accept-Encoding 협상 결과 헤더
+            if let Some(enc) = content_encoding {
+                resp = resp.header("Content-Encoding", enc);
+            }
+            if entry.body_br.is_some() {
+                resp = resp.header("Vary", "Accept-Encoding");
+            }
             return resp
                 .header("X-Cache-Status", HeaderValue::from_static("HIT"))
                 .header("X-Cache-Reason", HeaderValue::from_static(CacheOutcome::L1Hit.as_header()))
@@ -579,9 +627,9 @@ async fn proxy_handler(
 
     // ── L2 디스크 캐시 확인 (storage gRPC) ───────────────────────
     if let Some(ref key) = cache_key {
-        if let Some((cached_bytes, content_type, _cached_br)) = ps.storage.lock().await.get(key).await {
+        if let Some((cached_bytes, content_type, cached_br)) = ps.storage.lock().await.get(key).await {
             // Vec<u8> → Bytes로 한 번 변환 (이후 clone은 Arc refcount 증가라 저렴)
-            let body_bytes: Bytes = Bytes::from(cached_bytes);
+            let body_bytes: Bytes = cached_bytes;
             let total = body_bytes.len() as u64;
 
             // L2 HIT → L1 승격 (16MB 이하만)
@@ -590,32 +638,44 @@ async fn proxy_handler(
                 ps.memory_cache.insert(key.clone(), Arc::new(MemoryCacheEntry {
                     body: body_bytes.clone(),
                     content_type: content_type.clone(),
-                    body_br: _cached_br.clone(),
+                    body_br: cached_br.clone(),
                 })).await;
             }
 
             let elapsed_ms = start.elapsed().as_millis() as u64;
+            let has_range_req = headers.get(axum::http::header::RANGE).is_some();
+            let ae = headers.get(axum::http::header::ACCEPT_ENCODING).and_then(|v| v.to_str().ok());
 
             // Range 헤더 평가 — 있으면 206 슬라이스, 범위 초과면 416
-            let (resp_status, resp_body, content_range_hdr, decision, out_bytes) =
+            let (resp_status, resp_body, content_range_hdr, decision, out_bytes, content_encoding) =
                 match evaluate_range(&headers, total) {
-                    RangeOutcome::Full => (
-                        StatusCode::OK, body_bytes.clone(), None,
-                        CacheOutcome::L2Hit.as_header().to_string(), total,
-                    ),
+                    RangeOutcome::Full => {
+                        let (negotiated_body, ce) = select_encoded_body(
+                            &body_bytes,
+                            cached_br.as_ref(),
+                            has_range_req,
+                            ps.text_compress.gzip_level,
+                            ae,
+                        );
+                        let out = negotiated_body.len() as u64;
+                        (
+                            StatusCode::OK, negotiated_body, None,
+                            CacheOutcome::L2Hit.as_header().to_string(), out, ce,
+                        )
+                    }
                     RangeOutcome::Partial { start, end } => {
                         let sliced = body_bytes.slice(start as usize..=end as usize);
                         let len = sliced.len() as u64;
                         (
                             StatusCode::PARTIAL_CONTENT, sliced,
                             Some(range::format_content_range(start, end, total)),
-                            format!("{}_206", CacheOutcome::L2Hit.as_header()), len,
+                            format!("{}_206", CacheOutcome::L2Hit.as_header()), len, None,
                         )
                     }
                     RangeOutcome::Invalid => (
                         StatusCode::RANGE_NOT_SATISFIABLE, Bytes::new(),
                         Some(range::format_content_range_unsatisfied(total)),
-                        format!("{}_416", CacheOutcome::L2Hit.as_header()), 0,
+                        format!("{}_416", CacheOutcome::L2Hit.as_header()), 0, None,
                     ),
                 };
 
@@ -648,6 +708,13 @@ async fn proxy_handler(
             }
             if let Some(cr) = content_range_hdr {
                 resp = resp.header("Content-Range", cr);
+            }
+            // Phase 15: Accept-Encoding 협상 결과 헤더
+            if let Some(enc) = content_encoding {
+                resp = resp.header("Content-Encoding", enc);
+            }
+            if cached_br.is_some() {
+                resp = resp.header("Vary", "Accept-Encoding");
             }
             return resp
                 .header("X-Cache-Status", HeaderValue::from_static("HIT"))
@@ -2784,6 +2851,180 @@ mod tests {
                 .unwrap();
         });
         format!("http://127.0.0.1:{}", addr.port())
+    }
+
+    // ─── Phase 15 HIT 통합 테스트 ───────────────────────────────────────
+
+    /// Phase 15 Task 13: HIT 시 br Accept-Encoding 요청 → br 변형 응답
+    #[tokio::test]
+    async fn phase15_hit_accept_encoding_br_시_br_변형을_응답한다() {
+        let html = "<!DOCTYPE html>".to_string() + &"<p>x</p>".repeat(500);
+        let origin_url = start_mock_origin_server(html.as_bytes().to_vec(), "text/html").await;
+
+        let storage_url = start_mock_storage_server().await;
+        let tls_url = start_mock_tls_server().await;
+
+        let storage_client = loop {
+            match clients::storage_client::StorageClient::connect(&storage_url).await {
+                Ok(c) => break c,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        };
+        let tls = loop {
+            match clients::tls_client::TlsClient::connect(&tls_url).await {
+                Ok(c) => break c,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        };
+        let cert_cache = tls.cert_cache.clone();
+
+        let mut dm = HashMap::new();
+        dm.insert("hit-br.local".to_string(), origin_url);
+        let domain_map: DomainMap = Arc::new(tokio::sync::RwLock::new(dm));
+
+        let memory_cache: moka::future::Cache<String, Arc<MemoryCacheEntry>> =
+            moka::future::Cache::builder().max_capacity(100).build();
+
+        let ps = ProxyState {
+            shared: Arc::new(tokio::sync::RwLock::new(state::AppState::new())),
+            http_client: reqwest::Client::new(),
+            storage: Arc::new(Mutex::new(storage_client)),
+            tls_client: Arc::new(Mutex::new(tls)),
+            optimizer: None,
+            domain_map,
+            cert_cache,
+            coalescer: Arc::new(coalescer::Coalescer::new()),
+            memory_cache: memory_cache.clone(),
+            counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            events: None,
+            text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6 },
+        };
+
+        // 1차 요청: MISS — brotli 저장
+        let router = build_proxy_router(ps.clone());
+        let resp1 = router
+            .oneshot(
+                Request::builder()
+                    .uri("/a.html")
+                    .header("host", "hit-br.local")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp1.status(), StatusCode::OK);
+        drop(to_bytes(resp1.into_body(), 1024 * 1024).await.unwrap());
+
+        // moka 비동기 캐시는 pending tasks 완료 후 항목 조회 가능
+        memory_cache.run_pending_tasks().await;
+
+        // 2차 요청: HIT with br
+        let router2 = build_proxy_router(ps.clone());
+        let resp2 = router2
+            .oneshot(
+                Request::builder()
+                    .uri("/a.html")
+                    .header("host", "hit-br.local")
+                    .header("accept-encoding", "br, gzip")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp2.status(), StatusCode::OK);
+        assert_eq!(
+            resp2.headers().get("content-encoding").and_then(|v| v.to_str().ok()),
+            Some("br"),
+            "br Accept-Encoding 시 content-encoding: br 이어야 한다"
+        );
+        assert!(resp2.headers().get("vary").is_some(), "Vary 헤더가 있어야 한다");
+        let body = to_bytes(resp2.into_body(), 1024 * 1024).await.unwrap();
+        assert!(body.len() < html.len() / 2, "br 압축 응답은 원본보다 작아야 한다: {} vs {}", body.len(), html.len());
+    }
+
+    /// Phase 15 Task 13: HIT 시 Accept-Encoding 없으면 identity 응답
+    #[tokio::test]
+    async fn phase15_hit_accept_encoding_없으면_원본_identity_응답() {
+        let html = "<!DOCTYPE html>".to_string() + &"<p>x</p>".repeat(500);
+        let origin_url = start_mock_origin_server(html.as_bytes().to_vec(), "text/html").await;
+
+        let storage_url = start_mock_storage_server().await;
+        let tls_url = start_mock_tls_server().await;
+
+        let storage_client = loop {
+            match clients::storage_client::StorageClient::connect(&storage_url).await {
+                Ok(c) => break c,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        };
+        let tls = loop {
+            match clients::tls_client::TlsClient::connect(&tls_url).await {
+                Ok(c) => break c,
+                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+            }
+        };
+        let cert_cache = tls.cert_cache.clone();
+
+        let mut dm = HashMap::new();
+        dm.insert("hit-identity.local".to_string(), origin_url);
+        let domain_map: DomainMap = Arc::new(tokio::sync::RwLock::new(dm));
+
+        let memory_cache: moka::future::Cache<String, Arc<MemoryCacheEntry>> =
+            moka::future::Cache::builder().max_capacity(100).build();
+
+        let ps = ProxyState {
+            shared: Arc::new(tokio::sync::RwLock::new(state::AppState::new())),
+            http_client: reqwest::Client::new(),
+            storage: Arc::new(Mutex::new(storage_client)),
+            tls_client: Arc::new(Mutex::new(tls)),
+            optimizer: None,
+            domain_map,
+            cert_cache,
+            coalescer: Arc::new(coalescer::Coalescer::new()),
+            memory_cache: memory_cache.clone(),
+            counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            events: None,
+            text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6 },
+        };
+
+        // 1차 MISS
+        let router = build_proxy_router(ps.clone());
+        let resp1 = router
+            .oneshot(
+                Request::builder()
+                    .uri("/b.html")
+                    .header("host", "hit-identity.local")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp1.status(), StatusCode::OK);
+        drop(to_bytes(resp1.into_body(), 1024 * 1024).await.unwrap());
+
+        memory_cache.run_pending_tasks().await;
+
+        // 2차 HIT without Accept-Encoding
+        let router2 = build_proxy_router(ps.clone());
+        let resp2 = router2
+            .oneshot(
+                Request::builder()
+                    .uri("/b.html")
+                    .header("host", "hit-identity.local")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp2.status(), StatusCode::OK);
+        assert!(
+            resp2.headers().get("content-encoding").is_none(),
+            "Accept-Encoding 없으면 content-encoding 헤더가 없어야 한다"
+        );
+        let body = to_bytes(resp2.into_body(), 1024 * 1024).await.unwrap();
+        assert_eq!(body.len(), html.len(), "identity 응답은 원본 크기와 같아야 한다");
     }
 
     // ─── Phase 15 MISS 통합 테스트 ──────────────────────────────────────
