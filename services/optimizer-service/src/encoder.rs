@@ -60,6 +60,15 @@ pub fn encode_webp_lossy(img: &DynamicImage, quality: u8) -> Result<Vec<u8>, Enc
     Ok(webp_bytes.to_vec())
 }
 
+/// WebP lossless 인코딩 — libwebp의 무손실 모드.
+/// BMP/GIF(정지)/TIFF 같은 무손실 소스의 WebP 컨테이너 전환 타겟으로 사용.
+/// 픽셀이 bit-exact 라운드트립된다.
+pub fn encode_webp_lossless(img: &DynamicImage) -> Result<Vec<u8>, EncodeError> {
+    let encoder = webp::Encoder::from_image(img).map_err(|_| EncodeError::Encode)?;
+    let webp_bytes = encoder.encode_lossless();
+    Ok(webp_bytes.to_vec())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -152,6 +161,36 @@ mod tests {
     fn webp_lossy_차원이_유지된다() {
         let img = sample_rgb(20, 15);
         let out = encode_webp_lossy(&img, 85).unwrap();
+        let decoded = image::load_from_memory(&out).unwrap();
+        assert_eq!(decoded.width(),  20);
+        assert_eq!(decoded.height(), 15);
+    }
+
+    #[test]
+    fn webp_lossless_인코딩이_유효한_출력을_낸다() {
+        let img = sample_rgba(32, 32);
+        let out = encode_webp_lossless(&img).expect("encode 성공");
+        assert_eq!(&out[..4],  b"RIFF");
+        assert_eq!(&out[8..12], b"WEBP");
+    }
+
+    #[test]
+    fn webp_lossless_는_bit_exact_라운드트립한다() {
+        // lossless는 디코드 후 픽셀이 동일해야 한다
+        let mut src = image::RgbaImage::new(16, 16);
+        for (x, y, pix) in src.enumerate_pixels_mut() {
+            *pix = image::Rgba([(x * 8) as u8, (y * 8) as u8, 100, 255]);
+        }
+        let img = DynamicImage::ImageRgba8(src.clone());
+        let out = encode_webp_lossless(&img).unwrap();
+        let decoded = image::load_from_memory(&out).unwrap().to_rgba8();
+        assert_eq!(decoded.as_raw(), src.as_raw());
+    }
+
+    #[test]
+    fn webp_lossless_차원이_유지된다() {
+        let img = sample_rgba(20, 15);
+        let out = encode_webp_lossless(&img).unwrap();
         let decoded = image::load_from_memory(&out).unwrap();
         assert_eq!(decoded.width(),  20);
         assert_eq!(decoded.height(), 15);
