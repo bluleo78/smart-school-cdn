@@ -1,5 +1,12 @@
 import type { Database } from 'better-sqlite3';
 
+// 시간 단위 상수 (초)
+const MINUTE_SECONDS = 60;
+const HOUR_SECONDS = 3600;
+const DAY_SECONDS = 86400;
+const WEEK_SECONDS = 604800;
+const MONTH_SECONDS = 2592000;
+
 /**
  * domain_stats 테이블 단일 행 타입
  * - host: 도메인 호스트
@@ -160,17 +167,17 @@ export class DomainStatsRepository {
       until = range.to;
       const span = until - since;
       // 스팬에 따라 버킷 크기 자동 선택: 1시간 이내→60초, 하루 이내→3600초, 그 이상→86400초
-      bucketSize = span <= 3600 ? 60 : span <= 86400 ? 3600 : 86400;
+      bucketSize = span <= HOUR_SECONDS ? MINUTE_SECONDS : span <= DAY_SECONDS ? HOUR_SECONDS : DAY_SECONDS;
     } else if (period === '1h') {
       // 1시간 기간: 60초 단위 버킷으로 세밀하게 집계
-      since = now - 3600;
+      since = now - HOUR_SECONDS;
       until = now;
-      bucketSize = 60;
+      bucketSize = MINUTE_SECONDS;
     } else {
       // 24h / 7d / 30d 기존 로직
       until = now;
-      bucketSize = period === '24h' ? 3600 : 86400;
-      since = period === '24h' ? now - 86400 : period === '7d' ? now - 604800 : now - 2592000;
+      bucketSize = period === '24h' ? HOUR_SECONDS : DAY_SECONDS;
+      since = period === '24h' ? now - DAY_SECONDS : period === '7d' ? now - WEEK_SECONDS : now - MONTH_SECONDS;
     }
 
     // 버킷별 집계: timestamp를 버킷 크기로 내림하여 그룹화
