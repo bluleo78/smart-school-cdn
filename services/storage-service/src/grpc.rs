@@ -24,19 +24,21 @@ pub struct StorageGrpc {
 
 #[tonic::async_trait]
 impl StorageService for StorageGrpc {
-    /// 캐시 조회 — HIT 시 body/content_type 반환, MISS 시 hit=false
+    /// 캐시 조회 — HIT 시 body/content_type/body_br 반환, MISS 시 hit=false
     async fn get(&self, req: Request<GetRequest>) -> Result<Response<GetResponse>, Status> {
         let key = req.into_inner().key;
         match self.cache.get(&key).await {
-            Some((body, ct)) => Ok(Response::new(GetResponse {
+            Some((body, ct, body_br)) => Ok(Response::new(GetResponse {
                 hit: true,
                 body: body.to_vec(),
                 content_type: ct.unwrap_or_default(),
+                body_br: body_br.map(|b| b.to_vec()).unwrap_or_default(),
             })),
             None => Ok(Response::new(GetResponse {
                 hit: false,
                 body: vec![],
                 content_type: String::new(),
+                body_br: vec![],
             })),
         }
     }
@@ -54,8 +56,9 @@ impl StorageService for StorageGrpc {
         } else {
             Some(r.content_type)
         };
+        let body_br = if r.body_br.is_empty() { None } else { Some(bytes::Bytes::from(r.body_br)) };
         self.cache
-            .put(&r.key, &r.url, &r.domain, ct, bytes::Bytes::from(r.body), ttl)
+            .put(&r.key, &r.url, &r.domain, ct, bytes::Bytes::from(r.body), ttl, body_br)
             .await;
         Ok(Response::new(PutResponse {}))
     }
@@ -158,6 +161,11 @@ mod tests {
         (StorageGrpc { cache }, dir)
     }
 
+    /// body_br 테스트용 — TempDir를 alive 상태로 유지하는 헬퍼
+    async fn new_grpc() -> (StorageGrpc, TempDir) {
+        make_grpc()
+    }
+
     #[tokio::test]
     async fn get_miss_시_hit_false를_반환한다() {
         let (grpc, _dir) = make_grpc();
@@ -182,6 +190,7 @@ mod tests {
             content_type: "video/mp4".to_string(),
             body:         b"hello".to_vec(),
             ttl_secs:     0,
+            body_br:      vec![],
         }))
         .await
         .unwrap();
@@ -208,6 +217,7 @@ mod tests {
             content_type: "image/png".to_string(),
             body: b"img".to_vec(),
             ttl_secs: 0,
+            body_br: vec![],
         }))
         .await
         .unwrap();
@@ -238,6 +248,7 @@ mod tests {
                 content_type: "text/plain".to_string(),
                 body:         vec![i],
                 ttl_secs:     0,
+                body_br:      vec![],
             }))
             .await
             .unwrap();
@@ -276,7 +287,7 @@ mod tests {
             grpc.put(Request::new(PutRequest {
                 key: format!("p{i}"), url: format!("https://ex.com/{i}"),
                 domain: "ex.com".to_string(), content_type: "text/plain".to_string(),
-                body: vec![i], ttl_secs: 0,
+                body: vec![i], ttl_secs: 0, body_br: vec![],
             }))
             .await
             .unwrap();
@@ -301,5 +312,50 @@ mod tests {
             .into_inner();
 
         assert!(res.online);
+    }
+
+    #[tokio::test]
+    async fn body_br이_포함된_put_후_get_에서_함께_반환된다() {
+        let (grpc, _dir) = new_grpc().await;
+        grpc.put(Request::new(PutRequest {
+            key:          "k-br".to_string(),
+            url:          "https://a.test/a.html".to_string(),
+            domain:       "a.test".to_string(),
+            content_type: "text/html".to_string(),
+            body:         b"<!DOCTYPE html>...original...".to_vec(),
+            ttl_secs:     0,
+            body_br:      b"FAKE_BR_BLOB".to_vec(),
+        })).await.unwrap();
+
+        let res = grpc.get(Request::new(GetRequest {
+            key: "k-br".to_string(),
+        })).await.unwrap().into_inner();
+
+        assert!(res.hit);
+        assert_eq!(res.body, b"<!DOCTYPE html>...original...");
+        assert_eq!(res.body_br, b"FAKE_BR_BLOB");
+        assert_eq!(res.content_type, "text/html");
+    }
+
+    #[tokio::test]
+    async fn body_br_가_없으면_빈_bytes로_반환된다() {
+        let (grpc, _dir) = new_grpc().await;
+        grpc.put(Request::new(PutRequest {
+            key:          "k-nobr".to_string(),
+            url:          "https://a.test/b.png".to_string(),
+            domain:       "a.test".to_string(),
+            content_type: "image/png".to_string(),
+            body:         b"PNG_DATA".to_vec(),
+            ttl_secs:     0,
+            body_br:      vec![],
+        })).await.unwrap();
+
+        let res = grpc.get(Request::new(GetRequest {
+            key: "k-nobr".to_string(),
+        })).await.unwrap().into_inner();
+
+        assert!(res.hit);
+        assert_eq!(res.body, b"PNG_DATA");
+        assert!(res.body_br.is_empty());
     }
 }

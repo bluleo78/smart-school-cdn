@@ -119,6 +119,8 @@ pub struct CacheEntry {
     pub accessed_at: DateTime<Utc>,
     /// 만료 시각 — None이면 만료 없음
     pub expires_at: Option<DateTime<Utc>>,
+    /// Phase 15: Brotli 프리컴프레스 변형 존재 여부
+    pub has_br: bool,
 }
 
 impl CacheEntry {
@@ -170,12 +172,12 @@ impl CacheLayer {
         }
     }
 
-    /// 캐시 조회 — HIT 시 (Bytes, content_type) 반환, MISS/만료 시 None
-    pub async fn get(&self, key: &str) -> Option<(Bytes, Option<String>)> {
+    /// 캐시 조회 — HIT 시 (Bytes, content_type, body_br) 반환, MISS/만료 시 None
+    pub async fn get(&self, key: &str) -> Option<(Bytes, Option<String>, Option<Bytes>)> {
         // 1단계: lock 안 — 인덱스 확인·수정만 수행, 경로만 추출
         enum LookupResult {
             Expired(PathBuf),
-            Hit(PathBuf, Option<String>),
+            Hit(PathBuf, Option<String>, bool),
         }
 
         let result = {
@@ -194,8 +196,9 @@ impl CacheLayer {
                 entry.hit_count += 1;
                 entry.accessed_at = Utc::now();
                 let content_type = entry.content_type.clone();
+                let has_br = entry.has_br;
                 let path = self.cache_dir.join(key);
-                LookupResult::Hit(path, content_type)
+                LookupResult::Hit(path, content_type, has_br)
             }
         }; // lock 해제
 
@@ -205,9 +208,18 @@ impl CacheLayer {
                 let _ = tokio::fs::remove_file(path).await;
                 None
             }
-            LookupResult::Hit(path, content_type) => {
+            LookupResult::Hit(path, content_type, has_br) => {
                 match tokio::fs::read(&path).await {
-                    Ok(data) => Some((Bytes::from(data), content_type)),
+                    Ok(data) => {
+                        // body_br 파일 읽기 (없으면 None)
+                        let body_br = if has_br {
+                            let br_path = path.with_extension("br");
+                            tokio::fs::read(&br_path).await.ok().map(Bytes::from)
+                        } else {
+                            None
+                        };
+                        Some((Bytes::from(data), content_type, body_br))
+                    }
                     Err(_) => {
                         // Fix 3: 디스크 파일 없으면 stale 인덱스 제거
                         let mut index = self.index.lock().await;
@@ -223,6 +235,7 @@ impl CacheLayer {
 
     /// 캐시 저장 — 용량 초과 시 LRU 퇴거 후 저장
     /// 저장 실패는 무시 (best-effort)
+    /// body_br: Phase 15 Brotli 프리컴프레스 변형 (Some이면 {key}.br 파일로 함께 저장)
     pub async fn put(
         &self,
         key: &str,
@@ -231,6 +244,7 @@ impl CacheLayer {
         content_type: Option<String>,
         bytes: Bytes,
         ttl: Option<Duration>,
+        body_br: Option<Bytes>,
     ) {
         let size = bytes.len() as u64;
 
@@ -252,6 +266,18 @@ impl CacheLayer {
             return;
         }
 
+        // body_br 사이드카 파일 저장 (실패해도 진행)
+        let has_br = if let Some(ref br_bytes) = body_br {
+            if !br_bytes.is_empty() {
+                let br_path = path.with_extension("br");
+                tokio::fs::write(&br_path, br_bytes).await.is_ok()
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
         // 인덱스 등록
         let now = Utc::now();
         let expires_at = ttl.map(|d| now + chrono::Duration::from_std(d).unwrap_or_default());
@@ -265,6 +291,7 @@ impl CacheLayer {
             created_at: now,
             accessed_at: now,
             expires_at,
+            has_br,
         };
 
         let mut index = self.index.lock().await;
@@ -578,12 +605,13 @@ mod tests {
                 Some("text/html".to_string()),
                 data.clone(),
                 None,
+                None,
             )
             .await;
 
         let result = cache.get(&key).await;
         assert!(result.is_some());
-        let (body, ct) = result.unwrap();
+        let (body, ct, _body_br) = result.unwrap();
         assert_eq!(body, data);
         assert_eq!(ct, Some("text/html".to_string()));
     }
@@ -601,6 +629,7 @@ mod tests {
                 "example.com",
                 None,
                 Bytes::from("data"),
+                None,
                 None,
             )
             .await;
@@ -627,6 +656,7 @@ mod tests {
                 None,
                 Bytes::from("expires"),
                 Some(Duration::from_secs(0)),
+                None,
             )
             .await;
 
@@ -653,6 +683,7 @@ mod tests {
                 None,
                 Bytes::from("0123456789"), // 10바이트
                 None,
+                None,
             )
             .await;
 
@@ -664,6 +695,7 @@ mod tests {
                 "a.com",
                 None,
                 Bytes::from("0123456789"), // 10바이트
+                None,
                 None,
             )
             .await;
@@ -683,7 +715,7 @@ mod tests {
 
         for key in &[&key1, &key2] {
             cache
-                .put(key, "https://b.com/x", "b.com", None, Bytes::from("data"), None)
+                .put(key, "https://b.com/x", "b.com", None, Bytes::from("data"), None, None)
                 .await;
         }
 
@@ -703,13 +735,13 @@ mod tests {
         let k3 = compute_cache_key("GET", "d.com", "/1", "");
 
         cache
-            .put(&k1, "https://c.com/1", "c.com", None, Bytes::from("x"), None)
+            .put(&k1, "https://c.com/1", "c.com", None, Bytes::from("x"), None, None)
             .await;
         cache
-            .put(&k2, "https://c.com/2", "c.com", None, Bytes::from("y"), None)
+            .put(&k2, "https://c.com/2", "c.com", None, Bytes::from("y"), None, None)
             .await;
         cache
-            .put(&k3, "https://d.com/1", "d.com", None, Bytes::from("z"), None)
+            .put(&k3, "https://d.com/1", "d.com", None, Bytes::from("z"), None, None)
             .await;
 
         let (count, _) = cache.purge_domain("c.com").await;
@@ -727,7 +759,7 @@ mod tests {
         for i in 0..3 {
             let key = compute_cache_key("GET", "e.com", &format!("/{i}"), "");
             cache
-                .put(&key, "https://e.com/x", "e.com", None, Bytes::from("data"), None)
+                .put(&key, "https://e.com/x", "e.com", None, Bytes::from("data"), None, None)
                 .await;
         }
 
@@ -749,6 +781,7 @@ mod tests {
                 "f.com",
                 None,
                 Bytes::from("data"),
+                None,
                 None,
             )
             .await;
