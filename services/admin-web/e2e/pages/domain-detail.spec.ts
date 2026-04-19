@@ -1,5 +1,5 @@
 /// 도메인 상세 페이지 E2E 테스트
-/// Overview(개요), Stats(통계), Settings(설정) 3개 탭의 핵심 시나리오를 검증한다.
+/// Overview(개요), Stats(통계), Logs(로그), Settings(설정) 4개 탭의 핵심 시나리오를 검증한다.
 import type { Page } from '@playwright/test';
 import { test, expect } from '../fixtures/test';
 import { mockApi } from '../fixtures/api-mock';
@@ -145,6 +145,16 @@ async function setupDetailMocks(page: Page) {
       json: { buckets: [{ ts: Date.now() - 60_000, l1_hits: 6, l2_hits: 1, miss: 2, bypass: 1 }] },
     }),
   );
+  // Top URL 목록 mock
+  await page.route('**/api/domains/textbook.com/top-urls*', (route) =>
+    route.fulfill({
+      json: { urls: [
+        { path: '/a', count: 30 },
+        { path: '/b', count: 20 },
+        { path: '/c', count: 10 },
+      ] },
+    }),
+  );
 }
 
 // ─────────────────────────────────────────────
@@ -198,6 +208,22 @@ test.describe('도메인 상세 — Overview 탭', () => {
     await expect(page.getByTestId('purge-confirm-dialog')).not.toBeVisible();
   });
 
+  test('Overview — Quick Actions 4개 버튼이 동일 y 오프셋에 정렬된다', async ({ page }) => {
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com');
+
+    const buttons = [
+      page.getByTestId('proxy-test-open'),
+      page.getByTestId('purge-cache-open'),
+      page.getByTestId('tls-renew'),
+      page.getByTestId('force-sync'),
+    ];
+    const boxes = await Promise.all(buttons.map((b) => b.boundingBox()));
+    const ys = boxes.map((b) => b?.y ?? -1).filter((y) => y >= 0);
+    // 네 버튼의 y 좌표 최댓값-최솟값 차가 2px 이내
+    expect(Math.max(...ys) - Math.min(...ys)).toBeLessThanOrEqual(2);
+  });
+
 });
 
 // ─────────────────────────────────────────────
@@ -222,6 +248,62 @@ test.describe('도메인 상세 — 통계 탭', () => {
 
     await page.getByRole('tab', { name: '통계' }).click();
     await expect(page.getByTestId('domain-optimization-stats')).toBeVisible();
+  });
+
+  test('Stats 탭에 캐시/트래픽/최적화 3섹션이 모두 렌더링된다', async ({ page }) => {
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '통계' }).click();
+
+    await expect(page.getByTestId('stats-cache-section')).toBeVisible();
+    await expect(page.getByTestId('stats-traffic-section')).toBeVisible();
+    await expect(page.getByTestId('stats-optimization-section')).toBeVisible();
+  });
+
+  test('Stats 탭 기간 토글 — 1h/24h/7d/30d/커스텀 버튼이 존재', async ({ page }) => {
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '통계' }).click();
+
+    await expect(page.getByTestId('period-1h')).toBeVisible();
+    await expect(page.getByTestId('period-24h')).toBeVisible();
+    await expect(page.getByTestId('period-7d')).toBeVisible();
+    await expect(page.getByTestId('period-30d')).toBeVisible();
+    await expect(page.getByTestId('period-custom')).toBeVisible();
+  });
+
+  test('Stats 탭 수동 새로고침 버튼이 존재', async ({ page }) => {
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '통계' }).click();
+    await expect(page.getByTestId('manual-refresh-btn')).toBeVisible();
+  });
+});
+
+// ─────────────────────────────────────────────
+// Logs 탭 테스트
+// ─────────────────────────────────────────────
+
+test.describe('도메인 상세 — Logs 탭', () => {
+  test('Logs 탭에 Top URL 카드 + 로그 테이블이 렌더링된다', async ({ page }) => {
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '로그' }).click();
+
+    await expect(page.getByTestId('domain-logs-tab')).toBeVisible();
+    await expect(page.getByTestId('domain-top-urls')).toBeVisible();
+    // Top URL 첫 항목 — mock 의 /a (30)
+    await expect(page.getByTestId('domain-top-urls')).toContainText('/a');
+    await expect(page.getByTestId('domain-top-urls')).toContainText('30');
+  });
+
+  test('Logs 탭 자동 갱신 드롭다운 기본값은 30초', async ({ page }) => {
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '로그' }).click();
+    const select = page.getByTestId('refresh-interval-select');
+    await expect(select).toBeVisible();
+    await expect(select).toContainText('30초');
   });
 });
 
