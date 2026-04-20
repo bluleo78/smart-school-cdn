@@ -5,6 +5,7 @@ pub mod compress;
 pub mod config;
 pub mod events;
 pub mod range;
+pub mod save_tracker;
 pub mod state;
 
 use std::collections::HashMap;
