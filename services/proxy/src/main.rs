@@ -147,6 +147,8 @@ async fn main() {
         counters: counters.clone(),
         events: events_sender,
         text_compress: TextCompressConfig::from_env(),
+        // Phase 16-1: MISS 백그라운드 저장 중복 차단 트래커
+        save_tracker: proxy::save_tracker::SaveTracker::new(),
     };
 
     let proxy_router = build_proxy_router(ps);

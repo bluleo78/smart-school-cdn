@@ -172,6 +172,10 @@ pub struct ProxyState {
     pub events: Option<events::EventsSender>,
     /// Phase 15: 텍스트 압축 설정
     pub text_compress: TextCompressConfig,
+    /// Phase 16-1: 동일 키에 대한 백그라운드 저장 중복을 차단하는 트래커.
+    /// MISS 응답 후 optimize/compress/storage.put/L1 insert를 비동기로 분리할 때
+    /// 2차 MISS가 같은 키로 들어와도 저장은 1번만 수행하도록 보장한다.
+    pub save_tracker: save_tracker::SaveTracker,
 }
 
 /// 관리 API 핸들러 상태
@@ -852,151 +856,175 @@ async fn proxy_handler(
                 origin_ok_and_cacheable,
             );
 
-            // outcome이 Miss일 때만 optimizer → storage.put 수행
-            let (serve_bytes, serve_ct) = if outcome == CacheOutcome::Miss {
-                let ttl = if let CacheDirective::Cacheable(Some(t)) = cache_directive { t } else { DEFAULT_TTL };
-                let full_url = format!("https://{}{}", host_c, uri_str);
-                let domain = host_c.split(':').next().unwrap_or(&host_c).to_string();
+            // Phase 16-1: MISS 응답은 origin 본문을 즉시 클라이언트에 전달하고
+            // optimize/compress/storage.put/L1 insert는 tokio::spawn 백그라운드로 분리해 TTFB를 단축한다.
+            // 동일 키 저장 중복은 SaveTracker가 차단한다(첫 번째 task만 저장 주체로 진입).
+            if outcome == CacheOutcome::Miss {
+                // SaveTracker로 동일 키 저장 중복 차단 — true면 내가 저장 주체
+                let acquired = ps_c.save_tracker.try_acquire(&key_for_put);
+                if acquired {
+                    // spawn 직전에 모든 캡처 변수 준비 (헤더는 Send 이슈 회피 위해 미리 String 추출)
+                    let ps_bg     = ps_c.clone();
+                    let key_bg    = key_for_put.clone();
+                    let host_bg   = host_c.clone();
+                    let uri_bg    = uri_str.clone();
+                    let ct_bg     = content_type.clone();
+                    let body_bg   = resp_body.clone();
+                    let ce_bg     = resp_headers.get("content-encoding")
+                                        .and_then(|v| v.to_str().ok())
+                                        .map(|s| s.to_string());
+                    let ttl_bg    = if let CacheDirective::Cacheable(Some(t)) = cache_directive { t } else { DEFAULT_TTL };
 
-                let (store_bytes, store_ct, store_br) = if should_optimize(content_type.as_deref()) {
-                    // ── 이미지 최적화 분기 ──
-                    if let Some(ref opt) = ps_c.optimizer {
-                        let ct = content_type.clone().unwrap_or_default();
-                        let started = std::time::Instant::now();
-                        match opt.lock().await.optimize(resp_body.clone(), ct.clone(), &domain).await {
-                            Some((ob, oct, decision, orig_sz, out_sz)) => {
-                                let elapsed_ms = started.elapsed().as_millis() as u64;
-                                // Phase 14: decision이 Some일 때만 image_optimize 이벤트 발행.
-                                if let (Some(events), Some(dec)) = (ps_c.events.as_ref(), decision) {
-                                    events.emit(crate::events::EventRecord {
-                                        event_type:   "image_optimize",
-                                        host:         host_c.clone(),
-                                        url:          format!("https://{}{}", host_c, uri_str),
-                                        decision:     dec,
-                                        orig_size:    Some(orig_sz),
-                                        out_size:     Some(out_sz),
-                                        range_header: None,
-                                        content_type: Some(oct.clone()),
-                                        elapsed_ms,
-                                    });
-                                }
-                                (ob, Some(oct), None)
-                            }
-                            None => (resp_body.clone(), content_type.clone(), None),
-                        }
-                    } else {
-                        (resp_body.clone(), content_type.clone(), None)
-                    }
-                } else if ps_c.text_compress.enabled
-                    && compress::should_compress(
-                        content_type.as_deref(),
-                        resp_headers.get("content-encoding").and_then(|v| v.to_str().ok()),
-                        resp_body.len(),
-                        ps_c.text_compress.min_bytes,
-                    )
-                    && resp_body.len() <= ps_c.text_compress.max_bytes
-                {
-                    // ── Phase 15: 텍스트 brotli 프리컴프레스 분기 ──
-                    let body_clone = resp_body.clone();
-                    let level = ps_c.text_compress.br_level;
-                    let started = std::time::Instant::now();
-                    let br_result = tokio::task::spawn_blocking(move || {
-                        compress::compress_brotli(&body_clone, level)
-                    }).await.unwrap_or_else(|_| Err(std::io::Error::other("spawn_blocking join 실패")));
-                    let elapsed_ms = started.elapsed().as_millis() as u64;
+                    tokio::spawn(async move {
+                        let full_url = format!("https://{}{}", host_bg, uri_bg);
+                        let domain   = host_bg.split(':').next().unwrap_or(&host_bg).to_string();
 
-                    let (br_opt, decision, out_size_opt) = match br_result {
-                        Ok(br) if (br.len() as f32) <= (resp_body.len() as f32) * 0.9 => {
-                            let out = br.len() as u64;
-                            (Some(Bytes::from(br)), "compressed_br", Some(out))
-                        }
-                        Ok(_) => (None, "skipped_type", None),
-                        Err(err) => {
-                            tracing::warn!(error=%err, "brotli 압축 실패 — 원본만 저장");
-                            (None, "error", None)
-                        }
-                    };
-
-                    if let Some(ev) = ps_c.events.as_ref() {
-                        ev.emit(crate::events::EventRecord {
-                            event_type:   "text_compress",
-                            host:         host_c.clone(),
-                            url:          format!("https://{}{}", host_c, uri_str),
-                            decision:     decision.to_string(),
-                            orig_size:    Some(resp_body.len() as u64),
-                            out_size:     out_size_opt,
-                            range_header: None,
-                            content_type: content_type.clone(),
-                            elapsed_ms,
-                        });
-                    }
-
-                    (resp_body.clone(), content_type.clone(), br_opt)
-                } else {
-                    // ── should_compress 조건 불충족 시 관찰 이벤트 발행 ──
-                    if ps_c.text_compress.enabled {
-                        if let Some(ev) = ps_c.events.as_ref() {
-                            let ce = resp_headers.get("content-encoding").and_then(|v| v.to_str().ok());
-                            let is_text = compress::is_text_content_type(content_type.as_deref());
-                            let event_decision = if is_text {
-                                if resp_body.len() > ps_c.text_compress.max_bytes {
-                                    // DoS 가드 상한 초과
-                                    Some("skipped_type")
-                                } else if resp_body.len() < ps_c.text_compress.min_bytes {
-                                    Some("skipped_small")
-                                } else {
-                                    // content-encoding 이미 존재하는 경우
-                                    let ce_val = ce.unwrap_or("").trim().to_ascii_lowercase();
-                                    if !ce_val.is_empty() && ce_val != "identity" {
-                                        Some("skipped_type")
-                                    } else {
-                                        None
+                        // ── optimize/compress 분기 — 응답 후 비동기 처리 ──
+                        let (store_bytes, store_ct, store_br) = if should_optimize(ct_bg.as_deref()) {
+                            // 이미지 최적화 분기
+                            if let Some(ref opt) = ps_bg.optimizer {
+                                let ct = ct_bg.clone().unwrap_or_default();
+                                let started = std::time::Instant::now();
+                                match opt.lock().await.optimize(body_bg.clone(), ct.clone(), &domain).await {
+                                    Some((ob, oct, decision, orig_sz, out_sz)) => {
+                                        let elapsed_ms = started.elapsed().as_millis() as u64;
+                                        // Phase 14: decision이 Some일 때만 image_optimize 이벤트 발행
+                                        if let (Some(events), Some(dec)) = (ps_bg.events.as_ref(), decision) {
+                                            events.emit(crate::events::EventRecord {
+                                                event_type:   "image_optimize",
+                                                host:         host_bg.clone(),
+                                                url:          full_url.clone(),
+                                                decision:     dec,
+                                                orig_size:    Some(orig_sz),
+                                                out_size:     Some(out_sz),
+                                                range_header: None,
+                                                content_type: Some(oct.clone()),
+                                                elapsed_ms,
+                                            });
+                                        }
+                                        (ob, Some(oct), None)
                                     }
+                                    None => (body_bg.clone(), ct_bg.clone(), None),
                                 }
                             } else {
-                                None  // 이미지·오디오·비디오 등은 관찰 대상 아님
+                                (body_bg.clone(), ct_bg.clone(), None)
+                            }
+                        } else if ps_bg.text_compress.enabled
+                            && compress::should_compress(
+                                ct_bg.as_deref(),
+                                ce_bg.as_deref(),
+                                body_bg.len(),
+                                ps_bg.text_compress.min_bytes,
+                            )
+                            && body_bg.len() <= ps_bg.text_compress.max_bytes
+                        {
+                            // Phase 15: 텍스트 brotli 프리컴프레스 분기
+                            let body_clone = body_bg.clone();
+                            let level = ps_bg.text_compress.br_level;
+                            let started = std::time::Instant::now();
+                            let br_result = tokio::task::spawn_blocking(move || {
+                                compress::compress_brotli(&body_clone, level)
+                            }).await.unwrap_or_else(|_| Err(std::io::Error::other("spawn_blocking join 실패")));
+                            let elapsed_ms = started.elapsed().as_millis() as u64;
+
+                            let (br_opt, decision, out_size_opt) = match br_result {
+                                Ok(br) if (br.len() as f32) <= (body_bg.len() as f32) * 0.9 => {
+                                    let out = br.len() as u64;
+                                    (Some(Bytes::from(br)), "compressed_br", Some(out))
+                                }
+                                Ok(_) => (None, "skipped_type", None),
+                                Err(err) => {
+                                    tracing::warn!(error=%err, "brotli 압축 실패 — 원본만 저장");
+                                    (None, "error", None)
+                                }
                             };
-                            if let Some(dec) = event_decision {
+
+                            if let Some(ev) = ps_bg.events.as_ref() {
                                 ev.emit(crate::events::EventRecord {
                                     event_type:   "text_compress",
-                                    host:         host_c.clone(),
-                                    url:          format!("https://{}{}", host_c, uri_str),
-                                    decision:     dec.to_string(),
-                                    orig_size:    Some(resp_body.len() as u64),
-                                    out_size:     None,
+                                    host:         host_bg.clone(),
+                                    url:          full_url.clone(),
+                                    decision:     decision.to_string(),
+                                    orig_size:    Some(body_bg.len() as u64),
+                                    out_size:     out_size_opt,
                                     range_header: None,
-                                    content_type: content_type.clone(),
-                                    elapsed_ms:   0,
+                                    content_type: ct_bg.clone(),
+                                    elapsed_ms,
                                 });
                             }
+
+                            (body_bg.clone(), ct_bg.clone(), br_opt)
+                        } else {
+                            // should_compress 조건 불충족 시 관찰 이벤트 발행
+                            if ps_bg.text_compress.enabled {
+                                if let Some(ev) = ps_bg.events.as_ref() {
+                                    let is_text = compress::is_text_content_type(ct_bg.as_deref());
+                                    let event_decision = if is_text {
+                                        if body_bg.len() > ps_bg.text_compress.max_bytes {
+                                            // DoS 가드 상한 초과
+                                            Some("skipped_type")
+                                        } else if body_bg.len() < ps_bg.text_compress.min_bytes {
+                                            Some("skipped_small")
+                                        } else {
+                                            // content-encoding 이미 존재하는 경우
+                                            let ce_val = ce_bg.as_deref().unwrap_or("").trim().to_ascii_lowercase();
+                                            if !ce_val.is_empty() && ce_val != "identity" {
+                                                Some("skipped_type")
+                                            } else {
+                                                None
+                                            }
+                                        }
+                                    } else {
+                                        None  // 이미지·오디오·비디오 등은 관찰 대상 아님
+                                    };
+                                    if let Some(dec) = event_decision {
+                                        ev.emit(crate::events::EventRecord {
+                                            event_type:   "text_compress",
+                                            host:         host_bg.clone(),
+                                            url:          full_url.clone(),
+                                            decision:     dec.to_string(),
+                                            orig_size:    Some(body_bg.len() as u64),
+                                            out_size:     None,
+                                            range_header: None,
+                                            content_type: ct_bg.clone(),
+                                            elapsed_ms:   0,
+                                        });
+                                    }
+                                }
+                            }
+                            (body_bg.clone(), ct_bg.clone(), None)
+                        };
+
+                        // storage.put — 디스크 영속화
+                        ps_bg.storage.lock().await
+                            .put(&key_bg, &full_url, &host_bg, store_ct.clone(),
+                                 store_bytes.clone(), Some(ttl_bg), store_br.clone())
+                            .await;
+
+                        // L1 메모리 캐시 저장 (16MB 이하만)
+                        const MAX_MEMORY_ENTRY_BYTES: usize = 16 * 1024 * 1024;
+                        if store_bytes.len() <= MAX_MEMORY_ENTRY_BYTES {
+                            ps_bg.memory_cache.insert(key_bg.clone(), Arc::new(MemoryCacheEntry {
+                                body: Bytes::from(store_bytes.clone()),
+                                content_type: store_ct.clone(),
+                                body_br: store_br.clone(),
+                            })).await;
                         }
-                    }
-                    (resp_body.clone(), content_type.clone(), None)
-                };
 
-                ps_c.storage.lock().await
-                    .put(&key_for_put, &full_url, &host_c, store_ct.clone(), store_bytes.clone(), Some(ttl), store_br.clone())
-                    .await;
-
-                // L1 메모리 캐시 저장 (16MB 이하만)
-                const MAX_MEMORY_ENTRY_BYTES: usize = 16 * 1024 * 1024;
-                if store_bytes.len() <= MAX_MEMORY_ENTRY_BYTES {
-                    ps_c.memory_cache.insert(key_for_put.clone(), Arc::new(MemoryCacheEntry {
-                        body: Bytes::from(store_bytes.clone()),
-                        content_type: store_ct.clone(),
-                        body_br: store_br.clone(),
-                    })).await;
+                        // 트래커 해제 — 다음 MISS가 다시 저장 주체가 될 수 있도록
+                        ps_bg.save_tracker.release(&key_bg);
+                    });
                 }
-
-                (Bytes::from(store_bytes), store_ct)
+                // 첫 번째 요청자만 miss 카운터 증가 (구독자는 record_request만).
+                // SaveTracker acquire 여부와 무관 — 카운터는 origin-fetch 1회당 1회.
+                state_c.write().await.record_cache_miss();
+                // 응답은 항상 원본 — optimize/compress 결과는 백그라운드에 저장만 됨
+                Ok(Arc::new((resp_body, content_type, status, outcome)))
             } else {
                 // Bypass* — 캐시 저장 생략, 원본 응답 그대로 전달
-                (resp_body, content_type)
-            };
-
-            // 첫 번째 요청자만 miss 카운터 증가 (구독자는 record_request만)
-            state_c.write().await.record_cache_miss();
-            Ok(Arc::new((serve_bytes, serve_ct, status, outcome)))
+                state_c.write().await.record_cache_miss();
+                Ok(Arc::new((resp_body, content_type, status, outcome)))
+            }
         }).await;
 
         let elapsed_ms = start.elapsed().as_millis() as u64;
@@ -2379,6 +2407,7 @@ mod tests {
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
             events: None,
             text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6, max_bytes: 8_388_608 },
+            save_tracker: save_tracker::SaveTracker::new(),
         };
 
         let router = build_proxy_router(ps);
@@ -2436,6 +2465,7 @@ mod tests {
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
             events: None,
             text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6, max_bytes: 8_388_608 },
+            save_tracker: save_tracker::SaveTracker::new(),
         };
 
         let router = build_proxy_router(ps);
@@ -2492,6 +2522,7 @@ mod tests {
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
             events: None,
             text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6, max_bytes: 8_388_608 },
+            save_tracker: save_tracker::SaveTracker::new(),
         };
 
         let router = build_proxy_router(ps);
@@ -2551,6 +2582,7 @@ mod tests {
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
             events: None,
             text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6, max_bytes: 8_388_608 },
+            save_tracker: save_tracker::SaveTracker::new(),
         };
 
         let router = build_proxy_router(ps);
@@ -2636,6 +2668,7 @@ mod tests {
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
             events: None,
             text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6, max_bytes: 8_388_608 },
+            save_tracker: save_tracker::SaveTracker::new(),
         };
 
         let router = build_proxy_router(ps);
@@ -2838,6 +2871,7 @@ mod tests {
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
             events: None,
             text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6, max_bytes: 8_388_608 },
+            save_tracker: save_tracker::SaveTracker::new(),
         };
         let router = build_proxy_router(ps.clone());
         (ps, router)
@@ -2979,6 +3013,7 @@ mod tests {
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
             events: None,
             text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6, max_bytes: 8_388_608 },
+            save_tracker: save_tracker::SaveTracker::new(),
         };
 
         // 1차 요청: MISS — brotli 저장
@@ -2995,6 +3030,10 @@ mod tests {
             .unwrap();
         assert_eq!(resp1.status(), StatusCode::OK);
         drop(to_bytes(resp1.into_body(), 1024 * 1024).await.unwrap());
+
+        // Phase 16-1: MISS 응답 후 storage.put + L1 insert는 백그라운드 spawn으로 분리됐으므로
+        // 2차 요청 전에 백그라운드 작업이 완료될 시간이 필요하다. brotli 압축이 포함되므로 200ms 대기.
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
         // moka 비동기 캐시는 pending tasks 완료 후 항목 조회 가능
         memory_cache.run_pending_tasks().await;
@@ -3077,6 +3116,7 @@ mod tests {
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
             events: None,
             text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6, max_bytes: 8_388_608 },
+            save_tracker: save_tracker::SaveTracker::new(),
         };
 
         // 1차 MISS
@@ -3094,6 +3134,8 @@ mod tests {
         assert_eq!(resp1.status(), StatusCode::OK);
         drop(to_bytes(resp1.into_body(), 1024 * 1024).await.unwrap());
 
+        // Phase 16-1: 백그라운드 storage.put + L1 insert 완료 대기
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         memory_cache.run_pending_tasks().await;
 
         // 2차 HIT without Accept-Encoding
@@ -3163,6 +3205,7 @@ mod tests {
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
             events: None,
             text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6, max_bytes: 8_388_608 },
+            save_tracker: save_tracker::SaveTracker::new(),
         };
 
         let router = build_proxy_router(ps);
@@ -3180,6 +3223,10 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         drop(to_bytes(resp.into_body(), 1024 * 1024).await.unwrap());
 
+        // Phase 16-1: storage.put이 백그라운드 spawn으로 분리됐으므로 storage 검증 전 대기.
+        // brotli 압축 + gRPC 라운드트립을 고려해 200ms.
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
         // storage에 저장된 body_br 확인
         let key = compute_cache_key("GET", "textbook.local", "/page.html", "");
         let stored = storage_client.clone().get(&key).await;
@@ -3191,11 +3238,13 @@ mod tests {
 
     // ─── MISS 분기 테스트 A·B·C ─────────────────────────────────────────
 
-    /// Test A: MISS → optimizer 성공 → 최적화된 본문·content-type 응답
+    /// Test A: MISS → optimizer 성공 → 최적화 결과는 백그라운드 저장 후 2차 HIT에서 응답
+    /// Phase 16-1: 1차 MISS 응답은 원본 그대로(TTFB 단축), optimize 결과는 spawn 백그라운드에서 storage/L1에 저장된다.
+    /// 따라서 최적화 성공 검증은 (a) 1차 응답이 원본 jpeg, (b) 대기 후 2차 요청이 webp(L1 HIT) 두 단계로 나눠 수행한다.
     #[tokio::test]
     async fn proxy_handler_miss_optimizer_성공시_최적화된_응답을_반환한다() {
         let fake_jpeg = b"\xff\xd8\xff\xe0fake_jpeg_data".to_vec();
-        let origin_url = start_mock_origin_server(fake_jpeg, "image/jpeg").await;
+        let origin_url = start_mock_origin_server(fake_jpeg.clone(), "image/jpeg").await;
 
         let opt_url = start_mock_optimizer_success_server().await;
         let optimizer = loop {
@@ -3205,12 +3254,13 @@ mod tests {
             }
         };
 
-        let (_, router) = make_miss_proxy_state(
+        let (ps, router) = make_miss_proxy_state(
             Some(Arc::new(Mutex::new(optimizer))),
             origin_url,
             "miss-opt-success.test.com",
         ).await;
 
+        // 1차 요청 — Phase 16-1: 원본 응답 그대로(image/jpeg + fake_jpeg 바이트)
         let resp = router
             .oneshot(
                 Request::builder()
@@ -3223,10 +3273,34 @@ mod tests {
             .unwrap();
 
         assert_eq!(resp.status(), StatusCode::OK);
-        // optimizer가 반환한 content-type
-        assert_eq!(resp.headers().get("content-type").unwrap(), "image/webp");
+        assert_eq!(resp.headers().get("content-type").unwrap(), "image/jpeg",
+            "Phase 16-1: 1차 MISS는 원본 content-type을 즉시 반환");
         let body = to_bytes(resp.into_body(), 4096).await.unwrap();
-        assert_eq!(body.as_ref(), b"OPTIMIZED_WEBP");
+        assert_eq!(body.as_ref(), fake_jpeg.as_slice(),
+            "Phase 16-1: 1차 MISS는 원본 body를 즉시 반환");
+
+        // 백그라운드 optimize + storage.put + L1 insert 완료 대기
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        ps.memory_cache.run_pending_tasks().await;
+
+        // 2차 요청 — L1 HIT 경로에서 최적화된 webp 응답 검증
+        let router2 = build_proxy_router(ps.clone());
+        let resp2 = router2
+            .oneshot(
+                Request::builder()
+                    .uri("/img.jpg")
+                    .header("host", "miss-opt-success.test.com")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp2.status(), StatusCode::OK);
+        // optimizer가 반환한 content-type — L1에 저장된 최적화본 응답
+        assert_eq!(resp2.headers().get("content-type").unwrap(), "image/webp");
+        let body2 = to_bytes(resp2.into_body(), 4096).await.unwrap();
+        assert_eq!(body2.as_ref(), b"OPTIMIZED_WEBP");
     }
 
     /// Test B: MISS → optimizer gRPC 실패 → 원본 본문·content-type으로 그레이스풀 디그레이드
@@ -3348,6 +3422,7 @@ mod tests {
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
             events: None,
             text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6, max_bytes: 8_388_608 },
+            save_tracker: save_tracker::SaveTracker::new(),
         };
 
         let shared = ps.shared.clone();
@@ -3431,6 +3506,7 @@ mod tests {
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
             events: None,
             text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6, max_bytes: 8_388_608 },
+            save_tracker: save_tracker::SaveTracker::new(),
         };
 
         let shared = ps.shared.clone();
@@ -3797,6 +3873,7 @@ mod tests {
             counters: Arc::new(std::sync::RwLock::new(HashMap::new())),
             events: None,
             text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6, max_bytes: 8_388_608 },
+            save_tracker: save_tracker::SaveTracker::new(),
         };
 
         let router = build_proxy_router(ps.clone());
@@ -3879,6 +3956,7 @@ mod tests {
             counters:     Arc::new(std::sync::RwLock::new(HashMap::new())),
             events:       None,
             text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6, max_bytes: 8_388_608 },
+            save_tracker: save_tracker::SaveTracker::new(),
         };
 
         let router = build_proxy_router(ps);
