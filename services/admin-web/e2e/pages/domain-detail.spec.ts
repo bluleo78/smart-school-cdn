@@ -279,6 +279,18 @@ test.describe('도메인 상세 — 통계 탭', () => {
     await page.getByRole('tab', { name: '최적화' }).click();
     await expect(page.getByTestId('manual-refresh-btn')).toBeVisible();
   });
+
+  test('최적화 탭에 텍스트 압축 통계와 URL별 내역 표가 보인다', async ({ page }) => {
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '최적화' }).click();
+    await expect(page.getByTestId('domain-optimization-tab')).toBeVisible();
+    await expect(page.getByTestId('text-compress-stats')).toBeVisible();
+    await expect(page.getByTestId('url-optimization-table')).toBeVisible();
+    // 필터/정렬 동작 스모크
+    await page.getByTestId('url-opt-sort').selectOption('events');
+    await expect(page.getByTestId('url-optimization-table')).toBeVisible();
+  });
 });
 
 // ─────────────────────────────────────────────
