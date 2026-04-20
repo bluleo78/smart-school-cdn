@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { DomainCacheCards } from './DomainCacheCards';
 import { DomainStackedChart } from './DomainStackedChart';
 import { DomainOptimizationStats } from './DomainOptimizationStats';
+import { DomainTextCompressStats } from './DomainTextCompressStats';
 
 interface Props {
   host: string;
@@ -42,6 +43,9 @@ export function DomainStatsTab({ host }: Props) {
           <DomainStackedChart host={host} range={toSeriesRange(period)} />
         </CardContent>
       </Card>
+
+      {/* 텍스트 압축 섹션 (Phase 16-3) */}
+      <DomainTextCompressStats host={host} />
 
       {/* 최적화 섹션 */}
       <Card data-testid="stats-optimization-section">
