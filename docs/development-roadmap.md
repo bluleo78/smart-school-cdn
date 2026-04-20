@@ -533,6 +533,7 @@
 | 13 | 미디어 Range + 관찰 인프라 | 206/416 + no-store override + optimization_events | decision 4종 수집 가능 |
 | 14 | Optimizer 포맷 보존 | JPEG/PNG/WebP 포맷 유지 + size-guard + libwebp | `image_optimize` 이벤트 발행 |
 | 15 | 텍스트 Brotli 프리컴프레스 | HTML/JS/CSS level 11 + Accept-Encoding 협상 + size-guard | `text_compress` 이벤트 발행 |
+| 16 | 프록시 운영 품질 + 도메인 UX 재배치 | MISS 백그라운드 저장(TTFB↓) + admin snapshot pull 자동 복구 + 탭 리네임(최적화/트래픽) + URL별 최적화 표 | `SaveTracker` 동작 · 탭 네이밍 · URL 내역 표 |
 
 ---
 
@@ -568,9 +569,10 @@
 
 ---
 
-## Phase 16 (차기 착수): 프록시 운영 품질 개선 + 도메인 상세 UX 재배치
+## Phase 16 — 완료 (2026-04-20)
 
-> 목표: Phase 15 배포 직후 실측으로 드러난 운영 이슈 두 건과 도메인 상세 페이지의 정보 구조 개선을 함께 묶어 처리한다. 관찰·튜닝성 후보 페이즈(17~19)와 달리 **즉시 착수 예정**.
+> 목표: Phase 15 배포 직후 실측으로 드러난 운영 이슈 두 건과 도메인 상세 페이지의 정보 구조 개선을 함께 묶어 처리한다.
+> 스펙/플랜: `docs/superpowers/specs/2026-04-20-phase-16-design.md`, `docs/superpowers/plans/2026-04-20-phase-16.md`
 
 ### 16-1. MISS 경로 TTFB 개선 (백그라운드 저장)
 
