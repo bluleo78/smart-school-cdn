@@ -504,4 +504,29 @@ describe('GET /api/domains/:host/optimization/url-breakdown', () => {
     const body = res.json() as { total: number };
     expect(body.total).toBe(1);
   });
+
+  it('와일드카드 호스트(URL 인코딩)도 매칭한다', async () => {
+    const repo = makeRepo();
+    repo.upsert('*.textbook.com', 'https://origin');
+    const evRepo = new OptimizationEventsRepository(repo.database);
+    evRepo.insert({ event_type: 'image_optimize', host: '*.textbook.com',
+      url: 'https://x.textbook.com/a.png',
+      decision: 'Optimized', orig_size: 1000, out_size: 200, elapsed_ms: 10 });
+
+    const app = buildApp(repo);
+    const encoded = encodeURIComponent('*.textbook.com');
+    const res = await app.inject({ method: 'GET',
+      url: `/api/domains/${encoded}/optimization/url-breakdown` });
+    expect(res.statusCode).toBe(200);
+    expect((res.json() as { total: number }).total).toBe(1);
+  });
+
+  it('limit이 숫자가 아니면 무시한다', async () => {
+    const repo = makeRepo();
+    repo.upsert('a.test', 'https://a');
+    const app = buildApp(repo);
+    const res = await app.inject({ method: 'GET',
+      url: '/api/domains/a.test/optimization/url-breakdown?limit=abc' });
+    expect(res.statusCode).toBe(200); // NaN을 우아하게 무시
+  });
 });

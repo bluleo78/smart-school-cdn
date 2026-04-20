@@ -630,18 +630,23 @@ export async function domainRoutes(
     Params: { host: string };
     Querystring: { period?: string; sort?: string; decision?: string; q?: string; limit?: string; offset?: string };
   }>('/api/domains/:host/optimization/url-breakdown', async (req) => {
+    // 와일드카드 호스트(`*.textbook.com`)는 URL 인코딩되어 `%2A.textbook.com`로 들어오므로 디코딩 필요
+    const host = decodeURIComponent(req.params.host);
     const periodMap: Record<string, number> = { '1h': 3600, '24h': 86400, '7d': 604800, '30d': 2592000 };
     const periodSec = periodMap[req.query.period ?? '24h'] ?? 86400;
     const sort = (['savings', 'orig_size', 'events'] as const).find((s) => s === req.query.sort) ?? 'savings';
+    // limit/offset은 Number() 결과가 NaN/Infinity면 undefined로 처리해 `LIMIT NaN` SQL 에러를 방지
+    const limitParsed  = req.query.limit  !== undefined ? Number(req.query.limit)  : NaN;
+    const offsetParsed = req.query.offset !== undefined ? Number(req.query.offset) : NaN;
     const repo = new OptimizationEventsRepository(domainRepo.database);
     return repo.urlBreakdown({
-      host:       req.params.host,
+      host,
       period_sec: periodSec,
       sort,
       decision:   req.query.decision,
       search:     req.query.q,
-      limit:      req.query.limit  !== undefined ? Number(req.query.limit)  : undefined,
-      offset:     req.query.offset !== undefined ? Number(req.query.offset) : undefined,
+      limit:      Number.isFinite(limitParsed)  ? limitParsed  : undefined,
+      offset:     Number.isFinite(offsetParsed) ? offsetParsed : undefined,
     });
   });
 
