@@ -250,14 +250,15 @@ test.describe('도메인 상세 — 통계 탭', () => {
     await expect(page.getByTestId('domain-optimization-stats')).toBeVisible();
   });
 
-  test('Stats 탭에 캐시/트래픽/최적화 3섹션이 모두 렌더링된다', async ({ page }) => {
+  test('Stats 탭에 캐시/최적화 2섹션이 모두 렌더링된다 (Phase 16: 트래픽은 트래픽 탭으로 이동)', async ({ page }) => {
     await setupDetailMocks(page);
     await page.goto('/domains/textbook.com');
     await page.getByRole('tab', { name: '최적화' }).click();
 
     await expect(page.getByTestId('stats-cache-section')).toBeVisible();
-    await expect(page.getByTestId('stats-traffic-section')).toBeVisible();
     await expect(page.getByTestId('stats-optimization-section')).toBeVisible();
+    // 트래픽 섹션은 더 이상 최적화 탭에 없어야 한다
+    await expect(page.getByTestId('stats-traffic-section')).toHaveCount(0);
   });
 
   test('Stats 탭 기간 토글 — 1h/24h/7d/30d/커스텀 버튼이 존재', async ({ page }) => {
@@ -295,6 +296,14 @@ test.describe('도메인 상세 — Logs 탭', () => {
     // Top URL 첫 항목 — mock 의 /a (30)
     await expect(page.getByTestId('domain-top-urls')).toContainText('/a');
     await expect(page.getByTestId('domain-top-urls')).toContainText('30');
+  });
+
+  test('Logs 탭에 트래픽 차트 섹션(요청 추이)이 렌더링된다 (Phase 16-3)', async ({ page }) => {
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '트래픽' }).click();
+
+    await expect(page.getByTestId('traffic-charts-section')).toBeVisible();
   });
 
   test('Logs 탭 자동 갱신 드롭다운 기본값은 30초', async ({ page }) => {
