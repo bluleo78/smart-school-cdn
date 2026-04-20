@@ -8,6 +8,7 @@ import { DomainCacheCards } from './DomainCacheCards';
 import { DomainStackedChart } from './DomainStackedChart';
 import { DomainOptimizationStats } from './DomainOptimizationStats';
 import { DomainTextCompressStats } from './DomainTextCompressStats';
+import { DomainUrlOptimizationTable } from './DomainUrlOptimizationTable';
 
 interface Props {
   host: string;
@@ -57,6 +58,12 @@ export function DomainStatsTab({ host }: Props) {
           <DomainOptimizationStats host={host} />
         </CardContent>
       </Card>
+
+      {/* URL별 최적화 내역 (Phase 16-3) — period 'custom'은 24h 로 fallback */}
+      <DomainUrlOptimizationTable
+        host={host}
+        period={period.period === 'custom' ? '24h' : period.period}
+      />
     </div>
   );
 }
