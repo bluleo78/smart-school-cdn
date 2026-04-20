@@ -57,6 +57,24 @@ async fn main() {
     let domain_map: DomainMap = Arc::new(RwLock::new(HashMap::new()));
     let cert_cache = tls_client.cert_cache.clone();
 
+    // Phase 16-2: admin-server로부터 도메인 snapshot을 pull해 domain_map을 초기화한다.
+    // push 경로(admin-server HealthMonitor)에만 의존하면 proxy 단독 재기동 시
+    // domain_map이 공란이 되어 TLS SNI가 access denied로 터진다.
+    let admin_url = std::env::var("ADMIN_SNAPSHOT_URL")
+        .unwrap_or_else(|_| "http://admin-server:4001".to_string());
+    match proxy::clients::admin_client::fetch_domain_snapshot(&admin_url).await {
+        Ok(entries) => {
+            let mut map = domain_map.write().await;
+            for e in entries.iter().filter(|e| e.enabled) {
+                map.insert(e.host.clone(), e.origin.clone());
+            }
+            tracing::info!(count = map.len(), "domain_map initialized from admin snapshot");
+        }
+        Err(err) => {
+            tracing::warn!(%err, "admin snapshot pull 실패 — 빈 도메인맵으로 기동. admin push 경로 대기");
+        }
+    }
+
     let optimizer_url = std::env::var("OPTIMIZER_GRPC_URL")
         .unwrap_or_else(|_| "http://optimizer-service:50054".to_string());
     let optimizer = match OptimizerClient::connect(&optimizer_url).await {
