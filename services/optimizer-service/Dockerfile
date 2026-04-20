@@ -22,11 +22,11 @@ COPY services/ ./services/
 
 # $TARGETPLATFORM → Rust triple 매핑 후 zigbuild
 # libdeflate-sys 1.25.2 AVX-512 intrinsic 가 evex512 target feature 요구 — zig clang 에서 명시 필요
-ENV CFLAGS_x86_64_unknown_linux_musl="-mevex512"
 # BuildKit 캐시 마운트로 cargo registry + target 을 빌드 간 캐시
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/app/target,sharing=locked \
-    case "$TARGETPLATFORM" in \
+    export CFLAGS_x86_64_unknown_linux_musl="-mevex512" \
+ && case "$TARGETPLATFORM" in \
       "linux/amd64") TRIPLE=x86_64-unknown-linux-musl ;; \
       "linux/arm64") TRIPLE=aarch64-unknown-linux-musl ;; \
       *) echo "지원하지 않는 플랫폼: $TARGETPLATFORM" && exit 1 ;; \
