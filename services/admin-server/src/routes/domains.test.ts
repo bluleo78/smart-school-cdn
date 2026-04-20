@@ -3,6 +3,7 @@ import Fastify from 'fastify';
 import Database from 'better-sqlite3';
 import { DomainRepository, DOMAIN_SCHEMA } from '../db/domain-repo.js';
 import { DomainStatsRepository } from '../db/domain-stats-repo.js';
+import { OptimizationEventsRepository, OPTIMIZATION_EVENTS_SCHEMA } from '../db/optimization-events-repo.js';
 import { domainRoutes } from './domains.js';
 
 /** domain_stats 스키마 — 6개 신규 컬럼 포함 */
@@ -64,6 +65,8 @@ function makeRepo() {
   db.exec(DOMAIN_SCHEMA);
   db.exec(DOMAIN_STATS_SCHEMA);
   db.exec(ACCESS_LOGS_SCHEMA);
+  // optimization_events 스키마 — Phase 16-3 url-breakdown API 테스트용
+  db.exec(OPTIMIZATION_EVENTS_SCHEMA);
   return new DomainRepository(db);
 }
 
@@ -462,5 +465,43 @@ describe('GET /api/domains/internal/snapshot', () => {
     const res = await app.inject({ method: 'GET', url: '/api/domains/internal/snapshot' });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ domains: [] });
+  });
+});
+
+describe('GET /api/domains/:host/optimization/url-breakdown', () => {
+  // Phase 16-3: optimization_events를 URL 기준 GROUP BY 후 정렬·필터·페이지네이션
+  it('URL별로 집계하고 savings 기준 정렬한다', async () => {
+    const repo = makeRepo();
+    repo.upsert('a.test', 'https://a');
+    const evRepo = new OptimizationEventsRepository(repo.database);
+    evRepo.insert({ event_type: 'image_optimize', host: 'a.test', url: 'https://a.test/big.png',
+      decision: 'Optimized', orig_size: 1000, out_size: 200, elapsed_ms: 10 });
+    evRepo.insert({ event_type: 'text_compress', host: 'a.test', url: 'https://a.test/app.js',
+      decision: 'compressed_br', orig_size: 1000, out_size: 800, elapsed_ms: 5 });
+
+    const app = buildApp(repo);
+    const res = await app.inject({ method: 'GET', url: '/api/domains/a.test/optimization/url-breakdown?sort=savings' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { total: number; items: Array<{ url: string; savings_ratio: number }> };
+    expect(body.total).toBe(2);
+    expect(body.items[0].url).toBe('https://a.test/big.png');
+    expect(body.items[0].savings_ratio).toBeCloseTo(0.8, 2);
+  });
+
+  it('decision 필터와 q 검색이 동작한다', async () => {
+    const repo = makeRepo();
+    repo.upsert('a.test', 'https://a');
+    const evRepo = new OptimizationEventsRepository(repo.database);
+    evRepo.insert({ event_type: 'image_optimize', host: 'a.test', url: 'https://a.test/a.png',
+      decision: 'Optimized', orig_size: 1000, out_size: 200, elapsed_ms: 10 });
+    evRepo.insert({ event_type: 'image_optimize', host: 'a.test', url: 'https://a.test/b.gif',
+      decision: 'PassthroughLarger', orig_size: 500, out_size: 500, elapsed_ms: 5 });
+
+    const app = buildApp(repo);
+    const res = await app.inject({ method: 'GET',
+      url: '/api/domains/a.test/optimization/url-breakdown?decision=Optimized&q=a.png' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { total: number };
+    expect(body.total).toBe(1);
   });
 });

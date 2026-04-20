@@ -5,6 +5,7 @@ import axios from 'axios';
 import type { DomainRepository } from '../db/domain-repo.js';
 import { DomainStatsRepository } from '../db/domain-stats-repo.js';
 import type { StatsPeriod } from '../db/domain-stats-repo.js';
+import { OptimizationEventsRepository } from '../db/optimization-events-repo.js';
 
 const PROXY_ADMIN_URL = process.env.PROXY_ADMIN_URL || 'http://localhost:8081';
 
@@ -622,6 +623,27 @@ export async function domainRoutes(
       }
     },
   );
+
+  /** Phase 16-3: URL별 최적화 집계 — optimization_events를 URL 기준 GROUP BY 후
+   *  savings/orig_size/events 정렬과 decision/q 필터를 적용해 페이지네이션 결과를 반환한다. */
+  app.get<{
+    Params: { host: string };
+    Querystring: { period?: string; sort?: string; decision?: string; q?: string; limit?: string; offset?: string };
+  }>('/api/domains/:host/optimization/url-breakdown', async (req) => {
+    const periodMap: Record<string, number> = { '1h': 3600, '24h': 86400, '7d': 604800, '30d': 2592000 };
+    const periodSec = periodMap[req.query.period ?? '24h'] ?? 86400;
+    const sort = (['savings', 'orig_size', 'events'] as const).find((s) => s === req.query.sort) ?? 'savings';
+    const repo = new OptimizationEventsRepository(domainRepo.database);
+    return repo.urlBreakdown({
+      host:       req.params.host,
+      period_sec: periodSec,
+      sort,
+      decision:   req.query.decision,
+      search:     req.query.q,
+      limit:      req.query.limit  !== undefined ? Number(req.query.limit)  : undefined,
+      offset:     req.query.offset !== undefined ? Number(req.query.offset) : undefined,
+    });
+  });
 
   /** 도메인 삭제 */
   app.delete<{ Params: { host: string } }>('/api/domains/:host', async (request, reply) => {

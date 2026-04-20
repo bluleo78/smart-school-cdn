@@ -228,4 +228,75 @@ export class OptimizationEventsRepository {
   prune(beforeIso: string): number {
     return this.db.prepare(`DELETE FROM optimization_events WHERE ts < ?`).run(beforeIso).changes;
   }
+
+  /** Phase 16-3: URL별 최적화 집계.
+   *  선택 기간 내 host 이벤트를 URL 기준으로 GROUP BY 하여
+   *  이벤트 수·원본 합·최적화 후 합·decision 리스트(쉼표 구분)를 반환한다.
+   *  정렬은 호출자가 지정 — 기본은 savings_ratio DESC. */
+  urlBreakdown(q: {
+    host: string;
+    period_sec?: number;
+    sort?: 'savings' | 'orig_size' | 'events';
+    decision?: string;
+    search?: string;
+    limit?: number;
+    offset?: number;
+  }): {
+    total: number;
+    items: Array<{
+      url: string;
+      events: number;
+      total_orig: number;
+      total_out: number;
+      savings_ratio: number;
+      decisions: string;
+    }>;
+  } {
+    const periodSec = q.period_sec ?? 86400;
+    const since = new Date(Date.now() - periodSec * 1000).toISOString();
+    const where: string[] = ['host = @host', 'ts >= @since'];
+    const params: Record<string, string> = { host: q.host, since };
+    if (q.decision) { where.push('decision = @decision'); params.decision = q.decision; }
+    if (q.search)   { where.push('url LIKE @q');          params.q        = `%${q.search}%`; }
+
+    const limit  = Math.min(Math.max(q.limit ?? 50, 1), 500);
+    const offset = Math.max(q.offset ?? 0, 0);
+
+    const sortSql = ({
+      savings:   "(1.0 - (CAST(COALESCE(SUM(out_size),0) AS REAL) / NULLIF(SUM(orig_size),0))) DESC",
+      orig_size: "SUM(orig_size) DESC",
+      events:    "COUNT(*) DESC",
+    } as const)[q.sort ?? 'savings'];
+
+    const base = `FROM optimization_events WHERE ${where.join(' AND ')} GROUP BY url`;
+    const totalRow = this.db
+      .prepare(`SELECT COUNT(*) AS c FROM (SELECT url ${base})`)
+      .get(params) as { c: number };
+
+    const rows = this.db.prepare(`
+      SELECT
+        url,
+        COUNT(*)                                AS events,
+        COALESCE(SUM(orig_size), 0)             AS total_orig,
+        COALESCE(SUM(out_size),  0)             AS total_out,
+        GROUP_CONCAT(DISTINCT decision)         AS decisions
+      ${base}
+      ORDER BY ${sortSql}
+      LIMIT ${limit} OFFSET ${offset}
+    `).all(params) as Array<{
+      url: string; events: number; total_orig: number; total_out: number; decisions: string;
+    }>;
+
+    return {
+      total: totalRow.c,
+      items: rows.map((r) => ({
+        url: r.url,
+        events: r.events,
+        total_orig: r.total_orig,
+        total_out: r.total_out,
+        savings_ratio: r.total_orig > 0 ? 1 - r.total_out / r.total_orig : 0,
+        decisions: r.decisions ?? '',
+      })),
+    };
+  }
 }
