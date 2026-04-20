@@ -15,8 +15,8 @@ export function DomainDetailTabs({ domain }: Props) {
     <Tabs defaultValue="overview" className="w-full" data-testid="domain-detail-tabs">
       <TabsList>
         <TabsTrigger value="overview">개요</TabsTrigger>
-        <TabsTrigger value="stats">통계</TabsTrigger>
-        <TabsTrigger value="logs">로그</TabsTrigger>
+        <TabsTrigger value="stats">최적화</TabsTrigger>
+        <TabsTrigger value="logs">트래픽</TabsTrigger>
         <TabsTrigger value="settings">설정</TabsTrigger>
       </TabsList>
       <TabsContent value="overview" className="mt-4">

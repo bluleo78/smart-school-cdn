@@ -36,7 +36,7 @@ export function DomainStatsTab({ host }: Props) {
   }
 
   return (
-    <div className="space-y-6" data-testid="domain-stats-tab">
+    <div className="space-y-6" data-testid="domain-optimization-tab">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <PeriodSelector value={period} onChange={setPeriod} />
         <ManualRefreshButton onClick={handleRefresh} />

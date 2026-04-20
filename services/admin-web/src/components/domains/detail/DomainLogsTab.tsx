@@ -31,7 +31,7 @@ export function DomainLogsTab({ host }: Props) {
   }
 
   return (
-    <div className="space-y-6" data-testid="domain-logs-tab">
+    <div className="space-y-6" data-testid="domain-traffic-tab">
       {/* 기간 선택 + 자동갱신 + 수동 새로고침 컨트롤 바 */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <PeriodSelector value={period} onChange={setPeriod} />

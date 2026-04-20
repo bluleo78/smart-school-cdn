@@ -236,24 +236,24 @@ test.describe('도메인 상세 — 통계 탭', () => {
     await page.goto('/domains/textbook.com');
 
     // 통계 탭 클릭
-    await page.getByRole('tab', { name: '통계' }).click();
+    await page.getByRole('tab', { name: '최적화' }).click();
 
     // 통계 탭 컨텐츠가 표시되어야 한다
-    await expect(page.getByTestId('domain-stats-tab')).toBeVisible();
+    await expect(page.getByTestId('domain-optimization-tab')).toBeVisible();
   });
 
   test('최적화 절감 통계 카드가 렌더링된다', async ({ page }) => {
     await setupDetailMocks(page);
     await page.goto('/domains/textbook.com');
 
-    await page.getByRole('tab', { name: '통계' }).click();
+    await page.getByRole('tab', { name: '최적화' }).click();
     await expect(page.getByTestId('domain-optimization-stats')).toBeVisible();
   });
 
   test('Stats 탭에 캐시/트래픽/최적화 3섹션이 모두 렌더링된다', async ({ page }) => {
     await setupDetailMocks(page);
     await page.goto('/domains/textbook.com');
-    await page.getByRole('tab', { name: '통계' }).click();
+    await page.getByRole('tab', { name: '최적화' }).click();
 
     await expect(page.getByTestId('stats-cache-section')).toBeVisible();
     await expect(page.getByTestId('stats-traffic-section')).toBeVisible();
@@ -263,7 +263,7 @@ test.describe('도메인 상세 — 통계 탭', () => {
   test('Stats 탭 기간 토글 — 1h/24h/7d/30d/커스텀 버튼이 존재', async ({ page }) => {
     await setupDetailMocks(page);
     await page.goto('/domains/textbook.com');
-    await page.getByRole('tab', { name: '통계' }).click();
+    await page.getByRole('tab', { name: '최적화' }).click();
 
     await expect(page.getByTestId('period-1h')).toBeVisible();
     await expect(page.getByTestId('period-24h')).toBeVisible();
@@ -275,7 +275,7 @@ test.describe('도메인 상세 — 통계 탭', () => {
   test('Stats 탭 수동 새로고침 버튼이 존재', async ({ page }) => {
     await setupDetailMocks(page);
     await page.goto('/domains/textbook.com');
-    await page.getByRole('tab', { name: '통계' }).click();
+    await page.getByRole('tab', { name: '최적화' }).click();
     await expect(page.getByTestId('manual-refresh-btn')).toBeVisible();
   });
 });
@@ -288,9 +288,9 @@ test.describe('도메인 상세 — Logs 탭', () => {
   test('Logs 탭에 Top URL 카드 + 로그 테이블이 렌더링된다', async ({ page }) => {
     await setupDetailMocks(page);
     await page.goto('/domains/textbook.com');
-    await page.getByRole('tab', { name: '로그' }).click();
+    await page.getByRole('tab', { name: '트래픽' }).click();
 
-    await expect(page.getByTestId('domain-logs-tab')).toBeVisible();
+    await expect(page.getByTestId('domain-traffic-tab')).toBeVisible();
     await expect(page.getByTestId('domain-top-urls')).toBeVisible();
     // Top URL 첫 항목 — mock 의 /a (30)
     await expect(page.getByTestId('domain-top-urls')).toContainText('/a');
@@ -300,7 +300,7 @@ test.describe('도메인 상세 — Logs 탭', () => {
   test('Logs 탭 자동 갱신 드롭다운 기본값은 30초', async ({ page }) => {
     await setupDetailMocks(page);
     await page.goto('/domains/textbook.com');
-    await page.getByRole('tab', { name: '로그' }).click();
+    await page.getByRole('tab', { name: '트래픽' }).click();
     const select = page.getByTestId('refresh-interval-select');
     await expect(select).toBeVisible();
     await expect(select).toContainText('30초');
