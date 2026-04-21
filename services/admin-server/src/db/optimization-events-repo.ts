@@ -262,8 +262,12 @@ export class OptimizationEventsRepository {
     const limit  = Math.min(Math.max(q.limit ?? 50, 1), 500);
     const offset = Math.max(q.offset ?? 0, 0);
 
+    // skipped_*/bypass_* 이벤트는 out_size가 NULL — 실제로는 압축/변환을 안 한 것이므로
+    // 원본 그대로 전달된 것으로 간주해 out_size를 orig_size로 대체한다.
+    // 그대로 SUM(out_size)로 집계하면 NULL→0이 되어 savings가 100%로 과대 표시된다.
+    const effectiveOut = 'COALESCE(out_size, orig_size)';
     const sortSql = ({
-      savings:   "(1.0 - (CAST(COALESCE(SUM(out_size),0) AS REAL) / NULLIF(SUM(orig_size),0))) DESC",
+      savings:   `(1.0 - (CAST(COALESCE(SUM(${effectiveOut}),0) AS REAL) / NULLIF(SUM(orig_size),0))) DESC`,
       orig_size: "SUM(orig_size) DESC",
       events:    "COUNT(*) DESC",
     } as const)[q.sort ?? 'savings'];
@@ -278,7 +282,7 @@ export class OptimizationEventsRepository {
         url,
         COUNT(*)                                AS events,
         COALESCE(SUM(orig_size), 0)             AS total_orig,
-        COALESCE(SUM(out_size),  0)             AS total_out,
+        COALESCE(SUM(${effectiveOut}), 0)       AS total_out,
         GROUP_CONCAT(DISTINCT decision)         AS decisions
       ${base}
       ORDER BY ${sortSql}

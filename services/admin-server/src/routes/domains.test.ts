@@ -521,6 +521,24 @@ describe('GET /api/domains/:host/optimization/url-breakdown', () => {
     expect((res.json() as { total: number }).total).toBe(1);
   });
 
+  // out_size NULL 이벤트(skipped_small 등)는 "압축/변환 안 함"을 의미한다.
+  // total_out을 NULL→0으로 집계하면 절감 100%로 과대 표기되므로 원본 크기로 대체한다.
+  it('out_size NULL(skipped_small) 이벤트는 원본 크기로 집계돼 savings 0%이 된다', async () => {
+    const repo = makeRepo();
+    repo.upsert('a.test', 'https://a');
+    const evRepo = new OptimizationEventsRepository(repo.database);
+    evRepo.insert({ event_type: 'text_compress', host: 'a.test', url: 'https://a.test/tiny.html',
+      decision: 'skipped_small', orig_size: 317, out_size: null, elapsed_ms: 0 });
+
+    const app = buildApp(repo);
+    const res = await app.inject({ method: 'GET', url: '/api/domains/a.test/optimization/url-breakdown' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { items: Array<{ total_orig: number; total_out: number; savings_ratio: number }> };
+    expect(body.items[0].total_orig).toBe(317);
+    expect(body.items[0].total_out).toBe(317);
+    expect(body.items[0].savings_ratio).toBe(0);
+  });
+
   it('limit이 숫자가 아니면 무시한다', async () => {
     const repo = makeRepo();
     repo.upsert('a.test', 'https://a');
