@@ -9,14 +9,19 @@ import { useDomainUrlOptimization } from '../../../hooks/useDomainUrlOptimizatio
 
 type Sort = 'savings' | 'orig_size' | 'events';
 type Period = '1h' | '24h' | '7d' | '30d';
+// decision 값은 proxy/optimizer-service가 DB에 저장하는 실제 문자열과 일치해야 한다
+// (optimizer-service OptimizeDecision::as_str, proxy text_compress decision 분기 참조).
+// PascalCase를 보내면 WHERE 절이 일치하지 않아 필터가 전부 빈 결과를 반환한다.
 type Decision =
   | 'all'
-  | 'Optimized'
-  | 'PassthroughLarger'
-  | 'PassthroughError'
-  | 'PassthroughUnsupported'
+  | 'optimized'
+  | 'passthrough_larger'
+  | 'passthrough_error'
+  | 'passthrough_unsupported'
   | 'compressed_br'
-  | 'compressed_gzip';
+  | 'compressed_gzip'
+  | 'skipped_small'
+  | 'skipped_type';
 
 const PAGE = 50;
 
@@ -64,12 +69,14 @@ export function DomainUrlOptimizationTable({ host, period = '24h' }: { host: str
             data-testid="url-opt-decision"
           >
             <option value="all">decision: 전체</option>
-            <option value="Optimized">Optimized</option>
-            <option value="PassthroughLarger">PassthroughLarger</option>
-            <option value="PassthroughError">PassthroughError</option>
-            <option value="PassthroughUnsupported">PassthroughUnsupported</option>
-            <option value="compressed_br">text · br</option>
-            <option value="compressed_gzip">text · gzip</option>
+            <option value="optimized">이미지 · 최적화됨</option>
+            <option value="passthrough_larger">이미지 · 원본 유지(커짐)</option>
+            <option value="passthrough_error">이미지 · 원본 유지(에러)</option>
+            <option value="passthrough_unsupported">이미지 · 지원 안 함</option>
+            <option value="compressed_br">텍스트 · br</option>
+            <option value="compressed_gzip">텍스트 · gzip</option>
+            <option value="skipped_small">스킵 · 너무 작음</option>
+            <option value="skipped_type">스킵 · 타입/헤더 불가</option>
           </select>
           <select
             value={sort}

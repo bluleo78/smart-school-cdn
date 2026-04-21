@@ -474,8 +474,10 @@ describe('GET /api/domains/:host/optimization/url-breakdown', () => {
     const repo = makeRepo();
     repo.upsert('a.test', 'https://a');
     const evRepo = new OptimizationEventsRepository(repo.database);
+    // proxy/optimizer-service가 실제 DB에 저장하는 값은 snake_case 소문자다.
+    // PascalCase로 쓰면 필터가 통과되지 않아 회귀로 이어진다.
     evRepo.insert({ event_type: 'image_optimize', host: 'a.test', url: 'https://a.test/big.png',
-      decision: 'Optimized', orig_size: 1000, out_size: 200, elapsed_ms: 10 });
+      decision: 'optimized', orig_size: 1000, out_size: 200, elapsed_ms: 10 });
     evRepo.insert({ event_type: 'text_compress', host: 'a.test', url: 'https://a.test/app.js',
       decision: 'compressed_br', orig_size: 1000, out_size: 800, elapsed_ms: 5 });
 
@@ -493,13 +495,13 @@ describe('GET /api/domains/:host/optimization/url-breakdown', () => {
     repo.upsert('a.test', 'https://a');
     const evRepo = new OptimizationEventsRepository(repo.database);
     evRepo.insert({ event_type: 'image_optimize', host: 'a.test', url: 'https://a.test/a.png',
-      decision: 'Optimized', orig_size: 1000, out_size: 200, elapsed_ms: 10 });
+      decision: 'optimized', orig_size: 1000, out_size: 200, elapsed_ms: 10 });
     evRepo.insert({ event_type: 'image_optimize', host: 'a.test', url: 'https://a.test/b.gif',
-      decision: 'PassthroughLarger', orig_size: 500, out_size: 500, elapsed_ms: 5 });
+      decision: 'passthrough_larger', orig_size: 500, out_size: 500, elapsed_ms: 5 });
 
     const app = buildApp(repo);
     const res = await app.inject({ method: 'GET',
-      url: '/api/domains/a.test/optimization/url-breakdown?decision=Optimized&q=a.png' });
+      url: '/api/domains/a.test/optimization/url-breakdown?decision=optimized&q=a.png' });
     expect(res.statusCode).toBe(200);
     const body = res.json() as { total: number };
     expect(body.total).toBe(1);
@@ -511,7 +513,7 @@ describe('GET /api/domains/:host/optimization/url-breakdown', () => {
     const evRepo = new OptimizationEventsRepository(repo.database);
     evRepo.insert({ event_type: 'image_optimize', host: '*.textbook.com',
       url: 'https://x.textbook.com/a.png',
-      decision: 'Optimized', orig_size: 1000, out_size: 200, elapsed_ms: 10 });
+      decision: 'optimized', orig_size: 1000, out_size: 200, elapsed_ms: 10 });
 
     const app = buildApp(repo);
     const encoded = encodeURIComponent('*.textbook.com');
