@@ -2398,7 +2398,7 @@ mod tests {
         };
         let ps = ProxyState {
             shared: Arc::new(tokio::sync::RwLock::new(state::AppState::new())),
-            http_client: reqwest::Client::new(),
+            http_client: crate::clients::http::make_origin_http_client(),
             storage: Arc::new(Mutex::new(storage)),
             tls_client: Arc::new(Mutex::new(tls)),
             optimizer: Some(Arc::new(Mutex::new(optimizer))),
@@ -2456,7 +2456,7 @@ mod tests {
         };
         let ps = ProxyState {
             shared: Arc::new(tokio::sync::RwLock::new(state::AppState::new())),
-            http_client: reqwest::Client::new(),
+            http_client: crate::clients::http::make_origin_http_client(),
             storage: Arc::new(Mutex::new(storage)),
             tls_client: Arc::new(Mutex::new(tls)),
             optimizer: Some(Arc::new(Mutex::new(optimizer))),
@@ -2513,7 +2513,7 @@ mod tests {
         };
         let ps = ProxyState {
             shared: Arc::new(tokio::sync::RwLock::new(state::AppState::new())),
-            http_client: reqwest::Client::new(),
+            http_client: crate::clients::http::make_origin_http_client(),
             storage: Arc::new(Mutex::new(storage)),
             tls_client: Arc::new(Mutex::new(tls)),
             optimizer: Some(Arc::new(Mutex::new(optimizer))),
@@ -2573,7 +2573,7 @@ mod tests {
         };
         let ps = ProxyState {
             shared: Arc::new(tokio::sync::RwLock::new(state::AppState::new())),
-            http_client: reqwest::Client::new(),
+            http_client: crate::clients::http::make_origin_http_client(),
             storage: Arc::new(Mutex::new(storage)),
             tls_client: Arc::new(Mutex::new(tls)),
             optimizer: Some(Arc::new(Mutex::new(optimizer))),
@@ -2660,7 +2660,7 @@ mod tests {
         };
         let ps = ProxyState {
             shared: Arc::new(tokio::sync::RwLock::new(state::AppState::new())),
-            http_client: reqwest::Client::new(),
+            http_client: crate::clients::http::make_origin_http_client(),
             storage: Arc::new(Mutex::new(storage_client)),
             tls_client: Arc::new(Mutex::new(tls)),
             optimizer: Some(Arc::new(Mutex::new(optimizer))),
@@ -2863,7 +2863,7 @@ mod tests {
 
         let ps = ProxyState {
             shared: Arc::new(tokio::sync::RwLock::new(state::AppState::new())),
-            http_client: reqwest::Client::new(),
+            http_client: crate::clients::http::make_origin_http_client(),
             storage: Arc::new(Mutex::new(storage)),
             tls_client: Arc::new(Mutex::new(tls)),
             optimizer,
@@ -3005,7 +3005,7 @@ mod tests {
 
         let ps = ProxyState {
             shared: Arc::new(tokio::sync::RwLock::new(state::AppState::new())),
-            http_client: reqwest::Client::new(),
+            http_client: crate::clients::http::make_origin_http_client(),
             storage: Arc::new(Mutex::new(storage_client)),
             tls_client: Arc::new(Mutex::new(tls)),
             optimizer: None,
@@ -3108,7 +3108,7 @@ mod tests {
 
         let ps = ProxyState {
             shared: Arc::new(tokio::sync::RwLock::new(state::AppState::new())),
-            http_client: reqwest::Client::new(),
+            http_client: crate::clients::http::make_origin_http_client(),
             storage: Arc::new(Mutex::new(storage_client)),
             tls_client: Arc::new(Mutex::new(tls)),
             optimizer: None,
@@ -3197,7 +3197,7 @@ mod tests {
         // TextCompressConfig.br_level=6 (테스트 속도 우선)
         let ps = ProxyState {
             shared: Arc::new(tokio::sync::RwLock::new(state::AppState::new())),
-            http_client: reqwest::Client::new(),
+            http_client: crate::clients::http::make_origin_http_client(),
             storage: Arc::new(Mutex::new(storage_client.clone())),
             tls_client: Arc::new(Mutex::new(tls)),
             optimizer: None,
@@ -3414,7 +3414,7 @@ mod tests {
 
         let ps = ProxyState {
             shared: Arc::new(tokio::sync::RwLock::new(state::AppState::new())),
-            http_client: reqwest::Client::new(),
+            http_client: crate::clients::http::make_origin_http_client(),
             storage: Arc::new(Mutex::new(storage)),
             tls_client: Arc::new(Mutex::new(tls)),
             optimizer: Some(Arc::new(Mutex::new(optimizer))),
@@ -3498,7 +3498,7 @@ mod tests {
 
         let ps = ProxyState {
             shared: Arc::new(tokio::sync::RwLock::new(state::AppState::new())),
-            http_client: reqwest::Client::new(),
+            http_client: crate::clients::http::make_origin_http_client(),
             storage: Arc::new(Mutex::new(storage_client)),
             tls_client: Arc::new(Mutex::new(tls)),
             optimizer: Some(Arc::new(Mutex::new(optimizer))),
@@ -3865,7 +3865,7 @@ mod tests {
 
         let ps = ProxyState {
             shared: Arc::new(tokio::sync::RwLock::new(state::AppState::new())),
-            http_client: reqwest::Client::new(),
+            http_client: crate::clients::http::make_origin_http_client(),
             storage: Arc::new(Mutex::new(storage)),
             tls_client: Arc::new(Mutex::new(tls)),
             optimizer: Some(Arc::new(Mutex::new(optimizer))),
@@ -3948,7 +3948,7 @@ mod tests {
 
         let ps = ProxyState {
             shared:       Arc::new(tokio::sync::RwLock::new(state::AppState::new())),
-            http_client:  reqwest::Client::new(),
+            http_client:  crate::clients::http::make_origin_http_client(),
             storage:      Arc::new(Mutex::new(storage)),
             tls_client:   Arc::new(Mutex::new(tls)),
             optimizer:    None,

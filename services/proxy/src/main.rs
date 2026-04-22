@@ -53,7 +53,7 @@ async fn main() {
         .expect("tls-service gRPC 연결 실패");
 
     let shared_state: SharedState = Arc::new(RwLock::new(AppState::new()));
-    let http_client = reqwest::Client::new();
+    let http_client = proxy::clients::http::make_origin_http_client();
     let domain_map: DomainMap = Arc::new(RwLock::new(HashMap::new()));
     let cert_cache = tls_client.cert_cache.clone();
 
