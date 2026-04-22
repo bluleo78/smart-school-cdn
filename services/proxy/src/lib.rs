@@ -201,6 +201,83 @@ const DEFAULT_TTL: Duration = Duration::from_secs(3600);
 // L1 캐시가 L2 캐시보다 작은 상한을 갖도록 한다.
 const MAX_CACHE_ENTRY_BYTES: u64 = 128 * 1024 * 1024;
 
+// ─── Phase 20: 응답 헤더 포워딩 정책 ─────────────────────────────────
+
+/// 캐시 엔트리에 저장하고 HIT/MISS 응답 모두에서 복원할 헤더 (소문자).
+pub const CACHEABLE_HEADERS: &[&str] = &[
+    "cache-control",
+    "etag",
+    "last-modified",
+    "vary",
+    "content-language",
+    "content-disposition",
+    "access-control-allow-origin",
+    "access-control-allow-credentials",
+    "access-control-expose-headers",
+    "access-control-allow-methods",
+    "access-control-allow-headers",
+    "access-control-max-age",
+];
+
+/// MISS 응답에만 패스스루하고 저장하지 않는 헤더 (소문자).
+pub const PASSTHROUGH_HEADERS: &[&str] = &[
+    "location",
+    "www-authenticate",
+    "proxy-authenticate",
+    "retry-after",
+];
+
+/// 저장 헤더 총 바이트 상한 — 초과 시 화이트리스트 앞에서부터 담길 때까지만 유지.
+pub const MAX_CACHED_HEADERS_BYTES: usize = 8 * 1024;
+
+/// origin 응답 헤더 중 캐시 엔트리에 저장할 헤더를 화이트리스트로 추출한다.
+/// 이름은 소문자로 정규화되며, 총 바이트 합계가 MAX_CACHED_HEADERS_BYTES 이하가 되도록
+/// 앞쪽 항목부터 담기고 상한 초과 시점부터 드롭된다.
+pub fn extract_cacheable_headers(headers: &axum::http::HeaderMap) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    let mut total: usize = 0;
+    for wanted in CACHEABLE_HEADERS {
+        for value in headers.get_all(*wanted).iter() {
+            let Ok(v) = value.to_str() else { continue };
+            let name = (*wanted).to_ascii_lowercase();
+            let entry_size = name.len() + v.len();
+            if total + entry_size > MAX_CACHED_HEADERS_BYTES {
+                return out;
+            }
+            total += entry_size;
+            out.push((name, v.to_string()));
+        }
+    }
+    out
+}
+
+/// origin 응답 헤더 중 MISS 경로에서만 iPad 로 패스스루할 헤더를 추출한다.
+/// (Location 등 — 캐시 저장 대상 아님)
+pub fn extract_passthrough_headers(headers: &axum::http::HeaderMap) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    for wanted in PASSTHROUGH_HEADERS {
+        for value in headers.get_all(*wanted).iter() {
+            let Ok(v) = value.to_str() else { continue };
+            out.push(((*wanted).to_ascii_lowercase(), v.to_string()));
+        }
+    }
+    out
+}
+
+/// 원본 응답에 Set-Cookie 가 하나라도 존재하는지.
+/// true 면 캐시 저장을 스킵하고 BYPASS 경로로 전달해야 한다 (사용자간 쿠키 오염 방지).
+pub fn has_set_cookie(headers: &axum::http::HeaderMap) -> bool {
+    headers.contains_key("set-cookie")
+}
+
+/// 원본 응답이 `Vary: *` 를 보내 "캐시 금지" 를 지시하는지.
+pub fn has_vary_star(headers: &axum::http::HeaderMap) -> bool {
+    headers
+        .get_all("vary")
+        .iter()
+        .any(|v| v.to_str().map(|s| s.trim() == "*").unwrap_or(false))
+}
+
 /// 프록시 라우터 빌드
 pub fn build_proxy_router(ps: ProxyState) -> Router {
     Router::new()
@@ -847,6 +924,8 @@ async fn proxy_handler(
                 && !size_exceeded
                 && cacheable_ct;
             // classify_outcome: L1/L2 miss 이후이므로 두 플래그 모두 false
+            // NOTE: Task 7 에서 origin_has_set_cookie / origin_vary_star 를
+            //       실제 계산된 값으로 교체 예정 (현재는 placeholder false).
             let outcome = classify_outcome(
                 true, // GET 경로에서만 이 클로저가 실행됨
                 false,
@@ -854,6 +933,8 @@ async fn proxy_handler(
                 origin_no_cache,
                 size_exceeded,
                 origin_ok_and_cacheable,
+                false, // origin_has_set_cookie (Task 7 에서 계산)
+                false, // origin_vary_star       (Task 7 에서 계산)
             );
 
             // Phase 16-1: MISS 응답은 origin 본문을 즉시 클라이언트에 전달하고
@@ -1613,13 +1694,16 @@ impl CacheOutcome {
 }
 
 /// 순수 함수 — 입력 상태로부터 outcome을 결정한다.
-/// 우선순위: method → L1 → L2 → NoCache → Size → origin_ok → Other.
+/// 우선순위: method → L1 → L2 → SetCookie/Vary:* → NoCache → Size → origin_ok → Other.
 /// - `method_is_get_or_head`: GET/HEAD 요청이면 true
 /// - `l1_hit`: L1 메모리 캐시 HIT 여부
 /// - `l2_hit`: L2 디스크 캐시 HIT 여부 (L1 miss 후에만 의미)
 /// - `origin_no_cache`: origin 응답 Cache-Control이 no-cache/no-store
 /// - `size_exceeded`: 응답 크기가 MAX_CACHE_ENTRY_BYTES 초과
 /// - `origin_ok_and_cacheable`: origin 200 OK + 캐시 저장 성공
+/// - `origin_has_set_cookie`: origin 응답에 Set-Cookie 존재 (사용자별 응답 → 캐시 금지)
+/// - `origin_vary_star`:     origin 응답에 `Vary: *` (표준적 "캐시 금지" 신호)
+#[allow(clippy::too_many_arguments)]
 pub fn classify_outcome(
     method_is_get_or_head: bool,
     l1_hit: bool,
@@ -1627,6 +1711,8 @@ pub fn classify_outcome(
     origin_no_cache: bool,
     size_exceeded: bool,
     origin_ok_and_cacheable: bool,
+    origin_has_set_cookie: bool,
+    origin_vary_star: bool,
 ) -> CacheOutcome {
     if !method_is_get_or_head {
         return CacheOutcome::BypassMethod;
@@ -1636,6 +1722,12 @@ pub fn classify_outcome(
     }
     if l2_hit {
         return CacheOutcome::L2Hit;
+    }
+    if origin_has_set_cookie {
+        return CacheOutcome::BypassOther;
+    }
+    if origin_vary_star {
+        return CacheOutcome::BypassOther;
     }
     if origin_no_cache {
         return CacheOutcome::BypassNoCache;
@@ -3685,7 +3777,7 @@ mod tests {
     #[test]
     fn classify_outcome_비GET은_method_bypass() {
         assert_eq!(
-            classify_outcome(false, false, false, false, false, false),
+            classify_outcome(false, false, false, false, false, false, false, false),
             CacheOutcome::BypassMethod
         );
     }
@@ -3693,7 +3785,7 @@ mod tests {
     #[test]
     fn classify_outcome_l1_히트() {
         assert_eq!(
-            classify_outcome(true, true, false, false, false, false),
+            classify_outcome(true, true, false, false, false, false, false, false),
             CacheOutcome::L1Hit
         );
     }
@@ -3701,7 +3793,7 @@ mod tests {
     #[test]
     fn classify_outcome_l1_미스_l2_히트() {
         assert_eq!(
-            classify_outcome(true, false, true, false, false, false),
+            classify_outcome(true, false, true, false, false, false, false, false),
             CacheOutcome::L2Hit
         );
     }
@@ -3709,7 +3801,7 @@ mod tests {
     #[test]
     fn classify_outcome_origin_nocache() {
         assert_eq!(
-            classify_outcome(true, false, false, true, false, false),
+            classify_outcome(true, false, false, true, false, false, false, false),
             CacheOutcome::BypassNoCache
         );
     }
@@ -3717,7 +3809,7 @@ mod tests {
     #[test]
     fn classify_outcome_size_초과() {
         assert_eq!(
-            classify_outcome(true, false, false, false, true, false),
+            classify_outcome(true, false, false, false, true, false, false, false),
             CacheOutcome::BypassSize
         );
     }
@@ -3725,7 +3817,7 @@ mod tests {
     #[test]
     fn classify_outcome_origin_ok_캐시_저장() {
         assert_eq!(
-            classify_outcome(true, false, false, false, false, true),
+            classify_outcome(true, false, false, false, false, true, false, false),
             CacheOutcome::Miss
         );
     }
@@ -3733,7 +3825,7 @@ mod tests {
     #[test]
     fn classify_outcome_기타는_other() {
         assert_eq!(
-            classify_outcome(true, false, false, false, false, false),
+            classify_outcome(true, false, false, false, false, false, false, false),
             CacheOutcome::BypassOther
         );
     }
@@ -3741,8 +3833,24 @@ mod tests {
     #[test]
     fn classify_outcome_nocache가_size보다_우선() {
         assert_eq!(
-            classify_outcome(true, false, false, true, true, false),
+            classify_outcome(true, false, false, true, true, false, false, false),
             CacheOutcome::BypassNoCache
+        );
+    }
+
+    #[test]
+    fn classify_outcome_set_cookie면_bypass_other() {
+        assert_eq!(
+            classify_outcome(true, false, false, false, false, true, true, false),
+            CacheOutcome::BypassOther
+        );
+    }
+
+    #[test]
+    fn classify_outcome_vary_star면_bypass_other() {
+        assert_eq!(
+            classify_outcome(true, false, false, false, false, true, false, true),
+            CacheOutcome::BypassOther
         );
     }
 
@@ -4035,7 +4143,7 @@ mod tests {
     #[test]
     fn classify_outcome_size_exceeded_는_bypass_size() {
         assert_eq!(
-            classify_outcome(true, false, false, false, true, false),
+            classify_outcome(true, false, false, false, true, false, false, false),
             CacheOutcome::BypassSize,
         );
     }
@@ -4044,8 +4152,91 @@ mod tests {
     #[test]
     fn classify_outcome_size가_cacheable보다_우선() {
         assert_eq!(
-            classify_outcome(true, false, false, false, true, true),
+            classify_outcome(true, false, false, false, true, true, false, false),
             CacheOutcome::BypassSize,
         );
+    }
+}
+
+#[cfg(test)]
+mod header_policy_tests {
+    use super::*;
+    use axum::http::{HeaderMap, HeaderName, HeaderValue};
+
+    fn hm(pairs: &[(&str, &str)]) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        for (k, v) in pairs {
+            let name = HeaderName::from_bytes(k.as_bytes()).unwrap();
+            h.append(name, HeaderValue::from_str(v).unwrap());
+        }
+        h
+    }
+
+    #[test]
+    fn extract_cacheable_headers_whitelist_만_포함() {
+        let headers = hm(&[
+            ("Cache-Control", "max-age=3600"),
+            ("ETag", "\"v7\""),
+            ("Server", "origin/1.0"),
+            ("Date", "Wed, 23 Apr 2026 00:00 GMT"),
+            ("Last-Modified", "Tue, 22 Apr 2026 00:00 GMT"),
+        ]);
+        let out = extract_cacheable_headers(&headers);
+        let names: Vec<&str> = out.iter().map(|(n, _)| n.as_str()).collect();
+        assert!(names.contains(&"cache-control"));
+        assert!(names.contains(&"etag"));
+        assert!(names.contains(&"last-modified"));
+        assert!(!names.contains(&"server"));
+        assert!(!names.contains(&"date"));
+    }
+
+    #[test]
+    fn extract_cacheable_headers_소문자_정규화() {
+        let headers = hm(&[("ETag", "\"v7\""), ("Cache-Control", "no-cache")]);
+        let out = extract_cacheable_headers(&headers);
+        for (name, _) in &out {
+            assert_eq!(*name, name.to_lowercase());
+        }
+    }
+
+    #[test]
+    fn extract_cacheable_headers_8kb_상한() {
+        let big_value = "x".repeat(1024);
+        let mut headers = HeaderMap::new();
+        for _ in 0..10 {
+            headers.append("cache-control", HeaderValue::from_str(&big_value).unwrap());
+        }
+        let out = extract_cacheable_headers(&headers);
+        let total: usize = out.iter().map(|(n, v)| n.len() + v.len()).sum();
+        assert!(total <= 8 * 1024, "헤더 합계가 8KB 이하여야 함: {}", total);
+    }
+
+    #[test]
+    fn extract_passthrough_headers_location만_수거() {
+        let headers = hm(&[
+            ("Location", "/new/path"),
+            ("Retry-After", "120"),
+            ("Server", "origin/1.0"),
+        ]);
+        let out = extract_passthrough_headers(&headers);
+        let names: Vec<&str> = out.iter().map(|(n, _)| n.as_str()).collect();
+        assert!(names.contains(&"location"));
+        assert!(names.contains(&"retry-after"));
+        assert!(!names.contains(&"server"));
+    }
+
+    #[test]
+    fn has_set_cookie_true_false() {
+        assert!(has_set_cookie(&hm(&[("set-cookie", "a=1")])));
+        assert!(has_set_cookie(&hm(&[("Set-Cookie", "a=1")])));
+        assert!(!has_set_cookie(&hm(&[("cache-control", "no-cache")])));
+    }
+
+    #[test]
+    fn has_vary_star_true_false() {
+        assert!(has_vary_star(&hm(&[("vary", "*")])));
+        assert!(has_vary_star(&hm(&[("Vary", " * ")])));
+        assert!(!has_vary_star(&hm(&[("vary", "Accept-Encoding")])));
+        assert!(!has_vary_star(&hm(&[])));
     }
 }
