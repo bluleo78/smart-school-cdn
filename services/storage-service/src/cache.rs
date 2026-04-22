@@ -14,6 +14,12 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use tokio::sync::Mutex;
 
+/// Phase 20: 저장 헤더 사이드카 파일 확장자
+const HEADERS_SIDECAR_EXT: &str = "headers.json";
+
+/// Phase 20: 저장 헤더 JSON 직렬화 후 바이트 상한
+const MAX_CACHED_HEADERS_BYTES: usize = 8 * 1024;
+
 // ─── 캐시 키 계산 ────────────────────────────────────────────────
 
 /// HTTP 요청에서 캐시 키 계산 — SHA-256 hex string 반환
@@ -121,6 +127,8 @@ pub struct CacheEntry {
     pub expires_at: Option<DateTime<Utc>>,
     /// Phase 15: Brotli 프리컴프레스 변형 존재 여부
     pub has_br: bool,
+    /// Phase 20: origin 응답 헤더 화이트리스트 저장분 (소문자 이름)
+    pub cached_headers: Vec<(String, String)>,
 }
 
 impl CacheEntry {
@@ -172,12 +180,15 @@ impl CacheLayer {
         }
     }
 
-    /// 캐시 조회 — HIT 시 (Bytes, content_type, body_br) 반환, MISS/만료 시 None
-    pub async fn get(&self, key: &str) -> Option<(Bytes, Option<String>, Option<Bytes>)> {
+    /// 캐시 조회 — HIT 시 (Bytes, content_type, body_br, cached_headers) 반환, MISS/만료 시 None
+    pub async fn get(
+        &self,
+        key: &str,
+    ) -> Option<(Bytes, Option<String>, Option<Bytes>, Vec<(String, String)>)> {
         // 1단계: lock 안 — 인덱스 확인·수정만 수행, 경로만 추출
         enum LookupResult {
             Expired(PathBuf),
-            Hit(PathBuf, Option<String>, bool),
+            Hit(PathBuf, Option<String>, bool, Vec<(String, String)>),
         }
 
         let result = {
@@ -197,18 +208,21 @@ impl CacheLayer {
                 entry.accessed_at = Utc::now();
                 let content_type = entry.content_type.clone();
                 let has_br = entry.has_br;
+                let cached_headers = entry.cached_headers.clone();
                 let path = self.cache_dir.join(key);
-                LookupResult::Hit(path, content_type, has_br)
+                LookupResult::Hit(path, content_type, has_br, cached_headers)
             }
         }; // lock 해제
 
         // 2단계: lock 밖 — 디스크 I/O 수행
         match result {
             LookupResult::Expired(path) => {
-                let _ = tokio::fs::remove_file(path).await;
+                let _ = tokio::fs::remove_file(&path).await;
+                let _ = tokio::fs::remove_file(path.with_extension("br")).await;
+                let _ = tokio::fs::remove_file(self.cache_dir.join(format!("{key}.{HEADERS_SIDECAR_EXT}"))).await;
                 None
             }
-            LookupResult::Hit(path, content_type, has_br) => {
+            LookupResult::Hit(path, content_type, has_br, cached_headers) => {
                 match tokio::fs::read(&path).await {
                     Ok(data) => {
                         // body_br 파일 읽기 (없으면 None)
@@ -218,7 +232,7 @@ impl CacheLayer {
                         } else {
                             None
                         };
-                        Some((Bytes::from(data), content_type, body_br))
+                        Some((Bytes::from(data), content_type, body_br, cached_headers))
                     }
                     Err(_) => {
                         // Fix 3: 디스크 파일 없으면 stale 인덱스 제거
@@ -236,6 +250,8 @@ impl CacheLayer {
     /// 캐시 저장 — 용량 초과 시 LRU 퇴거 후 저장
     /// 저장 실패는 무시 (best-effort)
     /// body_br: Phase 15 Brotli 프리컴프레스 변형 (Some이면 {key}.br 파일로 함께 저장)
+    /// cached_headers: Phase 20 origin 응답 헤더 화이트리스트 — {key}.headers.json 사이드카로 저장
+    #[allow(clippy::too_many_arguments)]
     pub async fn put(
         &self,
         key: &str,
@@ -245,6 +261,7 @@ impl CacheLayer {
         bytes: Bytes,
         ttl: Option<Duration>,
         body_br: Option<Bytes>,
+        cached_headers: Vec<(String, String)>,
     ) {
         let size = bytes.len() as u64;
 
@@ -278,6 +295,16 @@ impl CacheLayer {
             false
         };
 
+        // Phase 20: cached_headers 사이드카 파일 저장 (best-effort, 크기 상한 초과 시 skip)
+        if !cached_headers.is_empty() {
+            if let Ok(json) = serde_json::to_vec(&cached_headers) {
+                if json.len() <= MAX_CACHED_HEADERS_BYTES {
+                    let sidecar = self.cache_dir.join(format!("{key}.{HEADERS_SIDECAR_EXT}"));
+                    let _ = tokio::fs::write(&sidecar, &json).await;
+                }
+            }
+        }
+
         // 인덱스 등록
         let now = Utc::now();
         let expires_at = ttl.map(|d| now + chrono::Duration::from_std(d).unwrap_or_default());
@@ -292,6 +319,7 @@ impl CacheLayer {
             accessed_at: now,
             expires_at,
             has_br,
+            cached_headers,
         };
 
         let mut index = self.index.lock().await;
@@ -304,6 +332,7 @@ impl CacheLayer {
             // 공간 부족 — 파일 롤백
             drop(index);
             let _ = tokio::fs::remove_file(&path).await;
+            let _ = tokio::fs::remove_file(self.cache_dir.join(format!("{key}.{HEADERS_SIDECAR_EXT}"))).await;
             return;
         }
 
@@ -343,9 +372,13 @@ impl CacheLayer {
             paths
         }; // lock 해제
 
-        // 2단계: lock 밖 — 디스크 I/O 수행
+        // 2단계: lock 밖 — 디스크 I/O 수행 (body + br + headers 사이드카)
         for path in paths_to_delete {
-            let _ = tokio::fs::remove_file(path).await;
+            let _ = tokio::fs::remove_file(&path).await;
+            let _ = tokio::fs::remove_file(path.with_extension("br")).await;
+            if let Some(name) = path.file_name().and_then(|s| s.to_str()) {
+                let _ = tokio::fs::remove_file(self.cache_dir.join(format!("{name}.{HEADERS_SIDECAR_EXT}"))).await;
+            }
         }
     }
 
@@ -363,9 +396,11 @@ impl CacheLayer {
             }
         }; // lock 해제
 
-        // 2단계: lock 밖 — 디스크 I/O
+        // 2단계: lock 밖 — 디스크 I/O (body + br + headers 사이드카)
         if let Some((path, size)) = maybe_path {
-            let _ = tokio::fs::remove_file(path).await;
+            let _ = tokio::fs::remove_file(&path).await;
+            let _ = tokio::fs::remove_file(path.with_extension("br")).await;
+            let _ = tokio::fs::remove_file(self.cache_dir.join(format!("{key}.{HEADERS_SIDECAR_EXT}"))).await;
             (1, size)
         } else {
             (0, 0)
@@ -397,9 +432,13 @@ impl CacheLayer {
             (count, freed, paths)
         }; // lock 해제
 
-        // 2단계: lock 밖 — 디스크 I/O
+        // 2단계: lock 밖 — 디스크 I/O (body + br + headers 사이드카)
         for path in paths {
-            let _ = tokio::fs::remove_file(path).await;
+            let _ = tokio::fs::remove_file(&path).await;
+            let _ = tokio::fs::remove_file(path.with_extension("br")).await;
+            if let Some(name) = path.file_name().and_then(|s| s.to_str()) {
+                let _ = tokio::fs::remove_file(self.cache_dir.join(format!("{name}.{HEADERS_SIDECAR_EXT}"))).await;
+            }
         }
         (count, freed)
     }
@@ -429,9 +468,13 @@ impl CacheLayer {
             (count, freed, paths)
         }; // lock 해제
 
-        // 2단계: lock 밖 — 디스크 I/O
+        // 2단계: lock 밖 — 디스크 I/O (body + br + headers 사이드카)
         for path in paths {
-            let _ = tokio::fs::remove_file(path).await;
+            let _ = tokio::fs::remove_file(&path).await;
+            let _ = tokio::fs::remove_file(path.with_extension("br")).await;
+            if let Some(name) = path.file_name().and_then(|s| s.to_str()) {
+                let _ = tokio::fs::remove_file(self.cache_dir.join(format!("{name}.{HEADERS_SIDECAR_EXT}"))).await;
+            }
         }
         (count, freed)
     }
@@ -449,9 +492,13 @@ impl CacheLayer {
             (count, freed, paths)
         }; // lock 해제
 
-        // 2단계: lock 밖 — 디스크 I/O
+        // 2단계: lock 밖 — 디스크 I/O (body + br + headers 사이드카)
         for path in paths {
-            let _ = tokio::fs::remove_file(path).await;
+            let _ = tokio::fs::remove_file(&path).await;
+            let _ = tokio::fs::remove_file(path.with_extension("br")).await;
+            if let Some(name) = path.file_name().and_then(|s| s.to_str()) {
+                let _ = tokio::fs::remove_file(self.cache_dir.join(format!("{name}.{HEADERS_SIDECAR_EXT}"))).await;
+            }
         }
         (count, freed)
     }
@@ -606,12 +653,13 @@ mod tests {
                 data.clone(),
                 None,
                 None,
+                vec![],
             )
             .await;
 
         let result = cache.get(&key).await;
         assert!(result.is_some());
-        let (body, ct, _body_br) = result.unwrap();
+        let (body, ct, _body_br, _hdrs) = result.unwrap();
         assert_eq!(body, data);
         assert_eq!(ct, Some("text/html".to_string()));
     }
@@ -631,6 +679,7 @@ mod tests {
                 Bytes::from("data"),
                 None,
                 None,
+                vec![],
             )
             .await;
 
@@ -657,6 +706,7 @@ mod tests {
                 Bytes::from("expires"),
                 Some(Duration::from_secs(0)),
                 None,
+                vec![],
             )
             .await;
 
@@ -684,6 +734,7 @@ mod tests {
                 Bytes::from("0123456789"), // 10바이트
                 None,
                 None,
+                vec![],
             )
             .await;
 
@@ -697,6 +748,7 @@ mod tests {
                 Bytes::from("0123456789"), // 10바이트
                 None,
                 None,
+                vec![],
             )
             .await;
 
@@ -715,7 +767,7 @@ mod tests {
 
         for key in &[&key1, &key2] {
             cache
-                .put(key, "https://b.com/x", "b.com", None, Bytes::from("data"), None, None)
+                .put(key, "https://b.com/x", "b.com", None, Bytes::from("data"), None, None, vec![])
                 .await;
         }
 
@@ -735,13 +787,13 @@ mod tests {
         let k3 = compute_cache_key("GET", "d.com", "/1", "");
 
         cache
-            .put(&k1, "https://c.com/1", "c.com", None, Bytes::from("x"), None, None)
+            .put(&k1, "https://c.com/1", "c.com", None, Bytes::from("x"), None, None, vec![])
             .await;
         cache
-            .put(&k2, "https://c.com/2", "c.com", None, Bytes::from("y"), None, None)
+            .put(&k2, "https://c.com/2", "c.com", None, Bytes::from("y"), None, None, vec![])
             .await;
         cache
-            .put(&k3, "https://d.com/1", "d.com", None, Bytes::from("z"), None, None)
+            .put(&k3, "https://d.com/1", "d.com", None, Bytes::from("z"), None, None, vec![])
             .await;
 
         let (count, _) = cache.purge_domain("c.com").await;
@@ -759,7 +811,7 @@ mod tests {
         for i in 0..3 {
             let key = compute_cache_key("GET", "e.com", &format!("/{i}"), "");
             cache
-                .put(&key, "https://e.com/x", "e.com", None, Bytes::from("data"), None, None)
+                .put(&key, "https://e.com/x", "e.com", None, Bytes::from("data"), None, None, vec![])
                 .await;
         }
 
@@ -783,6 +835,7 @@ mod tests {
                 Bytes::from("data"),
                 None,
                 None,
+                vec![],
             )
             .await;
 
@@ -790,5 +843,85 @@ mod tests {
         assert_eq!(count, 1);
         assert!(freed > 0);
         assert!(cache.get(&key).await.is_none());
+    }
+
+    // ── Phase 20: cached_headers 사이드카 ─────────────────────────
+
+    #[tokio::test]
+    async fn put_후_get에서_cached_headers를_함께_반환한다() {
+        let dir = TempDir::new().unwrap();
+        let cache = CacheLayer::new(dir.path().to_path_buf(), 100 * 1024 * 1024);
+
+        let headers = vec![
+            ("cache-control".to_string(), "max-age=3600".to_string()),
+            ("etag".to_string(), "\"v7\"".to_string()),
+        ];
+
+        cache
+            .put(
+                "k-hdr",
+                "https://a.test/x",
+                "a.test",
+                Some("text/html".to_string()),
+                Bytes::from_static(b"<!doctype html>"),
+                None,
+                None,
+                headers.clone(),
+            )
+            .await;
+
+        let (body, ct, br, got_headers) = cache.get("k-hdr").await.unwrap();
+        assert_eq!(body, Bytes::from_static(b"<!doctype html>"));
+        assert_eq!(ct.as_deref(), Some("text/html"));
+        assert!(br.is_none());
+        assert_eq!(got_headers, headers);
+    }
+
+    #[tokio::test]
+    async fn cached_headers_없이_저장하면_get은_빈_vec를_반환한다() {
+        let dir = TempDir::new().unwrap();
+        let cache = CacheLayer::new(dir.path().to_path_buf(), 100 * 1024 * 1024);
+
+        cache
+            .put(
+                "k-empty",
+                "https://a.test/y",
+                "a.test",
+                Some("image/png".to_string()),
+                Bytes::from_static(b"PNG_DATA"),
+                None,
+                None,
+                vec![],
+            )
+            .await;
+
+        let (_, _, _, got_headers) = cache.get("k-empty").await.unwrap();
+        assert!(got_headers.is_empty());
+    }
+
+    #[tokio::test]
+    async fn purge_by_key_는_사이드카_파일도_삭제한다() {
+        let dir = TempDir::new().unwrap();
+        let cache_dir = dir.path().to_path_buf();
+        let cache = CacheLayer::new(cache_dir.clone(), 100 * 1024 * 1024);
+
+        cache
+            .put(
+                "k-purge",
+                "https://a.test/z",
+                "a.test",
+                None,
+                Bytes::from_static(b"x"),
+                None,
+                None,
+                vec![("etag".to_string(), "\"v\"".to_string())],
+            )
+            .await;
+
+        let sidecar = cache_dir.join("k-purge.headers.json");
+        assert!(sidecar.exists(), "사이드카 파일이 생성되어야 함");
+
+        cache.purge_by_key("k-purge").await;
+        assert!(!sidecar.exists(), "퍼지 후 사이드카 파일이 삭제되어야 함");
     }
 }

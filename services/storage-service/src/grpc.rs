@@ -28,7 +28,8 @@ impl StorageService for StorageGrpc {
     async fn get(&self, req: Request<GetRequest>) -> Result<Response<GetResponse>, Status> {
         let key = req.into_inner().key;
         match self.cache.get(&key).await {
-            Some((body, ct, body_br)) => Ok(Response::new(GetResponse {
+            // Phase 20: cached_headers는 Task 3에서 wire-through — 현재는 무시
+            Some((body, ct, body_br, _cached_headers)) => Ok(Response::new(GetResponse {
                 hit: true,
                 body: body.to_vec(),
                 content_type: ct.unwrap_or_default(),
@@ -59,8 +60,9 @@ impl StorageService for StorageGrpc {
             Some(r.content_type)
         };
         let body_br = if r.body_br.is_empty() { None } else { Some(bytes::Bytes::from(r.body_br)) };
+        // Phase 20: cached_headers는 Task 3에서 proto-to-cache wire-through — 현재는 빈 Vec
         self.cache
-            .put(&r.key, &r.url, &r.domain, ct, bytes::Bytes::from(r.body), ttl, body_br)
+            .put(&r.key, &r.url, &r.domain, ct, bytes::Bytes::from(r.body), ttl, body_br, vec![])
             .await;
         Ok(Response::new(PutResponse {}))
     }
