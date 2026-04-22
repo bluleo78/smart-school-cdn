@@ -10,12 +10,20 @@ service StorageService {
   rpc Health(HealthRequest) returns (HealthResponse);
 }
 
+// Phase 20: 원본 응답 헤더 중 화이트리스트로 선별된 항목을 캐시와 함께 저장·복원하기 위한 key-value 쌍.
+// name 은 소문자 정규화 된 HTTP 헤더 이름.
+message HeaderEntry {
+  string name  = 1;
+  string value = 2;
+}
+
 message GetRequest  { string key = 1; }
 message GetResponse {
   bool   hit          = 1;
   bytes  body         = 2;
   string content_type = 3;
   bytes  body_br      = 4;  // Phase 15: Brotli 프리컴프레스 변형 (없으면 빈 bytes)
+  repeated HeaderEntry cached_headers = 5;  // Phase 20: 저장된 원본 응답 헤더 (없으면 빈 배열)
 }
 
 message PutRequest {
@@ -26,11 +34,11 @@ message PutRequest {
   bytes  body         = 5;
   uint64 ttl_secs     = 6;
   bytes  body_br      = 7;  // Phase 15: Brotli 프리컴프레스 변형 (없으면 빈 bytes)
+  repeated HeaderEntry cached_headers = 8;  // Phase 20: 저장할 원본 응답 헤더 (없으면 빈 배열)
 }
 message PutResponse {}
 
 message PurgeAll {}
-
 message PurgeRequest {
   oneof target {
     string  url    = 1;

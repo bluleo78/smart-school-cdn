@@ -33,12 +33,14 @@ impl StorageService for StorageGrpc {
                 body: body.to_vec(),
                 content_type: ct.unwrap_or_default(),
                 body_br: body_br.map(|b| b.to_vec()).unwrap_or_default(),
+                cached_headers: vec![],
             })),
             None => Ok(Response::new(GetResponse {
                 hit: false,
                 body: vec![],
                 content_type: String::new(),
                 body_br: vec![],
+                cached_headers: vec![],
             })),
         }
     }
@@ -191,6 +193,7 @@ mod tests {
             body:         b"hello".to_vec(),
             ttl_secs:     0,
             body_br:      vec![],
+            cached_headers: vec![],
         }))
         .await
         .unwrap();
@@ -218,6 +221,7 @@ mod tests {
             body: b"img".to_vec(),
             ttl_secs: 0,
             body_br: vec![],
+            cached_headers: vec![],
         }))
         .await
         .unwrap();
@@ -249,6 +253,7 @@ mod tests {
                 body:         vec![i],
                 ttl_secs:     0,
                 body_br:      vec![],
+                cached_headers: vec![],
             }))
             .await
             .unwrap();
@@ -288,6 +293,7 @@ mod tests {
                 key: format!("p{i}"), url: format!("https://ex.com/{i}"),
                 domain: "ex.com".to_string(), content_type: "text/plain".to_string(),
                 body: vec![i], ttl_secs: 0, body_br: vec![],
+                cached_headers: vec![],
             }))
             .await
             .unwrap();
@@ -325,6 +331,7 @@ mod tests {
             body:         b"<!DOCTYPE html>...original...".to_vec(),
             ttl_secs:     0,
             body_br:      b"FAKE_BR_BLOB".to_vec(),
+            cached_headers: vec![],
         })).await.unwrap();
 
         let res = grpc.get(Request::new(GetRequest {
@@ -348,6 +355,7 @@ mod tests {
             body:         b"PNG_DATA".to_vec(),
             ttl_secs:     0,
             body_br:      vec![],
+            cached_headers: vec![],
         })).await.unwrap();
 
         let res = grpc.get(Request::new(GetRequest {

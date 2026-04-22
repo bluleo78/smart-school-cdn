@@ -1702,12 +1702,14 @@ mod tests {
                     body: body.clone(),
                     content_type: ct.clone(),
                     body_br: br.clone(),
+                    cached_headers: vec![],
                 })),
                 None => Ok(tonic::Response::new(GetResponse {
                     hit: false,
                     body: vec![],
                     content_type: String::new(),
                     body_br: vec![],
+                    cached_headers: vec![],
                 })),
             }
         }

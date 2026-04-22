@@ -57,6 +57,7 @@ impl StorageClient {
             body:         body.to_vec(),
             ttl_secs:     ttl.map(|d| d.as_secs()).unwrap_or(0),
             body_br:      body_br.map(|b| b.to_vec()).unwrap_or_default(),
+            cached_headers: vec![],
         }).await {
             tracing::warn!("캐시 저장 실패 (key: {}): {}", key, e);
         }
