@@ -649,7 +649,7 @@ async fn proxy_handler(
 
     // ── L2 디스크 캐시 확인 (storage gRPC) ───────────────────────
     if let Some(ref key) = cache_key {
-        if let Some((cached_bytes, content_type, cached_br)) = ps.storage.lock().await.get(key).await {
+        if let Some((cached_bytes, content_type, cached_br, _cached_headers)) = ps.storage.lock().await.get(key).await {
             // Vec<u8> → Bytes로 한 번 변환 (이후 clone은 Arc refcount 증가라 저렴)
             let body_bytes: Bytes = cached_bytes;
             let total = body_bytes.len() as u64;
@@ -998,7 +998,7 @@ async fn proxy_handler(
                         // storage.put — 디스크 영속화
                         ps_bg.storage.lock().await
                             .put(&key_bg, &full_url, &host_bg, store_ct.clone(),
-                                 store_bytes.clone(), Some(ttl_bg), store_br.clone())
+                                 store_bytes.clone(), Some(ttl_bg), store_br.clone(), vec![])
                             .await;
 
                         // L1 메모리 캐시 저장 (16MB 이하만)
@@ -2639,6 +2639,7 @@ mod tests {
                 bytes::Bytes::from("fake-image-data"),
                 None,
                 None,
+                vec![],
             )
             .await;
         }
@@ -3232,7 +3233,7 @@ mod tests {
         // storage에 저장된 body_br 확인
         let key = compute_cache_key("GET", "textbook.local", "/page.html", "");
         let stored = storage_client.clone().get(&key).await;
-        let (_, _, body_br) = stored.expect("storage에 항목이 저장돼야 한다");
+        let (_, _, body_br, _cached_headers) = stored.expect("storage에 항목이 저장돼야 한다");
         assert!(body_br.is_some(), "brotli 변형이 함께 저장돼야 한다");
         let br = body_br.unwrap();
         assert!(br.len() < html.len() / 2, "br 크기 < 원본/2: {} vs {}", br.len(), html.len());
@@ -3488,7 +3489,7 @@ mod tests {
                     Err(_) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
                 }
             };
-            s.put(&key, "https://test.com/disk-item", "test.com", Some("text/html".to_string()), vec![60, 104, 49, 62].into(), Some(std::time::Duration::from_secs(3600)), None).await;
+            s.put(&key, "https://test.com/disk-item", "test.com", Some("text/html".to_string()), vec![60, 104, 49, 62].into(), Some(std::time::Duration::from_secs(3600)), None, vec![]).await;
         }
 
         let memory_cache: moka::future::Cache<String, Arc<MemoryCacheEntry>> =

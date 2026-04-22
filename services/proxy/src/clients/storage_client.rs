@@ -28,19 +28,28 @@ impl StorageClient {
         })
     }
 
-    /// 캐시 조회 — HIT 시 (body, content_type, body_br) 반환
-    pub async fn get(&mut self, key: &str) -> Option<(Bytes, Option<String>, Option<Bytes>)> {
+    /// 캐시 조회 — HIT 시 (body, content_type, body_br, cached_headers) 반환
+    pub async fn get(
+        &mut self,
+        key: &str,
+    ) -> Option<(Bytes, Option<String>, Option<Bytes>, Vec<(String, String)>)> {
         let resp = self.inner.get(GetRequest { key: key.to_string() }).await.ok()?.into_inner();
         if resp.hit {
             let ct = if resp.content_type.is_empty() { None } else { Some(resp.content_type) };
             let br = if resp.body_br.is_empty() { None } else { Some(Bytes::from(resp.body_br)) };
-            Some((Bytes::from(resp.body), ct, br))
+            let cached_headers: Vec<(String, String)> = resp
+                .cached_headers
+                .into_iter()
+                .map(|h| (h.name, h.value))
+                .collect();
+            Some((Bytes::from(resp.body), ct, br, cached_headers))
         } else {
             None
         }
     }
 
     /// 캐시 저장
+    #[allow(clippy::too_many_arguments)]
     pub async fn put(
         &mut self,
         key: &str, url: &str, domain: &str,
@@ -48,7 +57,12 @@ impl StorageClient {
         body: Bytes,
         ttl: Option<Duration>,
         body_br: Option<Bytes>,
+        cached_headers: Vec<(String, String)>,
     ) {
+        let proto_headers: Vec<cdn_proto::storage::HeaderEntry> = cached_headers
+            .into_iter()
+            .map(|(name, value)| cdn_proto::storage::HeaderEntry { name, value })
+            .collect();
         if let Err(e) = self.inner.put(PutRequest {
             key:          key.to_string(),
             url:          url.to_string(),
@@ -57,7 +71,7 @@ impl StorageClient {
             body:         body.to_vec(),
             ttl_secs:     ttl.map(|d| d.as_secs()).unwrap_or(0),
             body_br:      body_br.map(|b| b.to_vec()).unwrap_or_default(),
-            cached_headers: vec![],
+            cached_headers: proto_headers,
         }).await {
             tracing::warn!("캐시 저장 실패 (key: {}): {}", key, e);
         }
