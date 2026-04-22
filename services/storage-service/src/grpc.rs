@@ -13,6 +13,7 @@ use cdn_proto::storage::{
     StatsRequest, StatsResponse, DomainStat,
     PopularRequest, PopularResponse, PopularEntry,
     HealthRequest, HealthResponse,
+    HeaderEntry,
 };
 
 use crate::cache::CacheLayer;
@@ -24,17 +25,19 @@ pub struct StorageGrpc {
 
 #[tonic::async_trait]
 impl StorageService for StorageGrpc {
-    /// 캐시 조회 — HIT 시 body/content_type/body_br 반환, MISS 시 hit=false
+    /// 캐시 조회 — HIT 시 body/content_type/body_br/cached_headers 반환, MISS 시 hit=false
     async fn get(&self, req: Request<GetRequest>) -> Result<Response<GetResponse>, Status> {
         let key = req.into_inner().key;
         match self.cache.get(&key).await {
-            // Phase 20: cached_headers는 Task 3에서 wire-through — 현재는 무시
-            Some((body, ct, body_br, _cached_headers)) => Ok(Response::new(GetResponse {
+            Some((body, ct, body_br, cached_headers)) => Ok(Response::new(GetResponse {
                 hit: true,
                 body: body.to_vec(),
                 content_type: ct.unwrap_or_default(),
                 body_br: body_br.map(|b| b.to_vec()).unwrap_or_default(),
-                cached_headers: vec![],
+                cached_headers: cached_headers
+                    .into_iter()
+                    .map(|(name, value)| HeaderEntry { name, value })
+                    .collect(),
             })),
             None => Ok(Response::new(GetResponse {
                 hit: false,
@@ -60,9 +63,17 @@ impl StorageService for StorageGrpc {
             Some(r.content_type)
         };
         let body_br = if r.body_br.is_empty() { None } else { Some(bytes::Bytes::from(r.body_br)) };
-        // Phase 20: cached_headers는 Task 3에서 proto-to-cache wire-through — 현재는 빈 Vec
+        let cached_headers: Vec<(String, String)> = r
+            .cached_headers
+            .into_iter()
+            .map(|h| (h.name, h.value))
+            .collect();
         self.cache
-            .put(&r.key, &r.url, &r.domain, ct, bytes::Bytes::from(r.body), ttl, body_br, vec![])
+            .put(
+                &r.key, &r.url, &r.domain, ct,
+                bytes::Bytes::from(r.body), ttl, body_br,
+                cached_headers,
+            )
             .await;
         Ok(Response::new(PutResponse {}))
     }
@@ -367,5 +378,40 @@ mod tests {
         assert!(res.hit);
         assert_eq!(res.body, b"PNG_DATA");
         assert!(res.body_br.is_empty());
+    }
+
+    #[tokio::test]
+    async fn put_with_headers_후_get은_HeaderEntry_배열을_반환한다() {
+        let (grpc, _dir) = make_grpc();
+        grpc.put(Request::new(PutRequest {
+            key:          "k-hdr".to_string(),
+            url:          "https://a.test/x".to_string(),
+            domain:       "a.test".to_string(),
+            content_type: "text/html".to_string(),
+            body:         b"<!doctype html>".to_vec(),
+            ttl_secs:     0,
+            body_br:      vec![],
+            cached_headers: vec![
+                cdn_proto::storage::HeaderEntry {
+                    name:  "cache-control".to_string(),
+                    value: "max-age=3600".to_string(),
+                },
+                cdn_proto::storage::HeaderEntry {
+                    name:  "etag".to_string(),
+                    value: "\"v7\"".to_string(),
+                },
+            ],
+        })).await.unwrap();
+
+        let res = grpc.get(Request::new(GetRequest {
+            key: "k-hdr".to_string(),
+        })).await.unwrap().into_inner();
+
+        assert!(res.hit);
+        assert_eq!(res.cached_headers.len(), 2);
+        assert_eq!(res.cached_headers[0].name, "cache-control");
+        assert_eq!(res.cached_headers[0].value, "max-age=3600");
+        assert_eq!(res.cached_headers[1].name, "etag");
+        assert_eq!(res.cached_headers[1].value, "\"v7\"");
     }
 }
