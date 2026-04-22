@@ -41,7 +41,7 @@ export function ProxyStatusCard() {
         <Badge variant={isOnline ? 'success' : 'destructive'}>
           {isOnline ? '온라인' : '오프라인'}
         </Badge>
-        <p className="text-xl font-bold mt-3 leading-tight">{formatUptime(data?.uptime ?? 0)}</p>
+        <p data-testid="proxy-uptime" className="text-xl font-bold mt-3 leading-tight">{formatUptime(data?.uptime ?? 0)}</p>
         <p className="text-xs text-muted-foreground mt-1">
           총 요청 {(data?.request_count ?? 0).toLocaleString()}건
         </p>

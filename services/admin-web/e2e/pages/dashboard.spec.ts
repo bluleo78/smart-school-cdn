@@ -29,8 +29,8 @@ test.describe('대시보드 — 프록시 상태 카드', () => {
     // 온라인 배지 확인
     await expect(page.getByText('온라인')).toBeVisible();
 
-    // 업타임 "1시간 0분" 표시 확인
-    await expect(page.getByText('1시간 0분')).toBeVisible();
+    // 업타임 "1시간 0분" 표시 확인 — 차트 축 레이블 충돌 방지 위해 testid 로 스코프
+    await expect(page.getByTestId('proxy-uptime')).toHaveText('1시간 0분');
 
     // 총 요청 수 표시 확인
     await expect(page.getByText('총 요청 42건')).toBeVisible();
@@ -58,7 +58,8 @@ test.describe('대시보드 — 프록시 상태 카드', () => {
 
     await page.goto('/');
 
-    await expect(page.getByText('5분')).toBeVisible();
+    // 차트 축 레이블("1시 5분 21초" 등)이 strict-mode 에 매칭되는 이슈 회피 위해 testid 로 스코프
+    await expect(page.getByTestId('proxy-uptime')).toHaveText('5분');
   });
 });
 
