@@ -30,10 +30,14 @@ use clients::storage_client::StorageClient;
 use clients::tls_client::{TlsClient, CertCache};
 
 /// L1 메모리 캐시 항목 — body + content_type + Phase 15 brotli 변형(옵셔널)
+/// Phase 20: origin 응답에서 추출한 캐시 가능 헤더 화이트리스트를 함께 보관해
+/// HIT 응답에서도 cache-control/etag/CORS/content-disposition 등을 복원한다.
+#[derive(Clone)]
 pub struct MemoryCacheEntry {
-    pub body: Bytes,
-    pub content_type: Option<String>,
-    pub body_br: Option<Bytes>,
+    pub body:           Bytes,
+    pub content_type:   Option<String>,
+    pub body_br:        Option<Bytes>,
+    pub cached_headers: Vec<(String, String)>,
 }
 
 /// 런타임에 교체 가능한 도메인→원본서버 맵
@@ -697,6 +701,11 @@ async fn proxy_handler(
             let mut resp = Response::builder()
                 .status(resp_status)
                 .header("Accept-Ranges", "bytes");
+            // Phase 20: 저장된 origin 헤더 복원 (cache-control / etag / CORS / content-disposition …)
+            // Content-Type / Content-Encoding / Content-Range 는 아래에서 동일 이름을 덮어쓴다.
+            for (name, value) in entry.cached_headers.iter() {
+                resp = resp.header(name.as_str(), value.as_str());
+            }
             if is_head {
                 resp = resp.header("Content-Length", entry.body.len().to_string());
             }
@@ -726,7 +735,7 @@ async fn proxy_handler(
 
     // ── L2 디스크 캐시 확인 (storage gRPC) ───────────────────────
     if let Some(ref key) = cache_key {
-        if let Some((cached_bytes, content_type, cached_br, _cached_headers)) = ps.storage.lock().await.get(key).await {
+        if let Some((cached_bytes, content_type, cached_br, cached_headers)) = ps.storage.lock().await.get(key).await {
             // Vec<u8> → Bytes로 한 번 변환 (이후 clone은 Arc refcount 증가라 저렴)
             let body_bytes: Bytes = cached_bytes;
             let total = body_bytes.len() as u64;
@@ -738,6 +747,7 @@ async fn proxy_handler(
                     body: body_bytes.clone(),
                     content_type: content_type.clone(),
                     body_br: cached_br.clone(),
+                    cached_headers: cached_headers.clone(),
                 })).await;
             }
 
@@ -809,6 +819,10 @@ async fn proxy_handler(
             let mut resp = Response::builder()
                 .status(resp_status)
                 .header("Accept-Ranges", "bytes");
+            // Phase 20: storage 사이드카에서 읽은 origin 헤더 복원
+            for (name, value) in cached_headers.iter() {
+                resp = resp.header(name.as_str(), value.as_str());
+            }
             if is_head {
                 resp = resp.header("Content-Length", body_bytes.len().to_string());
             }
@@ -890,6 +904,12 @@ async fn proxy_handler(
             let status = origin_resp.status();
             let resp_headers = origin_resp.headers().clone();
 
+            // Phase 20: 헤더 포워딩/보안 플래그 계산
+            let cached_headers      = extract_cacheable_headers(&resp_headers);
+            let passthrough_headers = extract_passthrough_headers(&resp_headers);
+            let origin_has_cookie   = has_set_cookie(&resp_headers);
+            let origin_vary_star    = has_vary_star(&resp_headers);
+
             let cache_directive = {
                 let cc = resp_headers.get("cache-control").and_then(|v| v.to_str().ok());
                 let pragma = resp_headers.get("pragma").and_then(|v| v.to_str().ok());
@@ -924,8 +944,8 @@ async fn proxy_handler(
                 && !size_exceeded
                 && cacheable_ct;
             // classify_outcome: L1/L2 miss 이후이므로 두 플래그 모두 false
-            // NOTE: Task 7 에서 origin_has_set_cookie / origin_vary_star 를
-            //       실제 계산된 값으로 교체 예정 (현재는 placeholder false).
+            // Phase 20: origin 의 set-cookie / vary:* 플래그를 실제 계산해 전달 —
+            // 둘 중 하나라도 true 이면 BypassOther 로 분류되어 캐시 저장을 스킵한다.
             let outcome = classify_outcome(
                 true, // GET 경로에서만 이 클로저가 실행됨
                 false,
@@ -933,8 +953,8 @@ async fn proxy_handler(
                 origin_no_cache,
                 size_exceeded,
                 origin_ok_and_cacheable,
-                false, // origin_has_set_cookie (Task 7 에서 계산)
-                false, // origin_vary_star       (Task 7 에서 계산)
+                origin_has_cookie,
+                origin_vary_star,
             );
 
             // Phase 16-1: MISS 응답은 origin 본문을 즉시 클라이언트에 전달하고
@@ -955,6 +975,8 @@ async fn proxy_handler(
                                         .and_then(|v| v.to_str().ok())
                                         .map(|s| s.to_string());
                     let ttl_bg    = if let CacheDirective::Cacheable(Some(t)) = cache_directive { t } else { DEFAULT_TTL };
+                    // Phase 20: 캐시 가능 헤더를 백그라운드 저장 / L1 삽입으로 함께 전달
+                    let cached_headers_bg = cached_headers.clone();
 
                     tokio::spawn(async move {
                         let full_url = format!("https://{}{}", host_bg, uri_bg);
@@ -1076,10 +1098,11 @@ async fn proxy_handler(
                             (body_bg.clone(), ct_bg.clone(), None)
                         };
 
-                        // storage.put — 디스크 영속화
+                        // storage.put — 디스크 영속화 (Phase 20: cached_headers 사이드카 포함)
                         ps_bg.storage.lock().await
                             .put(&key_bg, &full_url, &host_bg, store_ct.clone(),
-                                 store_bytes.clone(), Some(ttl_bg), store_br.clone(), vec![])
+                                 store_bytes.clone(), Some(ttl_bg), store_br.clone(),
+                                 cached_headers_bg.clone())
                             .await;
 
                         // L1 메모리 캐시 저장 (16MB 이하만)
@@ -1089,6 +1112,7 @@ async fn proxy_handler(
                                 body: Bytes::from(store_bytes.clone()),
                                 content_type: store_ct.clone(),
                                 body_br: store_br.clone(),
+                                cached_headers: cached_headers_bg.clone(),
                             })).await;
                         }
 
@@ -1100,18 +1124,33 @@ async fn proxy_handler(
                 // SaveTracker acquire 여부와 무관 — 카운터는 origin-fetch 1회당 1회.
                 state_c.write().await.record_cache_miss();
                 // 응답은 항상 원본 — optimize/compress 결과는 백그라운드에 저장만 됨
-                Ok(Arc::new((resp_body, content_type, status, outcome)))
+                // Phase 20: cached/passthrough 헤더도 함께 전달해 MISS 응답 빌더가 복원한다.
+                Ok(Arc::new((
+                    resp_body,
+                    content_type,
+                    status,
+                    outcome,
+                    cached_headers.clone(),
+                    passthrough_headers.clone(),
+                )))
             } else {
                 // Bypass* — 캐시 저장 생략, 원본 응답 그대로 전달
                 state_c.write().await.record_cache_miss();
-                Ok(Arc::new((resp_body, content_type, status, outcome)))
+                Ok(Arc::new((
+                    resp_body,
+                    content_type,
+                    status,
+                    outcome,
+                    cached_headers.clone(),
+                    passthrough_headers.clone(),
+                )))
             }
         }).await;
 
         let elapsed_ms = start.elapsed().as_millis() as u64;
         match coalesced {
             Ok(resp) => {
-                let (body, ct, status, outcome) = resp.as_ref();
+                let (body, ct, status, outcome, cached_headers_out, passthrough_out) = resp.as_ref();
                 let total = body.len() as u64;
 
                 // Range 슬라이싱은 200 OK 응답에만 적용 — 오류 상태는 그대로 통과
@@ -1168,6 +1207,13 @@ async fn proxy_handler(
                 let mut response = Response::builder()
                     .status(resp_status)
                     .header("Accept-Ranges", "bytes");
+
+                // Phase 20: 저장 대상 + 패스스루(Location 등) 헤더 포워딩
+                // Content-Type / Content-Range 는 아래에서 동일 이름을 덮어쓴다.
+                for (name, value) in cached_headers_out.iter().chain(passthrough_out.iter()) {
+                    response = response.header(name.as_str(), value.as_str());
+                }
+
                 if let Some(ct_str) = ct {
                     response = response.header("Content-Type", ct_str.as_str());
                 }
@@ -1297,12 +1343,14 @@ async fn proxy_handler(
         cache = "BYPASS", "프록시 요청 처리 완료"
     );
 
+    // Phase 20: non-GET BYPASS 경로도 화이트리스트 기반 헤더 전달로 전환.
+    // Set-Cookie / connection-control 등 위험/hop-by-hop 헤더는 자연스럽게 제거된다.
+    let cached_headers   = extract_cacheable_headers(&response_headers);
+    let passthrough      = extract_passthrough_headers(&response_headers);
+
     let mut response = Response::builder().status(status);
-    for (key, value) in response_headers.iter() {
-        let name = key.as_str();
-        if !matches!(name, "content-type") {
-            response = response.header(key, value);
-        }
+    for (name, value) in cached_headers.iter().chain(passthrough.iter()) {
+        response = response.header(name.as_str(), value.as_str());
     }
     let final_ct = response_headers
         .get("content-type")
@@ -2364,6 +2412,7 @@ mod tests {
             body: Bytes::from("data"),
             content_type: Some("text/plain".to_string()),
             body_br: None,
+            cached_headers: vec![],
         })).await;
 
         let memory_cache_check = memory_cache.clone();
@@ -2411,11 +2460,13 @@ mod tests {
             body: Bytes::from("aaa"),
             content_type: None,
             body_br: None,
+            cached_headers: vec![],
         })).await;
         memory_cache.insert("k2".to_string(), Arc::new(MemoryCacheEntry {
             body: Bytes::from("bbb"),
             content_type: None,
             body_br: None,
+            cached_headers: vec![],
         })).await;
         // moka 비동기 캐시는 pending tasks 실행 후 entry_count 반영
         memory_cache.run_pending_tasks().await;
@@ -3502,6 +3553,7 @@ mod tests {
             body: Bytes::from("cached-in-memory"),
             content_type: Some("text/plain".to_string()),
             body_br: None,
+            cached_headers: vec![],
         })).await;
 
         let ps = ProxyState {
@@ -3969,6 +4021,7 @@ mod tests {
             body: Bytes::from("l1-cached-body"),
             content_type: Some("text/html".to_string()),
             body_br: None,
+            cached_headers: vec![],
         })).await;
 
         let ps = ProxyState {
@@ -4049,9 +4102,10 @@ mod tests {
         // GET 캐시 키로 L1에 삽입 (HEAD는 GET과 같은 키를 공유)
         let key = compute_cache_key("GET", "head.local", "/page", "");
         memory_cache.insert(key, Arc::new(MemoryCacheEntry {
-            body:         Bytes::from(cached_body),
-            content_type: Some("text/html".to_string()),
-            body_br:      None,
+            body:          Bytes::from(cached_body),
+            content_type:  Some("text/html".to_string()),
+            body_br:       None,
+            cached_headers: vec![],
         })).await;
 
         let ps = ProxyState {
@@ -4154,6 +4208,202 @@ mod tests {
         assert_eq!(
             classify_outcome(true, false, false, false, true, true, false, false),
             CacheOutcome::BypassSize,
+        );
+    }
+
+    // ─── Phase 20 응답 헤더 포워딩 통합 테스트 ──────────────────────────
+
+    /// 커스텀 status/헤더/본문을 반환하는 mock origin 서버 — Phase 20 테스트 전용.
+    /// extra_headers 는 (소/대문자 혼용 허용) 이름/값 쌍을 그대로 원본 응답에 주입한다.
+    async fn start_mock_origin_server_with_custom_response(
+        status: u16,
+        extra_headers: Vec<(String, String)>,
+        body: Vec<u8>,
+        content_type: &str,
+    ) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let ct = content_type.to_string();
+        tokio::spawn(async move {
+            let app = axum::Router::new().fallback(move || {
+                let body = body.clone();
+                let ct = ct.clone();
+                let extras = extra_headers.clone();
+                async move {
+                    let mut builder = axum::response::Response::builder()
+                        .status(status)
+                        .header("content-type", ct);
+                    for (k, v) in extras.iter() {
+                        builder = builder.header(k.as_str(), v.as_str());
+                    }
+                    builder.body(axum::body::Body::from(body)).unwrap()
+                }
+            });
+            axum::serve(listener, app).await.unwrap();
+        });
+        format!("http://127.0.0.1:{}", addr.port())
+    }
+
+    /// 302 리다이렉트 응답은 Location 헤더가 그대로 전달되고,
+    /// (일반적으로 캐시 부적합 Content-Type 이므로) MISS 응답이어도 storage 에 저장되지 않는다.
+    #[tokio::test]
+    async fn redirect_302_응답은_location을_보존한다() {
+        let origin_url = start_mock_origin_server_with_custom_response(
+            302,
+            vec![("location".to_string(), "/redirected".to_string())],
+            b"".to_vec(),
+            "text/plain",
+        ).await;
+        let (_ps, router) = make_miss_proxy_state(None, origin_url, "redir.local").await;
+
+        let req = Request::builder()
+            .method("GET")
+            .uri("/orig")
+            .header("host", "redir.local")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let resp = router.oneshot(req).await.unwrap();
+
+        assert_eq!(resp.status().as_u16(), 302);
+        assert_eq!(
+            resp.headers().get("location").and_then(|v| v.to_str().ok()),
+            Some("/redirected"),
+            "302 응답은 Location 헤더를 그대로 전달해야 한다",
+        );
+        assert_eq!(resp.headers().get("x-cache-status").unwrap(), "MISS");
+    }
+
+    /// Set-Cookie 응답은 사용자 오염을 방지하기 위해 캐시 저장을 스킵(BYPASS-OTHER)하며,
+    /// 클라이언트에는 Set-Cookie 가 그대로 전달된다. 두 번째 요청도 HIT 으로 승격되지 않는다.
+    #[tokio::test]
+    async fn set_cookie_응답은_bypass되어_캐시되지_않는다() {
+        let origin_url = start_mock_origin_server_with_custom_response(
+            200,
+            vec![("set-cookie".to_string(), "session=abc".to_string())],
+            b"<html></html>".to_vec(),
+            "text/html",
+        ).await;
+        let (_ps, router) = make_miss_proxy_state(None, origin_url, "cookie.local").await;
+
+        let mk_req = || Request::builder()
+            .method("GET").uri("/")
+            .header("host", "cookie.local")
+            .body(axum::body::Body::empty()).unwrap();
+
+        let r1 = router.clone().oneshot(mk_req()).await.unwrap();
+        assert_eq!(r1.status(), StatusCode::OK);
+        assert_eq!(r1.headers().get("x-cache-reason").unwrap(), "BYPASS-OTHER");
+
+        // 백그라운드 저장이 혹시라도 돌 수 있는 시간 확보
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        let r2 = router.oneshot(mk_req()).await.unwrap();
+        // Set-Cookie 는 저장/HIT 대상 아님 — 두 번째 요청도 MISS 로 나와야 한다.
+        assert_eq!(r2.headers().get("x-cache-status").unwrap(), "MISS");
+    }
+
+    /// Vary: * 응답은 "캐시 금지" 로 해석해 BYPASS-OTHER 로 분류한다.
+    #[tokio::test]
+    async fn vary_star_응답은_캐시되지_않는다() {
+        let origin_url = start_mock_origin_server_with_custom_response(
+            200,
+            vec![("vary".to_string(), "*".to_string())],
+            b"x".to_vec(),
+            "text/plain",
+        ).await;
+        let (_ps, router) = make_miss_proxy_state(None, origin_url, "vary.local").await;
+
+        let req = Request::builder()
+            .method("GET").uri("/").header("host", "vary.local")
+            .body(axum::body::Body::empty()).unwrap();
+        let resp = router.oneshot(req).await.unwrap();
+        assert_eq!(resp.headers().get("x-cache-reason").unwrap(), "BYPASS-OTHER");
+    }
+
+    /// Cache-Control / ETag 는 MISS 와 HIT 양쪽에서 모두 복원된다.
+    #[tokio::test]
+    async fn cache_control_과_etag는_miss_와_hit에서_모두_전달된다() {
+        let origin_url = start_mock_origin_server_with_custom_response(
+            200,
+            vec![
+                ("cache-control".to_string(), "max-age=3600".to_string()),
+                ("etag".to_string(), "\"v7\"".to_string()),
+            ],
+            b"<html>hi</html>".to_vec(),
+            "text/html",
+        ).await;
+        let (_ps, router) = make_miss_proxy_state(None, origin_url, "ccetag.local").await;
+
+        let mk = || Request::builder()
+            .method("GET").uri("/a")
+            .header("host", "ccetag.local")
+            .body(axum::body::Body::empty()).unwrap();
+
+        let r1 = router.clone().oneshot(mk()).await.unwrap();
+        assert_eq!(r1.headers().get("x-cache-status").unwrap(), "MISS");
+        assert_eq!(r1.headers().get("cache-control").unwrap(), "max-age=3600");
+        assert_eq!(r1.headers().get("etag").unwrap(), "\"v7\"");
+
+        // Phase 16 백그라운드 저장 완료 대기
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        let r2 = router.oneshot(mk()).await.unwrap();
+        assert_eq!(r2.headers().get("x-cache-status").unwrap(), "HIT");
+        assert_eq!(r2.headers().get("cache-control").unwrap(), "max-age=3600");
+        assert_eq!(r2.headers().get("etag").unwrap(), "\"v7\"");
+    }
+
+    /// CORS 헤더(Access-Control-Allow-Origin)는 MISS/HIT 모두에서 그대로 복원된다.
+    #[tokio::test]
+    async fn cors_헤더는_miss_와_hit에서_모두_복원된다() {
+        let origin_url = start_mock_origin_server_with_custom_response(
+            200,
+            vec![("access-control-allow-origin".to_string(), "*".to_string())],
+            b"body".to_vec(),
+            "application/json",
+        ).await;
+        let (_ps, router) = make_miss_proxy_state(None, origin_url, "cors.local").await;
+
+        let mk = || Request::builder()
+            .method("GET").uri("/j")
+            .header("host", "cors.local")
+            .body(axum::body::Body::empty()).unwrap();
+
+        let r1 = router.clone().oneshot(mk()).await.unwrap();
+        assert_eq!(r1.headers().get("access-control-allow-origin").unwrap(), "*");
+
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        let r2 = router.oneshot(mk()).await.unwrap();
+        assert_eq!(r2.headers().get("access-control-allow-origin").unwrap(), "*");
+        assert_eq!(r2.headers().get("x-cache-status").unwrap(), "HIT");
+    }
+
+    /// Content-Disposition 은 HIT 응답에서도 복원되어 다운로드 의도가 유지된다.
+    #[tokio::test]
+    async fn content_disposition은_hit에서_복원된다() {
+        let origin_url = start_mock_origin_server_with_custom_response(
+            200,
+            vec![("content-disposition".to_string(), "attachment; filename=a.pdf".to_string())],
+            b"%PDF-1.4".to_vec(),
+            "application/pdf",
+        ).await;
+        let (_ps, router) = make_miss_proxy_state(None, origin_url, "cd.local").await;
+
+        let mk = || Request::builder()
+            .method("GET").uri("/x.pdf")
+            .header("host", "cd.local")
+            .body(axum::body::Body::empty()).unwrap();
+
+        // 첫 번째 MISS — 백그라운드 저장 트리거
+        let _ = router.clone().oneshot(mk()).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        let r2 = router.oneshot(mk()).await.unwrap();
+        assert_eq!(r2.headers().get("x-cache-status").unwrap(), "HIT");
+        assert_eq!(
+            r2.headers().get("content-disposition").unwrap(),
+            "attachment; filename=a.pdf",
         );
     }
 }

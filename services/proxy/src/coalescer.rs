@@ -10,8 +10,17 @@ const COALESCE_CHANNEL_CAPACITY: usize = 256;
 
 use crate::CacheOutcome;
 
-/// origin fetch 결과 — (body, content_type, status, outcome)
-pub type CoalescedResponse = Arc<(Bytes, Option<String>, StatusCode, CacheOutcome)>;
+/// origin fetch 결과 — (body, content_type, status, outcome, cached_headers, passthrough_headers)
+/// Phase 20: cached_headers 는 L1/L2 에 저장할 화이트리스트,
+///            passthrough_headers 는 MISS 응답에만 붙이는 Location/Retry-After 등의 헤더.
+pub type CoalescedResponse = Arc<(
+    Bytes,
+    Option<String>,
+    StatusCode,
+    CacheOutcome,
+    Vec<(String, String)>,
+    Vec<(String, String)>,
+)>;
 
 /// in-flight 요청 맵 — cache key → broadcast sender
 /// 첫 번째 miss 요청이 Sender를 삽입하고 fetch 완료 후 결과를 broadcast
@@ -123,6 +132,8 @@ mod tests {
                     Some("text/plain".to_string()),
                     StatusCode::OK,
                     CacheOutcome::Miss,
+                    vec![],
+                    vec![],
                 )))
             })
             .await
@@ -137,7 +148,14 @@ mod tests {
             c2.get_or_fetch("key".to_string(), || async move {
                 // 이 함수는 호출되어선 안 됨
                 cnt2.fetch_add(1, Ordering::SeqCst);
-                Ok(Arc::new((Bytes::from("other"), None, StatusCode::OK, CacheOutcome::Miss)))
+                Ok(Arc::new((
+                    Bytes::from("other"),
+                    None,
+                    StatusCode::OK,
+                    CacheOutcome::Miss,
+                    vec![],
+                    vec![],
+                )))
             })
             .await
         });
