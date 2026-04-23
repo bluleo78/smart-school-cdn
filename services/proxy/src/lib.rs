@@ -243,6 +243,11 @@ pub fn extract_cacheable_headers(headers: &axum::http::HeaderMap) -> Vec<(String
     for wanted in CACHEABLE_HEADERS {
         for value in headers.get_all(*wanted).iter() {
             let Ok(v) = value.to_str() else { continue };
+            // Phase 20: HIT 시 brotli 분기가 `Vary: Accept-Encoding` 을 자체 emit 하므로,
+            // origin 이 보낸 같은 값의 Vary 는 저장하지 않아 응답 헤더 중복을 방지한다.
+            if *wanted == "vary" && v.trim().eq_ignore_ascii_case("accept-encoding") {
+                continue;
+            }
             let name = (*wanted).to_ascii_lowercase();
             let entry_size = name.len() + v.len();
             if total + entry_size > MAX_CACHED_HEADERS_BYTES {
@@ -4459,6 +4464,26 @@ mod header_policy_tests {
         let out = extract_cacheable_headers(&headers);
         let total: usize = out.iter().map(|(n, v)| n.len() + v.len()).sum();
         assert!(total <= 8 * 1024, "헤더 합계가 8KB 이하여야 함: {}", total);
+    }
+
+    #[test]
+    fn extract_cacheable_headers_vary_accept_encoding은_제외된다() {
+        // brotli HIT 분기가 자체적으로 Vary: Accept-Encoding 을 emit 하므로 중복 방지
+        let headers = hm(&[
+            ("vary", "Accept-Encoding"),
+            ("etag", "\"v1\""),
+        ]);
+        let out = extract_cacheable_headers(&headers);
+        let names: Vec<&str> = out.iter().map(|(n, _)| n.as_str()).collect();
+        assert!(!names.contains(&"vary"), "Vary: Accept-Encoding 은 저장되지 않아야 함");
+        assert!(names.contains(&"etag"));
+    }
+
+    #[test]
+    fn extract_cacheable_headers_vary_다른값은_저장된다() {
+        let headers = hm(&[("vary", "User-Agent")]);
+        let out = extract_cacheable_headers(&headers);
+        assert_eq!(out, vec![("vary".to_string(), "User-Agent".to_string())]);
     }
 
     #[test]
