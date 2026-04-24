@@ -18,21 +18,27 @@ struct SnapshotResponse {
     domains: Vec<DomainSnapshotEntry>,
 }
 
-/// admin-server `/api/domains/internal/snapshot` 호출.
+/// admin-server `/internal/domains/snapshot` 호출.
 /// 실패 시 지수 백오프 재시도(1,2,4,8,16초, 최대 총 ~30초).
 /// 모두 실패하면 `Err`를 반환해 호출자가 빈 맵으로 기동할 수 있게 한다.
+/// `internal_token`이 Some이면 `x-internal-token` 헤더를 부착한다 — Phase 18 인증 게이트.
 pub async fn fetch_domain_snapshot(
     base_url: &str,
+    internal_token: Option<&str>,
 ) -> Result<Vec<DomainSnapshotEntry>, reqwest::Error> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(3))
         .build()?;
-    let url = format!("{}/api/domains/internal/snapshot", base_url.trim_end_matches('/'));
+    let url = format!("{}/internal/domains/snapshot", base_url.trim_end_matches('/'));
 
     let mut delay = Duration::from_secs(1);
     let mut last_err: Option<reqwest::Error> = None;
     for attempt in 1..=5u32 {
-        match client.get(&url).send().await.and_then(|r| r.error_for_status()) {
+        let mut req = client.get(&url);
+        if let Some(tok) = internal_token {
+            req = req.header("x-internal-token", tok);
+        }
+        match req.send().await.and_then(|r| r.error_for_status()) {
             Ok(resp) => {
                 let body: SnapshotResponse = resp.json().await?;
                 tracing::info!(count = body.domains.len(), attempt, "도메인 snapshot 수신");

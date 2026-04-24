@@ -62,7 +62,12 @@ async fn main() {
     // domain_map이 공란이 되어 TLS SNI가 access denied로 터진다.
     let admin_url = std::env::var("ADMIN_SNAPSHOT_URL")
         .unwrap_or_else(|_| "http://admin-server:4001".to_string());
-    match proxy::clients::admin_client::fetch_domain_snapshot(&admin_url).await {
+    // Phase 18: admin-server `/internal/*` 인증 토큰. 미설정 시 경고 후 무인증 호출(개발 편의).
+    let internal_token = std::env::var("INTERNAL_API_TOKEN").ok();
+    if internal_token.is_none() {
+        tracing::warn!("INTERNAL_API_TOKEN 미설정 — admin-server 인증 없이 호출(prod에서는 반드시 설정)");
+    }
+    match proxy::clients::admin_client::fetch_domain_snapshot(&admin_url, internal_token.as_deref()).await {
         Ok(entries) => {
             let mut map = domain_map.write().await;
             for e in entries.iter().filter(|e| e.enabled) {

@@ -262,23 +262,6 @@ export async function domainRoutes(
     },
   );
 
-  /** Phase 16-2: proxy 기동 시 도메인 맵 초기 pull 전용 엔드포인트.
-   *  nginx가 /internal/* 과 달리 /api/* 는 외부에 노출하지만, 이 경로는
-   *  본질적으로 read-only 이며 민감 정보가 없어 공개 최소 위험. 필요 시
-   *  후속 페이즈에서 IP 제한/토큰으로 승격.
-   *  주의: '/internal/snapshot' 이 ':host' 로 매칭되지 않도록 :host 라우트보다 먼저 등록. */
-  app.get('/api/domains/internal/snapshot', async () => {
-    const rows = domainRepo.findAll();
-    return {
-      domains: rows.map((d) => ({
-        host: d.host,
-        origin: d.origin,
-        enabled: d.enabled === 1,
-        description: d.description,
-      })),
-    };
-  });
-
   /** 단일 도메인 상세 조회 */
   app.get<{ Params: { host: string } }>('/api/domains/:host', async (request, reply) => {
     const host = decodeURIComponent(request.params.host);

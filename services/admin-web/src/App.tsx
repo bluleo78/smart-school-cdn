@@ -1,11 +1,15 @@
 import { Routes, Route, Navigate } from 'react-router';
 import { Toaster } from 'sonner';
 import { AppLayout } from './components/layout/AppLayout';
+import { RequireAuth } from './components/auth/RequireAuth';
+import { LoginPage } from './pages/LoginPage';
+import { SetupPage } from './pages/SetupPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { DomainsPage } from './pages/DomainsPage';
 import { DomainDetailPage } from './pages/DomainDetailPage';
 import { DnsPage } from './pages/DnsPage';
 import { SystemPage } from './pages/SystemPage';
+import { UsersPage } from './pages/UsersPage';
 
 function NotFoundPage() {
   return (
@@ -20,15 +24,21 @@ export function App() {
   return (
     <>
       <Routes>
-        <Route element={<AppLayout />}>
-          <Route index element={<DashboardPage />} />
-          <Route path="domains" element={<DomainsPage />} />
-          <Route path="domains/:host" element={<DomainDetailPage />} />
-          <Route path="cache" element={<Navigate to="/domains" replace />} />
-          <Route path="optimizer" element={<Navigate to="/domains" replace />} />
-          <Route path="dns" element={<DnsPage />} />
-          <Route path="system" element={<SystemPage />} />
-          <Route path="*" element={<NotFoundPage />} />
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/setup" element={<SetupPage />} />
+
+        <Route element={<RequireAuth />}>
+          <Route element={<AppLayout />}>
+            <Route index element={<DashboardPage />} />
+            <Route path="domains" element={<DomainsPage />} />
+            <Route path="domains/:host" element={<DomainDetailPage />} />
+            <Route path="cache" element={<Navigate to="/domains" replace />} />
+            <Route path="optimizer" element={<Navigate to="/domains" replace />} />
+            <Route path="dns" element={<DnsPage />} />
+            <Route path="users" element={<UsersPage />} />
+            <Route path="system" element={<SystemPage />} />
+            <Route path="*" element={<NotFoundPage />} />
+          </Route>
         </Route>
       </Routes>
       {/* 전역 토스트 — bottom-right, 성공=녹색 / 에러=빨강 */}

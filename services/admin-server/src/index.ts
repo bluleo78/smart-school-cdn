@@ -1,5 +1,6 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import cookie from '@fastify/cookie';
 import Database from 'better-sqlite3';
 import { HealthMonitor } from './health-monitor.js';
 import { proxyRoutes } from './routes/proxy.js';
@@ -11,6 +12,7 @@ import { DomainRepository, DOMAIN_SCHEMA } from './db/domain-repo.js';
 import { DomainStatsRepository } from './db/domain-stats-repo.js';
 import { DnsMetricsRepository, DNS_METRICS_SCHEMA } from './db/dns-metrics-repo.js';
 import { OPTIMIZATION_EVENTS_SCHEMA } from './db/optimization-events-repo.js';
+import { USER_SCHEMA, UserRepository } from './db/user-repo.js';
 import { startStatsCollector } from './stats-collector.js';
 import { startDnsMetricsCollector } from './dns-metrics-collector.js';
 import { createStorageClient } from './grpc/storage_client.js';
@@ -21,6 +23,22 @@ import { optimizerRoutes } from './routes/optimizer.js';
 import { dnsRoutes } from './routes/dns.js';
 import { logRoutes } from './routes/logs.js';
 import { optimizationEventsRoutes } from './routes/optimization-events.js';
+import { authRoutes } from './routes/auth.js';
+import { usersRoutes } from './routes/users.js';
+import { internalRoutes } from './routes/internal.js';
+import { requireAuth } from './auth/require-auth.js';
+import { requireInternalToken } from './auth/require-internal-token.js';
+
+// 보안 기동 가드 — JWT_SECRET / INTERNAL_API_TOKEN 미설정 시 즉시 종료.
+// 32자 미만이면 HMAC 충돌·brute-force 위험이 무시 못 할 수준이라 거부한다.
+if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
+  console.error('JWT_SECRET 환경변수 필수 (32자 이상)');
+  process.exit(1);
+}
+if (!process.env.INTERNAL_API_TOKEN || process.env.INTERNAL_API_TOKEN.length < 32) {
+  console.error('INTERNAL_API_TOKEN 환경변수 필수 (32자 이상)');
+  process.exit(1);
+}
 
 // SQLite DB 초기화 — 앱 기동 시 1회 실행
 const db = new Database(process.env.DB_PATH || './data/admin.db');
@@ -64,16 +82,28 @@ db.exec(DNS_METRICS_SCHEMA);
 // 최적화 이벤트 테이블 생성 — Phase 13/14/15 공용 관찰 인프라
 db.exec(OPTIMIZATION_EVENTS_SCHEMA);
 
+// 관리자 사용자 테이블 생성 — Task 1/6 인증 인프라
+db.exec(USER_SCHEMA);
+
 // 외래 키 제약 활성화 — 도메인 삭제 시 cascade 동작에 필요
 db.pragma('foreign_keys = ON');
 
 const domainRepo = new DomainRepository(db);
 const dnsMetricsRepo = new DnsMetricsRepository(db);
+const userRepo = new UserRepository(db);
 
 // Rust 프록시 기본 도메인 시드 — 없으면 삽입, 있으면 무시
 domainRepo.upsert('httpbin.org', 'https://httpbin.org');
 
 const app = Fastify({ logger: true });
+
+// 쿠키 플러그인은 인증 훅이 req.cookies 를 읽으므로 훅 등록 이전에 register.
+await app.register(cookie);
+
+// preHandler 훅 — 등록 순서가 실행 순서. 토큰 검사를 먼저 수행해
+// /internal/* 의 인증 실패가 즉시 401 로 끊기도록 한다.
+app.addHook('preHandler', requireInternalToken);
+app.addHook('preHandler', requireAuth);
 
 await app.register(cors);
 
@@ -135,6 +165,15 @@ await app.register(logRoutes);
 
 /** 최적화 이벤트 관찰 API 라우트 등록 (Phase 13/14/15 공용) */
 await app.register(optimizationEventsRoutes);
+
+/** 인증 라우트 (state/setup/login/logout) — requireAuth 가 /api/auth/* 스킵 */
+await app.register(authRoutes, { userRepo });
+
+/** 사용자 CRUD 라우트 — requireAuth 보호 */
+await app.register(usersRoutes, { userRepo });
+
+/** 서비스간 내부 호출 라우트 — requireInternalToken 보호 */
+await app.register(internalRoutes, { domainRepo });
 
 const port = Number(process.env.PORT) || 4001;
 

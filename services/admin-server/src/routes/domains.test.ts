@@ -439,35 +439,6 @@ describe('GET /api/domains/:host/logs — period/from/to/q 필터', () => {
   });
 });
 
-describe('GET /api/domains/internal/snapshot', () => {
-  // Phase 16-2: proxy 기동 시 도메인 맵 초기 pull 전용 read-only 엔드포인트
-  it('활성·비활성 도메인 전체를 host/origin/enabled/description 필드로 반환한다', async () => {
-    const repo = makeRepo();
-    repo.upsert('a.test', 'https://a.origin.test', 'alpha');
-    repo.upsert('b.test', 'https://b.origin.test', 'beta');
-    // updateEnabled가 없으므로 update({ enabled: 0 })로 비활성화
-    repo.update('b.test', { enabled: 0 });
-    const app = buildApp(repo);
-
-    const res = await app.inject({ method: 'GET', url: '/api/domains/internal/snapshot' });
-    expect(res.statusCode).toBe(200);
-    const body = res.json() as { domains: Array<{ host: string; origin: string; enabled: boolean; description: string }> };
-    expect(body.domains).toHaveLength(2);
-    const a = body.domains.find((d) => d.host === 'a.test');
-    const b = body.domains.find((d) => d.host === 'b.test');
-    expect(a).toMatchObject({ origin: 'https://a.origin.test', enabled: true,  description: 'alpha' });
-    expect(b).toMatchObject({ origin: 'https://b.origin.test', enabled: false, description: 'beta'  });
-  });
-
-  it('빈 DB에서도 {domains: []} 형태로 응답한다', async () => {
-    const repo = makeRepo();
-    const app = buildApp(repo);
-    const res = await app.inject({ method: 'GET', url: '/api/domains/internal/snapshot' });
-    expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ domains: [] });
-  });
-});
-
 describe('GET /api/domains/:host/optimization/url-breakdown', () => {
   // Phase 16-3: optimization_events를 URL 기준 GROUP BY 후 정렬·필터·페이지네이션
   it('URL별로 집계하고 savings 기준 정렬한다', async () => {

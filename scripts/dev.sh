@@ -7,6 +7,11 @@ LOG_DIR="logs"
 
 mkdir -p "$LOG_DIR"
 
+# Phase 21 — admin-server / proxy 가 요구하는 인증 env 의 dev 기본값 주입
+# 운영 .env 의 시크릿이 아닌 dev 전용 placeholder. 이미 환경에 설정되어 있으면 유지.
+export JWT_SECRET="${JWT_SECRET:-dev-secret-dev-secret-dev-secret-dev}"
+export INTERNAL_API_TOKEN="${INTERNAL_API_TOKEN:-dev-internal-token-dev-internal-token-dev}"
+
 # 기존 프로세스 정리
 echo "🔄 포트 ${PORTS} 프로세스 정리..."
 lsof -ti:${PORTS} | xargs kill -9 2>/dev/null

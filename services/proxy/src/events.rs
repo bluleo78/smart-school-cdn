@@ -147,9 +147,15 @@ async fn flush_loop(
 }
 
 /// 한 번의 배치 전송 — 성공/실패 모두 버퍼를 비운다(재시도 없음).
+/// Phase 18: `INTERNAL_API_TOKEN` 환경변수가 설정돼 있으면 `x-internal-token` 헤더로 인증.
 async fn flush_once(http: &reqwest::Client, endpoint: &str, buffer: &mut Vec<EventRecord>) {
     let payload = serde_json::json!({ "events": &*buffer });
-    match http.post(endpoint).json(&payload).send().await {
+    let internal_token = std::env::var("INTERNAL_API_TOKEN").ok();
+    let mut req = http.post(endpoint).json(&payload);
+    if let Some(tok) = internal_token.as_deref() {
+        req = req.header("x-internal-token", tok);
+    }
+    match req.send().await {
         Ok(resp) if resp.status().is_success() => {
             tracing::debug!(count = buffer.len(), "events 배치 전송 성공");
         }
