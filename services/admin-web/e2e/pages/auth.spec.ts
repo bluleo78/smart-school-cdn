@@ -48,8 +48,9 @@ test.describe('인증', () => {
     // 기본 모킹(authenticated)으로 바로 대시보드 진입
     await page.goto('/');
 
-    // 헤더의 로그아웃 버튼 클릭 → AppLayout 이 navigate('/login', replace) 수행
-    await page.getByRole('button', { name: '로그아웃' }).click();
+    // 사이드바 하단 UserNav 트리거(드롭다운) 클릭 후 메뉴 안 로그아웃 항목 클릭
+    await page.locator('[aria-haspopup="menu"]').click();
+    await page.getByTestId('user-nav-logout').click();
 
     await expect(page).toHaveURL(/\/login/);
   });

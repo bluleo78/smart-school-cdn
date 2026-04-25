@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
+import { NavLink, Outlet, useLocation } from 'react-router';
 import {
   LayoutDashboard,
   Globe,
@@ -10,7 +10,7 @@ import {
   Layers,
 } from 'lucide-react';
 import { useAuth } from '../auth/use-auth';
-import { Button } from '../ui/button';
+import { UserNav } from './UserNav';
 
 /** 사이드바 네비게이션 항목 — 대시보드/도메인/DNS/사용자/시스템 */
 const navItems = [
@@ -22,8 +22,7 @@ const navItems = [
 ];
 
 export function AppLayout() {
-  const { state, logout } = useAuth();
-  const navigate = useNavigate();
+  const { state } = useAuth();
   const location = useLocation();
 
   // 모바일 사이드바 열림 상태 — 라우트 변경 시 자동 닫힘
@@ -32,12 +31,6 @@ export function AppLayout() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- 라우트 변경에 따른 UI 상태 동기화
     setMobileOpen(false);
   }, [location.pathname]);
-
-  // 로그아웃 — 서버 쿠키 만료 후 /login 으로 이동(replace 로 히스토리 잔존 방지)
-  const handleLogout = async () => {
-    await logout();
-    navigate('/login', { replace: true });
-  };
 
   return (
     <div className="flex h-screen bg-background text-foreground">
@@ -86,6 +79,12 @@ export function AppLayout() {
             </NavLink>
           ))}
         </nav>
+        {/* 사이드바 하단 사용자 메뉴 — 인증된 경우에만 노출 */}
+        {state.status === 'authenticated' && (
+          <div className="shrink-0 border-t border-sidebar-border p-2">
+            <UserNav />
+          </div>
+        )}
       </aside>
 
       {/* 메인 콘텐츠 영역 */}
@@ -102,12 +101,7 @@ export function AppLayout() {
                 <MenuIcon size={18} />
               </button>
             </div>
-            <div className="flex items-center gap-3">
-              <span className="text-sm text-muted-foreground">{state.user.username}</span>
-              <Button variant="outline" size="sm" onClick={handleLogout}>
-                로그아웃
-              </Button>
-            </div>
+            <div className="flex items-center gap-3" />
           </header>
         )}
         <main className="flex-1 overflow-auto bg-gradient-main">
