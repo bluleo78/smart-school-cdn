@@ -36,7 +36,7 @@ export function Dialog({ open, onClose, children }: DialogProps) {
 export function DialogContent({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={cn('bg-card rounded-lg shadow-lg w-full max-w-md p-6 space-y-4', className)}
+      className={cn('bg-card rounded-xl shadow-lg w-full max-w-md p-6 space-y-4', className)}
       {...props}
     />
   );

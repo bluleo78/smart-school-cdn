@@ -44,7 +44,7 @@ export function CacheHitRateChart() {
             variant={range === '1h' ? 'default' : 'outline'}
             onClick={() => setRange('1h')}
             data-testid="cache-range-1h"
-            className="px-3 py-1 text-xs"
+            size="xs"
           >
             1시간
           </Button>
@@ -52,7 +52,7 @@ export function CacheHitRateChart() {
             variant={range === '24h' ? 'default' : 'outline'}
             onClick={() => setRange('24h')}
             data-testid="cache-range-24h"
-            className="px-3 py-1 text-xs"
+            size="xs"
           >
             24시간
           </Button>

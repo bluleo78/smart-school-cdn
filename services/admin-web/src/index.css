@@ -1,56 +1,59 @@
 @import "tailwindcss";
 
 @theme {
-  /* 배경 / 텍스트 */
-  --color-background: oklch(0.993 0.013 73.67);
+  /* 배경 / 텍스트 — 노란끼 제거하고 중성 청회색 */
+  --color-background: oklch(0.985 0.002 264);
   --color-foreground: oklch(0.145 0.03 281);
 
-  /* 카드 */
+  /* 카드 — 순백 유지(중성 배경 위에서 카드가 부상) */
   --color-card: oklch(1 0 0);
   --color-card-foreground: oklch(0.145 0.03 281);
 
-  /* 뮤트 (연회색 배경·보조 텍스트) */
-  --color-muted: oklch(0.962 0.021 272.31);
-  --color-muted-foreground: oklch(0.556 0 0);
+  /* 뮤트 — 채도 거의 0 으로 순수 중성 회색 */
+  --color-muted: oklch(0.965 0.005 264);
+  --color-muted-foreground: oklch(0.500 0 0);
 
-  /* 테두리 */
-  --color-border: oklch(0.929 0.032 272.79);
+  /* 테두리 — 명도/채도 모두 낮춰 카드·테이블 경계 식별성 확보 */
+  --color-border: oklch(0.905 0.008 264);
+  --color-input: oklch(0.905 0.008 264);
 
-  /* 프라이머리 — 인디고 600 */
-  --color-primary: oklch(0.445 0.258 275.75);
+  /* 프라이머리 — 채도 낮춰 덜 원색적, 액션 강조에 집중 */
+  --color-primary: oklch(0.450 0.200 264);
   --color-primary-foreground: oklch(0.985 0 0);
 
-  /* 디스트럭티브 (삭제 등) */
+  /* 디스트럭티브 */
   --color-destructive: oklch(0.577 0.245 27.325);
   --color-destructive-foreground: oklch(0.985 0 0);
   --color-destructive-subtle: oklch(0.955 0.032 17.72);
 
-  /* 액센트 — 인디고 50 */
-  --color-accent: oklch(0.962 0.021 272.31);
+  /* 액센트 — muted 와 분리된 별도 토큰 (hover 배경용) */
+  --color-accent: oklch(0.955 0.010 264);
   --color-accent-foreground: oklch(0.257 0.09 281.29);
 
-  /* 포커스 링 */
-  --color-ring: oklch(0.445 0.258 275.75);
+  /* 포커스 링 — primary 보다 밝게 */
+  --color-ring: oklch(0.550 0.150 264);
 
   /* 시맨틱 상태 토큰 */
-  --color-success: oklch(0.545 0.175 142.5);
+  --color-success: oklch(0.523 0.165 149.5);
   --color-success-foreground: oklch(1 0 0);
-  --color-success-subtle: oklch(0.952 0.052 149.58);
+  --color-success-subtle: oklch(0.950 0.050 149.5);
 
-  --color-warning: oklch(0.646 0.165 75.83);
-  --color-warning-foreground: oklch(1 0 0);
-  --color-warning-subtle: oklch(0.976 0.042 83.6);
+  /* warning 더 밝게 + foreground 검정 (한글 가독성) */
+  --color-warning: oklch(0.840 0.160 84);
+  --color-warning-foreground: oklch(0.200 0 0);
+  --color-warning-subtle: oklch(0.970 0.040 84);
 
-  --color-info: oklch(0.518 0.215 264.05);
+  /* info — 채도 낮춰 primary 와 구분 */
+  --color-info: oklch(0.550 0.150 240);
   --color-info-foreground: oklch(1 0 0);
   --color-info-subtle: oklch(0.941 0.04 260.91);
 
   --color-pink: oklch(0.592 0.2 0);
   --color-pink-subtle: oklch(0.961 0.04 350);
 
-  /* 사이드바 그라데이션용 */
-  --color-sidebar-from: oklch(0.445 0.258 275.75);
-  --color-sidebar-to: oklch(0.496 0.232 277.02);
+  /* 사이드바 — 그라데이션 폐기, 흰색/뉴트럴 단일 배경 */
+  --color-sidebar-bg: oklch(1 0 0);
+  --color-sidebar-border: oklch(0.905 0.008 264);
 
   /* 대시보드 글래스 영역 그라데이션 */
   --color-glass-from: oklch(0.941 0.04 260.91);
@@ -63,13 +66,14 @@
   --color-background: oklch(0.165 0.025 290);
   --color-foreground: oklch(0.93 0.01 281);
 
-  --color-card: oklch(0.205 0.03 290);
+  --color-card: oklch(0.200 0.020 280);
   --color-card-foreground: oklch(0.93 0.01 281);
 
-  --color-muted: oklch(0.225 0.028 290);
+  --color-muted: oklch(0.225 0.015 280);
   --color-muted-foreground: oklch(0.6 0 0);
 
-  --color-border: oklch(0.27 0.025 290);
+  --color-border: oklch(0.280 0.015 264);
+  --color-input: oklch(0.280 0.015 264);
 
   --color-primary: oklch(0.702 0.183 281.29);
   --color-primary-foreground: oklch(0.985 0 0);
@@ -78,7 +82,7 @@
   --color-destructive-foreground: oklch(0.985 0 0);
   --color-destructive-subtle: oklch(0.258 0.062 17.72);
 
-  --color-accent: oklch(0.225 0.028 290);
+  --color-accent: oklch(0.235 0.018 280);
   --color-accent-foreground: oklch(0.9 0 0);
 
   --color-ring: oklch(0.702 0.183 281.29);
@@ -98,12 +102,55 @@
   --color-pink: oklch(0.756 0.165 350);
   --color-pink-subtle: oklch(0.305 0.08 350);
 
-  --color-sidebar-from: oklch(0.257 0.09 281.29);
-  --color-sidebar-to: oklch(0.295 0.108 280);
+  --color-sidebar-bg: oklch(0.140 0.020 280);
+  --color-sidebar-border: oklch(0.280 0.015 264);
 
   --color-glass-from: oklch(0.205 0.09 281.29);
   --color-glass-via: oklch(0.257 0.09 281.29);
   --color-glass-to: oklch(0.245 0.08 310);
 
   color-scheme: dark;
+}
+
+/* 메인 컨텐츠 미묘한 radial gradient 배경 — 평평하지 않은 공간감 */
+.bg-gradient-main {
+  background: radial-gradient(
+    ellipse at top center,
+    oklch(1 0 0),
+    oklch(0.970 0.003 264)
+  );
+}
+.dark .bg-gradient-main {
+  background: radial-gradient(
+    ellipse at top center,
+    oklch(0.180 0.020 280),
+    oklch(0.150 0.018 280)
+  );
+}
+
+/* 사이드바 active 좌측 3px primary 인디케이터 */
+.nav-active-indicator {
+  position: relative;
+}
+.nav-active-indicator::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 25%;
+  bottom: 25%;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+  background: var(--color-primary);
+}
+
+/* 카드 hover lift — 클릭 가능한 카드에만 적용 */
+.card-hover {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+.dark .card-hover:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
 }

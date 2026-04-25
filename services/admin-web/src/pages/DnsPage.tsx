@@ -42,9 +42,6 @@ const RESULT_VARIANT: Record<DnsQueryResultLabel, 'success' | 'outline' | 'destr
   nxdomain: 'destructive',
 };
 
-/** 작은 버튼 공통 스타일 — Button 컴포넌트에 size prop 이 없어 className 으로 대체 */
-const SMALL_BTN = 'px-3 py-1 text-xs';
-
 /** DNS 관리 페이지 루트 — 헤더 + 오프라인 배너 + 상태 스트립 + 3탭 */
 export function DnsPage() {
   const { data: status } = useDnsStatus();
@@ -229,14 +226,14 @@ function StatsTab() {
             <Button
               variant={range === '1h' ? 'default' : 'outline'}
               onClick={() => setRange('1h')}
-              className={SMALL_BTN}
+              size="xs"
             >
               1시간
             </Button>
             <Button
               variant={range === '24h' ? 'default' : 'outline'}
               onClick={() => setRange('24h')}
-              className={SMALL_BTN}
+              size="xs"
             >
               24시간
             </Button>
@@ -362,7 +359,7 @@ function QueriesTab() {
               key={r}
               variant={filter.has(r) ? 'default' : 'outline'}
               onClick={() => toggle(r)}
-              className={SMALL_BTN}
+              size="xs"
               data-testid={`filter-${r}`}
             >
               {r}

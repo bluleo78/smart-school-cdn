@@ -74,7 +74,7 @@ function OriginSection({ domain }: { domain: Domain }) {
             variant="outline"
             onClick={() => setEditing(true)}
             data-testid="edit-domain-btn"
-            className="h-7 text-xs py-1 px-3"
+            size="xs"
           >
             편집
           </Button>
@@ -122,7 +122,7 @@ function OriginSection({ domain }: { domain: Domain }) {
                 onClick={handleSave}
                 disabled={updateMutation.isPending}
                 data-testid="save-domain-btn"
-                className="h-7 text-xs py-1 px-3"
+                size="xs"
               >
                 {updateMutation.isPending ? '저장 중...' : '저장'}
               </Button>
@@ -130,7 +130,7 @@ function OriginSection({ domain }: { domain: Domain }) {
                 variant="outline"
                 onClick={handleCancel}
                 disabled={updateMutation.isPending}
-                className="h-7 text-xs py-1 px-3"
+                size="xs"
               >
                 취소
               </Button>
@@ -161,7 +161,7 @@ function TlsSection() {
       <CardHeader className="flex flex-row items-center justify-between pb-2">
         <CardTitle className="text-sm">TLS / 인증서</CardTitle>
         {/* 1차 릴리스에서는 수동 갱신 비활성화 */}
-        <Button variant="outline" disabled className="h-7 text-xs py-1 px-3">
+        <Button variant="outline" disabled size="xs">
           수동 갱신
         </Button>
       </CardHeader>
@@ -223,7 +223,7 @@ function DangerSection({
         <Button
           variant="destructive"
           onClick={() => setOpen(true)}
-          className="h-8 text-xs py-1 px-3"
+          size="sm"
         >
           도메인 삭제
         </Button>
@@ -243,7 +243,7 @@ function DangerSection({
               variant="outline"
               onClick={() => setOpen(false)}
               disabled={deleteMutation.isPending}
-              className="py-1 px-3 text-sm"
+              size="sm"
             >
               취소
             </Button>
@@ -251,7 +251,7 @@ function DangerSection({
               variant="destructive"
               onClick={handleDelete}
               disabled={deleteMutation.isPending}
-              className="py-1 px-3 text-sm"
+              size="sm"
             >
               {deleteMutation.isPending ? '삭제 중...' : '삭제'}
             </Button>

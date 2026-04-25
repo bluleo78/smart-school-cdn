@@ -92,7 +92,7 @@ export function DomainOptimizerSection({ host }: Props) {
             <Button
               onClick={handleSave}
               disabled={updateMutation.isPending}
-              className="h-8 text-xs py-1 px-3"
+              size="sm"
               data-testid="optimizer-save-btn"
             >
               {updateMutation.isPending ? '저장 중...' : '저장'}
@@ -108,7 +108,7 @@ export function DomainOptimizerSection({ host }: Props) {
             <Button
               onClick={handleActivate}
               disabled={updateMutation.isPending}
-              className="h-8 text-xs py-1 px-3"
+              size="sm"
               data-testid="optimizer-activate-btn"
             >
               {updateMutation.isPending ? '활성화 중...' : '기본값으로 활성화'}

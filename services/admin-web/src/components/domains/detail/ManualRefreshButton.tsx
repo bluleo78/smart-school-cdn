@@ -13,7 +13,7 @@ export function ManualRefreshButton({ onClick, isRefreshing }: Props) {
       variant="ghost"
       onClick={onClick}
       disabled={isRefreshing}
-      className="h-8 w-8 p-0"
+      size="icon"
       aria-label="새로고침"
       data-testid="manual-refresh-btn"
     >

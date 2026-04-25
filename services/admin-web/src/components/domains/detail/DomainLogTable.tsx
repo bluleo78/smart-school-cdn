@@ -82,7 +82,7 @@ export function DomainLogTable({ host, period, range, refetchIntervalMs = false 
           variant={errorsOnly ? 'default' : 'outline'}
           onClick={() => setErrorsOnly((v) => !v)}
           aria-pressed={errorsOnly}
-          className="h-8 text-xs py-1 px-3"
+          size="sm"
         >
           에러만
         </Button>

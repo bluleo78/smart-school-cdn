@@ -88,14 +88,14 @@ export function UsersPage() {
               <td className="py-2 space-x-2">
                 <Button
                   variant="outline"
-                  className="px-3 py-1 text-xs"
+                  size="xs"
                   onClick={() => { passwordForm.reset(); setPasswordTarget(u); }}
                 >
                   비밀번호 재설정
                 </Button>
                 <Button
                   variant="destructive"
-                  className="px-3 py-1 text-xs"
+                  size="xs"
                   disabled={u.id === myId || !!u.disabled_at}
                   onClick={() => { if (confirm(`${u.username} 을 비활성화하시겠습니까?`)) disableMut.mutate(u.id); }}
                 >

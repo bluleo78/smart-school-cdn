@@ -64,7 +64,8 @@ export function DomainCacheSection({ host }: Props) {
             <Button
               onClick={handleUrlPurge}
               disabled={purgeMutation.isPending || !urlInput.trim()}
-              className="h-8 text-xs py-1 px-3 shrink-0"
+              size="sm"
+              className="shrink-0"
               data-testid="url-purge-btn"
             >
               퍼지
@@ -81,7 +82,7 @@ export function DomainCacheSection({ host }: Props) {
           <Button
             variant="destructive"
             onClick={() => setPurgeDialogOpen(true)}
-            className="h-8 text-xs py-1 px-3"
+            size="sm"
             data-testid="domain-purge-btn"
           >
             도메인 캐시 퍼지
@@ -100,14 +101,14 @@ export function DomainCacheSection({ host }: Props) {
             <Button
               variant="outline"
               onClick={() => setPurgeDialogOpen(false)}
-              className="py-1 px-3 text-sm"
+              size="sm"
             >
               취소
             </Button>
             <Button
               variant="destructive"
               onClick={handleDomainPurge}
-              className="py-1 px-3 text-sm"
+              size="sm"
               data-testid="domain-purge-confirm-btn"
             >
               퍼지

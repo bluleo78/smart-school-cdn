@@ -58,7 +58,7 @@ export function PeriodSelector({ value, onChange }: Props) {
           key={key}
           variant={value.period === key ? 'default' : 'outline'}
           onClick={() => selectPreset(key)}
-          className="h-8 text-xs py-1 px-3"
+          size="sm"
           data-testid={`period-${key}`}
           aria-pressed={value.period === key}
         >
@@ -68,7 +68,7 @@ export function PeriodSelector({ value, onChange }: Props) {
       <Button
         variant={value.period === 'custom' ? 'default' : 'outline'}
         onClick={() => setCustomOpen(true)}
-        className="h-8 text-xs py-1 px-3"
+        size="sm"
         data-testid="period-custom"
         aria-pressed={value.period === 'custom'}
       >

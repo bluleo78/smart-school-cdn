@@ -1,10 +1,13 @@
-import { NavLink, Outlet, useNavigate } from 'react-router';
+import { useEffect, useState } from 'react';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import {
   LayoutDashboard,
   Globe,
   Settings,
   Network,
   Users as UsersIcon,
+  Menu as MenuIcon,
+  Layers,
 } from 'lucide-react';
 import { useAuth } from '../auth/use-auth';
 import { Button } from '../ui/button';
@@ -21,6 +24,14 @@ const navItems = [
 export function AppLayout() {
   const { state, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  // 모바일 사이드바 열림 상태 — 라우트 변경 시 자동 닫힘
+  const [mobileOpen, setMobileOpen] = useState(false);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 라우트 변경에 따른 UI 상태 동기화
+    setMobileOpen(false);
+  }, [location.pathname]);
 
   // 로그아웃 — 서버 쿠키 만료 후 /login 으로 이동(replace 로 히스토리 잔존 방지)
   const handleLogout = async () => {
@@ -30,27 +41,43 @@ export function AppLayout() {
 
   return (
     <div className="flex h-screen bg-background text-foreground">
-      {/* 사이드바 — 인디고 그라데이션 */}
-      <aside className="w-60 bg-gradient-to-b from-sidebar-from to-sidebar-to flex flex-col shrink-0">
-        <div className="p-4 border-b border-white/15">
+      {/* 모바일 백드롭 — 사이드바 열렸을 때만 */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 bg-black/40 z-20 lg:hidden"
+          onClick={() => setMobileOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
+      {/* 사이드바 — 흰색/뉴트럴, 모바일에서는 fixed translate */}
+      <aside
+        className={`w-60 bg-sidebar-bg border-r border-sidebar-border flex flex-col shrink-0
+                    fixed lg:static inset-y-0 left-0 z-30
+                    transition-transform duration-200
+                    ${mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}
+      >
+        <div className="h-14 flex items-center px-4 border-b border-sidebar-border">
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-md bg-white/20 flex items-center justify-center shrink-0">
-              <span className="text-white text-xs font-bold">SC</span>
+            <div className="size-8 rounded-md bg-primary/10 text-primary flex items-center justify-center shrink-0">
+              <Layers size={18} />
             </div>
-            <h1 className="text-sm font-bold leading-tight text-white">Smart School CDN</h1>
+            <h1 className="text-sm font-semibold leading-tight text-foreground">
+              Smart School CDN
+            </h1>
           </div>
         </div>
-        <nav className="flex-1 p-2 space-y-1">
+        <nav className="flex-1 p-2 space-y-1 overflow-y-auto">
           {navItems.map(({ to, icon: Icon, label }) => (
             <NavLink
               key={to}
               to={to}
               end={to === '/'}
               className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2 rounded-[10px] text-sm transition-colors ${
+                `flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors ${
                   isActive
-                    ? 'bg-white/20 text-white font-medium'
-                    : 'text-white/70 hover:bg-white/10 hover:text-white/90'
+                    ? 'bg-accent text-accent-foreground font-medium nav-active-indicator'
+                    : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
                 }`
               }
             >
@@ -61,19 +88,32 @@ export function AppLayout() {
         </nav>
       </aside>
 
-      {/* 메인 콘텐츠 영역 — 상단 헤더(현재 사용자 + 로그아웃) + Outlet */}
+      {/* 메인 콘텐츠 영역 */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* 헤더 — 인증된 경우에만 사용자 메일/로그아웃 버튼 노출 */}
+        {/* 헤더 — h-14 고정, sticky + backdrop-blur */}
         {state.status === 'authenticated' && (
-          <header className="flex items-center justify-end gap-3 px-6 py-3 border-b bg-background">
-            <span className="text-sm text-muted-foreground">{state.user.username}</span>
-            <Button variant="outline" className="px-3 py-1 text-xs" onClick={handleLogout}>
-              로그아웃
-            </Button>
+          <header className="h-14 px-4 md:px-6 flex items-center justify-between border-b border-border bg-background/80 backdrop-blur-sm sticky top-0 z-10">
+            <div className="flex items-center gap-2">
+              <button
+                aria-label="메뉴 열기"
+                className="lg:hidden p-2 -ml-2 rounded-md hover:bg-accent text-foreground"
+                onClick={() => setMobileOpen(true)}
+              >
+                <MenuIcon size={18} />
+              </button>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-muted-foreground">{state.user.username}</span>
+              <Button variant="outline" size="sm" onClick={handleLogout}>
+                로그아웃
+              </Button>
+            </div>
           </header>
         )}
-        <main className="flex-1 overflow-auto p-6">
-          <Outlet />
+        <main className="flex-1 overflow-auto bg-gradient-main">
+          <div className="p-4 md:p-6">
+            <Outlet />
+          </div>
         </main>
       </div>
     </div>
