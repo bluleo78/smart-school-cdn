@@ -1002,6 +1002,38 @@ test.describe('도메인 상세 — 존재하지 않는 도메인 접근 (#66)',
   });
 });
 
+// ─── 브라우저 탭 제목 (#78 회귀) ────────────────────────────────────
+test.describe('도메인 상세 — 브라우저 탭 제목 (#78)', () => {
+  /**
+   * 이슈 #78 회귀 방지 — 도메인 상세 페이지 title이 "도메인 관리 | Smart School CDN"으로
+   * 고정되어 여러 탭을 열었을 때 구분이 불가하던 버그.
+   * 수정 후: "textbook.com — 도메인 관리 | Smart School CDN" 형태로 호스트명이 포함되어야 한다.
+   */
+  test('도메인 상세 페이지 title에 호스트명이 포함된다', async ({ page }) => {
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com');
+
+    // host가 포함된 title이어야 한다 (수정 전: "도메인 관리 | Smart School CDN" 고정)
+    await expect(page).toHaveTitle('textbook.com — 도메인 관리 | Smart School CDN');
+  });
+
+  test('도메인 상세 → 목록 복귀 시 title이 "도메인 관리 | Smart School CDN"으로 복원된다', async ({ page }) => {
+    // 언마운트 cleanup: return () => { document.title = '도메인 관리 | Smart School CDN'; }
+    await setupDetailMocks(page);
+    await mockApi(page, 'GET', '/domains', []);
+    await page.goto('/domains/textbook.com');
+
+    // 상세 페이지에서 host 포함 title 확인
+    await expect(page).toHaveTitle('textbook.com — 도메인 관리 | Smart School CDN');
+
+    // 뒤로가기 → 목록으로 이동
+    await page.goto('/domains');
+
+    // 목록 페이지로 돌아왔을 때 AppLayout이 title을 "도메인 관리 | Smart School CDN"으로 복원해야 한다
+    await expect(page).toHaveTitle('도메인 관리 | Smart School CDN');
+  });
+});
+
 // ─── 탭 URL 동기화 (#61 회귀) ──────────────────────────────────────
 test.describe('도메인 상세 — 탭 URL searchParam 동기화 (#61)', () => {
   /**

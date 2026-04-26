@@ -24,6 +24,17 @@ function DomainDetailPageInner({ host }: { host: string }) {
   const { data: domain, isLoading, isError } = useDomain(host);
   const navigate = useNavigate();
 
+  // 도메인 상세 페이지 탭 제목 — AppLayout의 navItems는 /domains/:host를
+  // '/domains' 전체로 매핑하므로 항상 '도메인 관리'만 반환한다.
+  // 여러 탭에서 동시에 열 때 구분이 불가하므로, 호스트명을 포함한 제목으로 override.
+  // 언마운트 시 원래 '도메인 관리' 제목으로 복원한다.
+  useEffect(() => {
+    document.title = `${host} — 도메인 관리 | Smart School CDN`;
+    return () => {
+      document.title = '도메인 관리 | Smart School CDN';
+    };
+  }, [host]);
+
   // 조회 실패(404 포함) → 에러 토스트를 표시한 뒤 목록으로 이동
   // Navigate 컴포넌트 대신 useEffect를 사용하는 이유:
   // 렌더 중 side-effect(toast 호출)를 일으키면 React 경고가 발생하므로

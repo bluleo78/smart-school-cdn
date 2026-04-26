@@ -38,11 +38,18 @@ export function AppLayout() {
     navItems.find(({ to }) =>
       to === '/' ? location.pathname === '/' : location.pathname.startsWith(to),
     )?.label ?? '';
+
+  // /domains/:host 같은 서브 라우트는 자식 컴포넌트(DomainDetailPageInner)가
+  // 호스트명을 포함한 title을 직접 설정하므로 AppLayout은 덮어쓰지 않는다.
+  // React effects는 자식 → 부모 순으로 실행되므로 이 가드 없이는 부모 effect가
+  // 자식이 설정한 title을 덮어쓰게 된다.
+  const isDomainDetail = /^\/domains\/[^/]+/.test(location.pathname);
   useEffect(() => {
+    if (isDomainDetail) return;
     document.title = currentPageLabel
       ? `${currentPageLabel} | Smart School CDN`
       : 'Smart School CDN';
-  }, [currentPageLabel]);
+  }, [currentPageLabel, isDomainDetail]);
 
   return (
     <div className="flex h-screen bg-background text-foreground">
