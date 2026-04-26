@@ -1,5 +1,6 @@
 /** 실시간 로그 뷰어 — 서비스 선택, 레벨 필터, 자동 스크롤 */
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { Wifi, WifiOff } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { ScrollArea } from '../ui/scroll-area';
@@ -169,7 +170,14 @@ export function LogViewer() {
 
         <div className="flex items-center justify-between mt-2 text-xs text-muted-foreground">
           <span>{filteredLines.length}줄 표시 (총 {lines.length}줄)</span>
-          <span>{isConnected ? '● 연결됨' : '○ 연결 끊김'}</span>
+          {/* 연결 상태 — lucide-react 아이콘으로 디자인 시스템 색상 토큰 적용 */}
+          <span className="flex items-center gap-1">
+            {isConnected ? (
+              <><Wifi size={12} className="text-success" /><span className="text-success">연결됨</span></>
+            ) : (
+              <><WifiOff size={12} className="text-destructive" /><span className="text-destructive">연결 끊김</span></>
+            )}
+          </span>
         </div>
       </CardContent>
     </Card>

@@ -3,7 +3,7 @@
  * 마이크로서비스 상태 그리드 + 장애 배너 추가
  */
 import { useState } from 'react';
-import { AlertTriangle, Monitor, Sun, Moon } from 'lucide-react';
+import { AlertTriangle, Monitor, Sun, Moon, CheckCircle2, XCircle } from 'lucide-react';
 import { getTheme, setTheme, type Theme } from '../lib/theme';
 import { useProxyStatus } from '../hooks/useProxyStatus';
 import { useSystemStatus } from '../api/system';
@@ -136,8 +136,19 @@ export function SystemPage() {
               <p data-testid="uptime-value" className="text-3xl font-bold">
                 {status ? formatUptime(status.uptime) : '—'}
               </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {status?.online ? '● 온라인' : '○ 오프라인'}
+              {/* 온/오프라인 상태 — lucide-react 아이콘으로 표시해 디자인 시스템 색상 토큰 적용 */}
+              <p className="mt-1 flex items-center gap-1 text-sm">
+                {status?.online ? (
+                  <>
+                    <CheckCircle2 size={14} className="text-success" />
+                    <span className="text-success">온라인</span>
+                  </>
+                ) : (
+                  <>
+                    <XCircle size={14} className="text-destructive" />
+                    <span className="text-destructive">오프라인</span>
+                  </>
+                )}
               </p>
             </>
           )}
