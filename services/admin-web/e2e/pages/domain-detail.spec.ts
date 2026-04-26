@@ -838,3 +838,70 @@ test.describe('도메인 상세 — DomainStackedChart empty state (#21)', () =>
     await expect(chart.getByText('프록시로 요청이 들어오면 자동으로 표시됩니다')).toBeVisible();
   });
 });
+
+// ─── 탭 URL 동기화 (#61 회귀) ──────────────────────────────────────
+test.describe('도메인 상세 — 탭 URL searchParam 동기화 (#61)', () => {
+  /**
+   * 탭 클릭 시 ?tab=<value> 가 URL에 반영되어야 한다.
+   * 반영되지 않으면 뒤로가기·북마크·공유 링크로 이전 탭에 돌아올 수 없다.
+   */
+  test('설정 탭 클릭 시 ?tab=settings 가 URL에 추가된다', async ({ page }) => {
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com');
+
+    // 기본 상태에서 tab 파라미터가 없어야 한다 (또는 overview)
+    await expect(page).not.toHaveURL(/tab=settings/);
+
+    // 설정 탭 클릭
+    await page.getByRole('tab', { name: '설정' }).click();
+
+    // URL에 ?tab=settings 가 반영되어야 한다
+    await expect(page).toHaveURL(/tab=settings/);
+  });
+
+  test('최적화 탭 클릭 시 ?tab=stats 가 URL에 추가된다', async ({ page }) => {
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com');
+
+    await page.getByRole('tab', { name: '최적화' }).click();
+    await expect(page).toHaveURL(/tab=stats/);
+  });
+
+  test('트래픽 탭 클릭 시 ?tab=logs 가 URL에 추가된다', async ({ page }) => {
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com');
+
+    await page.getByRole('tab', { name: '트래픽' }).click();
+    await expect(page).toHaveURL(/tab=logs/);
+  });
+
+  test('?tab=settings 로 직접 접근하면 설정 탭이 활성화된다', async ({ page }) => {
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com?tab=settings');
+
+    // 설정 탭 패널이 바로 표시되어야 한다
+    await expect(page.getByTestId('domain-settings-tab')).toBeVisible();
+  });
+
+  test('?tab=stats 로 직접 접근하면 최적화 탭이 활성화된다', async ({ page }) => {
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com?tab=stats');
+
+    await expect(page.getByTestId('domain-optimization-tab')).toBeVisible();
+  });
+
+  test('?tab=logs 로 직접 접근하면 트래픽 탭이 활성화된다', async ({ page }) => {
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com?tab=logs');
+
+    await expect(page.getByTestId('domain-traffic-tab')).toBeVisible();
+  });
+
+  test('잘못된 ?tab 값으로 접근하면 개요 탭으로 폴백된다', async ({ page }) => {
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com?tab=invalid_value');
+
+    // overview 탭 내용(origin)이 표시되어야 한다
+    await expect(page.getByText('https://textbook.com')).toBeVisible();
+  });
+});
