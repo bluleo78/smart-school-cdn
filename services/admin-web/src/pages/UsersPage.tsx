@@ -114,7 +114,14 @@ export function UsersPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {users?.map((u) => (
+            {/* 빈 상태 처리 — users가 없거나 빈 배열일 때 안내 메시지 표시 (DomainsPage·DnsPage 패턴과 일관성) */}
+            {!users || users.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={5} className="text-center py-8 text-sm text-muted-foreground">
+                  등록된 사용자가 없습니다.
+                </TableCell>
+              </TableRow>
+            ) : users.map((u) => (
               // hover:bg-muted/50 — 클릭 가능한 행임을 시각적으로 전달 (ByDomainTable 패턴과 일관성)
               <TableRow key={u.id} className="hover:bg-muted/50 transition-colors" data-testid={`user-row-${u.id}`}>
                 <TableCell>{u.username}</TableCell>
@@ -158,7 +165,8 @@ export function UsersPage() {
             </div>
             <div>
               <Label>비밀번호</Label>
-              <Input type="password" {...createForm.register('password')} />
+              {/* 새 비밀번호 입력 — autocomplete="new-password"로 브라우저 자동완성 힌트 제공 */}
+              <Input type="password" autoComplete="new-password" {...createForm.register('password')} />
               {createForm.formState.errors.password && <p className="text-xs text-destructive">{createForm.formState.errors.password.message}</p>}
             </div>
             <div className="flex justify-end gap-2 pt-2">
@@ -183,7 +191,8 @@ export function UsersPage() {
           >
             <div>
               <Label>새 비밀번호</Label>
-              <Input type="password" {...passwordForm.register('password')} />
+              {/* 비밀번호 재설정 입력 — autocomplete="new-password"로 브라우저 자동완성 힌트 제공 */}
+              <Input type="password" autoComplete="new-password" {...passwordForm.register('password')} />
               {passwordForm.formState.errors.password && <p className="text-xs text-destructive">{passwordForm.formState.errors.password.message}</p>}
             </div>
             <div className="flex justify-end gap-2 pt-2">

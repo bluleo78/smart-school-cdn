@@ -220,6 +220,52 @@ test.describe('사용자 관리', () => {
     expect(classList).toContain('transition-colors');
   });
 
+  // 이슈 #44 회귀 방지 — 비밀번호 입력 필드 autocomplete 속성 누락
+  test('사용자 추가 다이얼로그 — 비밀번호 입력에 autocomplete="new-password" 속성 존재', async ({ page }) => {
+    await mockApi(page, 'GET', '/users', baseUsers);
+
+    await page.goto('/users');
+
+    // 사용자 추가 다이얼로그 열기
+    await page.getByRole('button', { name: '+ 사용자 추가' }).click();
+
+    // 비밀번호 입력 필드에 autocomplete="new-password" 속성이 있어야 함
+    const passwordInput = page.locator('input[type=password]');
+    await expect(passwordInput).toBeVisible();
+    const autocomplete = await passwordInput.getAttribute('autocomplete');
+    expect(autocomplete).toBe('new-password');
+  });
+
+  // 이슈 #44 회귀 방지 — 비밀번호 재설정 다이얼로그 autocomplete 속성 누락
+  test('비밀번호 재설정 다이얼로그 — 비밀번호 입력에 autocomplete="new-password" 속성 존재', async ({ page }) => {
+    await mockApi(page, 'GET', '/users', baseUsers);
+
+    await page.goto('/users');
+
+    // 비밀번호 재설정 버튼 클릭 (본인이 아닌 other 사용자 행)
+    const otherRow = page.getByTestId('user-row-2');
+    await otherRow.getByRole('button', { name: '비밀번호 재설정' }).click();
+
+    // 비밀번호 재설정 다이얼로그의 입력 필드에 autocomplete="new-password" 속성이 있어야 함
+    const passwordInput = page.locator('input[type=password]');
+    await expect(passwordInput).toBeVisible();
+    const autocomplete = await passwordInput.getAttribute('autocomplete');
+    expect(autocomplete).toBe('new-password');
+  });
+
+  // 이슈 #52 회귀 방지 — 빈 사용자 목록 시 안내 메시지 누락
+  test('빈 사용자 목록 시 "등록된 사용자가 없습니다." 메시지 표시', async ({ page }) => {
+    // 빈 배열 반환 — 테이블 헤더만 표시되고 빈 바디가 나오는 버그 재현 조건
+    await mockApi(page, 'GET', '/users', []);
+
+    await page.goto('/users');
+
+    // 빈 상태 안내 메시지가 표시되어야 함
+    await expect(page.getByText('등록된 사용자가 없습니다.')).toBeVisible();
+    // 테이블 자체는 헤더와 함께 표시되어야 함
+    await expect(page.getByRole('table')).toBeVisible();
+  });
+
   test('API 에러 시 에러 메시지 표시', async ({ page }) => {
     // API 실패 응답 모킹 — 빈 화면 대신 에러 메시지가 표시되어야 함
     await mockApi(page, 'GET', '/users', { error: 'Internal Server Error' }, { status: 500 });
