@@ -49,14 +49,14 @@ export function UsersPage() {
     },
     onError: (e) => {
       const status = (e as { response?: { status?: number } }).response?.status;
-      toast.error(status === 409 ? '이미 존재하는 이메일입니다' : '추가 실패');
+      toast.error(status === 409 ? '이미 존재하는 이메일입니다.' : '사용자 추가에 실패했습니다.');
     },
   });
 
   const passwordMut = useMutation({
     mutationFn: ({ id, password }: { id: number; password: string }) => updatePassword(id, password),
     onSuccess: () => toast.success('비밀번호가 재설정되었습니다'),
-    onError: () => toast.error('비밀번호 재설정 실패'),
+    onError: () => toast.error('비밀번호 재설정에 실패했습니다.'),
   });
 
   const disableMut = useMutation({
@@ -65,7 +65,7 @@ export function UsersPage() {
       toast.success('사용자가 비활성화되었습니다');
       void qc.invalidateQueries({ queryKey: ['users'] });
     },
-    onError: () => toast.error('비활성화 실패'),
+    onError: () => toast.error('사용자 비활성화에 실패했습니다.'),
   });
 
   const [createOpen, setCreateOpen] = useState(false);

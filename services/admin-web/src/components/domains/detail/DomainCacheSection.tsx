@@ -29,7 +29,7 @@ export function DomainCacheSection({ host }: Props) {
       toast.success(`퍼지 완료 — ${result.purged_count}건 삭제`);
       setUrlInput('');
     } catch {
-      toast.error('퍼지 실패: 서버에 연결할 수 없습니다.');
+      toast.error('캐시 퍼지에 실패했습니다.');
     }
   }
 
@@ -40,7 +40,7 @@ export function DomainCacheSection({ host }: Props) {
       const result = await purgeCache({ type: 'domain', target: host });
       toast.success(`도메인 캐시 퍼지 완료 — ${result.purged_count}건 삭제`);
     } catch {
-      toast.error('퍼지 실패: 서버에 연결할 수 없습니다.');
+      toast.error('캐시 퍼지에 실패했습니다.');
     }
   }
 

@@ -31,7 +31,7 @@ export function DashboardPage() {
       const result = await purge({ type: 'all' });
       toast.success(`캐시 ${result.purged_count}건 퍼지 완료 (${formatBytes(result.freed_bytes)} 해제)`);
     } catch {
-      toast.error('캐시 퍼지 실패');
+      toast.error('캐시 퍼지에 실패했습니다.');
     } finally {
       setShowConfirm(false);
     }
