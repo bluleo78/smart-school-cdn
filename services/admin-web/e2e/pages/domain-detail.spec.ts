@@ -404,3 +404,38 @@ test.describe('도메인 상세 — 설정 탭', () => {
     await expect(page).toHaveURL(/\/domains$/);
   });
 });
+
+// ─── 빈 데이터 empty state (#21 회귀) ─────────────────────────
+test.describe('도메인 상세 — DomainStackedChart empty state (#21)', () => {
+  test('캐시 시계열 데이터가 없으면 차트 대신 empty state 메시지가 표시된다', async ({ page }) => {
+    // 빈 버킷 배열 → DomainStackedChart의 data.length === 0 분기 진입 검증
+    await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
+    await mockApi(page, 'GET', '/proxy/requests', []);
+    await mockApi(page, 'GET', '/domains/summary', createDomainSummary());
+    await mockApi(page, 'GET', '/domains/textbook.com', createDomain());
+    await mockApi(page, 'GET', '/domains/textbook.com/stats', createDomainStats());
+    await mockApi(page, 'GET', '/domains/textbook.com/logs', createDomainLogs());
+    await mockApi(page, 'GET', '/domains/textbook.com/summary', createDomainHostSummary());
+    await mockApi(page, 'GET', '/tls/certificates', createCertificates());
+    await mockApi(page, 'GET', '/cache/popular', createPopularContent());
+    await mockApi(page, 'GET', '/stats/optimization', createOptimizationStats());
+    await mockApi(page, 'GET', '/optimizer/profiles', createOptimizerProfile());
+    // 빈 버킷 → empty state 진입
+    await page.route('**/api/cache/series*', (route) =>
+      route.fulfill({ json: { buckets: [] } }),
+    );
+    await page.route('**/api/domains/textbook.com/top-urls*', (route) =>
+      route.fulfill({ json: { urls: [] } }),
+    );
+
+    await page.goto('/domains/textbook.com');
+    // DomainDetailTabs의 stats 탭은 '최적화' 텍스트로 접근 (testid 없음)
+    await page.getByRole('tab', { name: '최적화' }).click();
+
+    // DomainStackedChart 안에 empty state 문구가 노출되어야 한다
+    const chart = page.getByTestId('domain-overview-stacked-chart');
+    await expect(chart).toBeVisible();
+    await expect(chart.getByText('아직 데이터가 없습니다')).toBeVisible();
+    await expect(chart.getByText('프록시로 요청이 들어오면 자동으로 표시됩니다')).toBeVisible();
+  });
+});

@@ -11,6 +11,7 @@ import {
   CartesianGrid,
   Legend,
 } from 'recharts';
+import { BarChart2 } from 'lucide-react';
 import { Skeleton } from '../../ui/skeleton';
 import { useCacheSeries } from '../../../hooks/useCacheSeries';
 import type { CacheSeriesRange } from '../../../api/cache';
@@ -41,6 +42,13 @@ export function DomainStackedChart({ host, range }: Props) {
     <div className="h-64" data-testid="domain-overview-stacked-chart">
       {isLoading ? (
         <Skeleton className="h-full w-full" />
+      ) : data.length === 0 ? (
+        /* 데이터 없음 — 빈 캔버스 대신 안내 메시지로 대체 (CacheHitRateChart 패턴 준용) */
+        <div className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground">
+          <BarChart2 size={32} className="opacity-30" />
+          <p className="text-sm">아직 데이터가 없습니다</p>
+          <p className="text-xs">프록시로 요청이 들어오면 자동으로 표시됩니다</p>
+        </div>
       ) : (
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={data} stackOffset="expand">

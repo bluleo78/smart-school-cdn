@@ -2,7 +2,7 @@
  *  페이지 헤더 + 상태 스트립 + 3개 탭(레코드/통계/최근 쿼리).
  *  SystemPage / DashboardPage / DomainsPage 와 동일한 shadcn/ui · 시맨틱 토큰 패턴을 따른다. */
 import { useMemo, useState } from 'react';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, BarChart2 } from 'lucide-react';
 import {
   LineChart,
   Line,
@@ -243,6 +243,13 @@ function StatsTab() {
         <CardContent className="h-72">
           {isLoading ? (
             <Skeleton className="h-full w-full" />
+          ) : !metrics || metrics.length === 0 ? (
+            /* 데이터 없음 — 빈 캔버스 대신 안내 메시지로 대체 (CacheHitRateChart 패턴 준용) */
+            <div className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground">
+              <BarChart2 size={32} className="opacity-30" />
+              <p className="text-sm">아직 데이터가 없습니다</p>
+              <p className="text-xs">DNS 쿼리가 들어오면 자동으로 표시됩니다</p>
+            </div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
               <LineChart

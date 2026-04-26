@@ -82,3 +82,25 @@ test.describe('대시보드 — 전체 캐시 퍼지', () => {
     await expect(page.getByRole('button', { name: '퍼지 실행' })).not.toBeVisible();
   });
 });
+
+// ─── 빈 데이터 empty state (#21 회귀) ─────────────────────────
+test.describe('대시보드 — 캐시 스택 차트 empty state (#21)', () => {
+  test('시계열 데이터가 없으면 차트 대신 empty state 메시지가 표시된다', async ({ page }) => {
+    // 빈 버킷 배열 → data.length === 0 분기 진입 검증
+    await mockApi(page, 'GET', '/proxy/status', { status: 'online', uptime: 3600, total_requests: 0 });
+    await mockApi(page, 'GET', '/proxy/requests', []);
+    await mockApi(page, 'GET', '/cache/stats', createCacheStats());
+    await mockApi(page, 'GET', '/cache/popular', createPopularContent());
+    await page.route('**/api/cache/series*', (route) =>
+      route.fulfill({ json: { buckets: [] } }),
+    );
+
+    await page.goto('/');
+
+    // 캐시 결과 분포 카드 안에 empty state 문구가 노출되어야 한다
+    const chart = page.getByTestId('cache-stacked-chart');
+    await expect(chart).toBeVisible();
+    await expect(chart.getByText('아직 데이터가 없습니다')).toBeVisible();
+    await expect(chart.getByText('프록시로 요청이 들어오면 자동으로 표시됩니다')).toBeVisible();
+  });
+});

@@ -146,3 +146,22 @@ test.describe('DNS 관리 페이지', () => {
     await expect(page.getByText('b.test')).toBeVisible();
   });
 });
+
+// ─── 빈 데이터 empty state (#21 회귀) ─────────────────────────
+test.describe('DNS — 쿼리 추이 차트 empty state (#21)', () => {
+  test('메트릭 데이터가 없으면 차트 대신 empty state 메시지가 표시된다', async ({ page }) => {
+    // 빈 버킷 배열 → metrics.length === 0 분기 진입 검증
+    await mockApi(page, 'GET', '/dns/status', createDnsStatusOnline());
+    await mockApi(page, 'GET', '/dns/records', createDnsRecords());
+    await mockDnsQuery(page, '/dns/queries', createDnsQueriesMixed());
+    // 빈 메트릭 버킷 → 쿼리 추이 차트 empty state 진입
+    await mockDnsQuery(page, '/dns/metrics', createDnsMetrics([]));
+
+    await page.goto('/dns');
+    await page.getByTestId('tab-stats').click();
+
+    // 쿼리 추이 카드 안에 empty state 문구가 노출되어야 한다
+    await expect(page.getByText('아직 데이터가 없습니다')).toBeVisible();
+    await expect(page.getByText('DNS 쿼리가 들어오면 자동으로 표시됩니다')).toBeVisible();
+  });
+});
