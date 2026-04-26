@@ -96,7 +96,12 @@ function OriginSection({ domain }: { domain: Domain }) {
         </div>
 
         {editing ? (
-          <>
+          /* 편집 폼 — form 태그로 감싸 Enter 키 제출 활성화, onKeyDown으로 Esc 취소 처리 */
+          <form
+            className="space-y-3"
+            onSubmit={(e) => { e.preventDefault(); handleSave(); }}
+            onKeyDown={(e) => { if (e.key === 'Escape') handleCancel(); }}
+          >
             {/* Origin 입력 */}
             <div className="space-y-1">
               <Label htmlFor="origin-input" className="text-xs text-muted-foreground">
@@ -127,7 +132,7 @@ function OriginSection({ domain }: { domain: Domain }) {
             {/* 저장 / 취소 버튼 */}
             <div className="flex gap-2 pt-1">
               <Button
-                onClick={handleSave}
+                type="submit"
                 disabled={updateMutation.isPending}
                 data-testid="save-domain-btn"
                 size="xs"
@@ -135,6 +140,7 @@ function OriginSection({ domain }: { domain: Domain }) {
                 {updateMutation.isPending ? '저장 중...' : '저장'}
               </Button>
               <Button
+                type="button"
                 variant="outline"
                 onClick={handleCancel}
                 disabled={updateMutation.isPending}
@@ -143,7 +149,7 @@ function OriginSection({ domain }: { domain: Domain }) {
                 취소
               </Button>
             </div>
-          </>
+          </form>
         ) : (
           <>
             {/* 읽기 모드 */}

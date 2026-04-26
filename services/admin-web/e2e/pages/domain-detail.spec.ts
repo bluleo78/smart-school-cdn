@@ -894,6 +894,52 @@ test.describe('도메인 상세 — 설정 탭', () => {
     // purge API는 호출되지 않아야 한다
     expect(purgeCallCount).toBe(0);
   });
+
+  /**
+   * 이슈 #80 회귀 방지 — 오리진 편집 폼에서 Enter 키 제출·Esc 취소가 동작하지 않던 버그
+   * 수정 후:
+   * - 오리진 입력 필드에서 Enter 키 누르면 폼이 제출되어야 한다
+   * - 오리진 입력 필드에서 Esc 키 누르면 편집 모드가 취소되어야 한다
+   */
+  test('OriginSection — origin 입력 필드에서 Enter 키로 저장이 동작한다 (회귀: #80)', async ({ page }) => {
+    // <form onSubmit> 패턴 적용 후 Enter 제출이 동작해야 한다 (수정 전: div 래퍼로 Enter 미동작)
+    await setupDetailMocks(page);
+    await mockApi(page, 'PUT', '/domains/textbook.com', {
+      ...createDomain(),
+      origin: 'https://new-origin.com',
+    });
+    await page.goto('/domains/textbook.com');
+
+    // 설정 탭으로 전환 → 편집 모드 진입 → origin 입력 후 Enter 키 누름
+    await page.getByRole('tab', { name: '설정' }).click();
+    await page.getByTestId('edit-domain-btn').click();
+    await page.getByTestId('origin-input').fill('https://new-origin.com');
+    await page.getByTestId('origin-input').press('Enter');
+
+    // Enter 키로 제출되어 편집 모드가 해제되어야 한다 (edit-domain-btn이 다시 보임)
+    await expect(page.getByTestId('edit-domain-btn')).toBeVisible();
+    // 저장 버튼은 편집 모드 해제 후 사라져야 한다
+    await expect(page.getByTestId('save-domain-btn')).not.toBeVisible();
+  });
+
+  test('OriginSection — origin 입력 필드에서 Esc 키로 편집 취소가 동작한다 (회귀: #80)', async ({ page }) => {
+    // form 레벨 onKeyDown Escape 처리 적용 후 Esc 취소가 동작해야 한다 (수정 전: onKeyDown 핸들러 없어 Esc 미동작)
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com');
+
+    // 설정 탭으로 전환 → 편집 모드 진입 → origin 값 변경 후 Esc 키 누름
+    await page.getByRole('tab', { name: '설정' }).click();
+    await page.getByTestId('edit-domain-btn').click();
+    await page.getByTestId('origin-input').fill('https://changed-value.com');
+    await page.getByTestId('origin-input').press('Escape');
+
+    // Esc 키로 편집 모드가 해제되어야 한다 (edit-domain-btn이 다시 보임)
+    await expect(page.getByTestId('edit-domain-btn')).toBeVisible();
+    // 저장 버튼이 사라져야 한다
+    await expect(page.getByTestId('save-domain-btn')).not.toBeVisible();
+    // 변경 전 원래 값(https://textbook.com)이 표시되어야 한다 (취소로 복원됨)
+    await expect(page.getByText('https://textbook.com')).toBeVisible();
+  });
 });
 
 // ─── 헤더 액션 에러 처리 (#45 회귀) ──────────────────────────────
