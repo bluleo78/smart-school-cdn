@@ -97,6 +97,93 @@ describe('GET /api/logs/:service', () => {
     expect(body[1].level).toBe('WARN');
   });
 
+  it('pino JSON 형식(Admin 서비스) — level 30(INFO)을 올바르게 파싱한다', async () => {
+    // Admin 서비스(Fastify/pino) 실제 로그 형식:
+    //   "<docker_ts> {\"level\":30,\"time\":...,\"pid\":1,\"msg\":\"incoming request\"}"
+    const app = await createApp();
+    const mockRes = new PassThrough() as unknown as IncomingMessage;
+    (mockRes as unknown as Record<string, unknown>).statusCode = 200;
+
+    vi.spyOn(http, 'request').mockImplementationOnce(
+      ((_opts, cb?: RequestCallback): ClientRequest => {
+        if (cb) cb(mockRes);
+        const pinoJson = JSON.stringify({
+          level: 30, time: 1777216360806, pid: 1,
+          hostname: 'test-host',
+          reqId: 'req-1',
+          req: { method: 'GET', url: '/api/system/status' },
+          msg: 'incoming request',
+        });
+        const line = `2026-04-26T15:12:40.807230828Z ${pinoJson}\n`;
+        const hdr = Buffer.alloc(8);
+        hdr[0] = 1;
+        hdr.writeUInt32BE(line.length, 4);
+        (mockRes as unknown as PassThrough).write(Buffer.concat([hdr, Buffer.from(line)]));
+        (mockRes as unknown as PassThrough).end();
+        const mockReq = new PassThrough() as unknown as ClientRequest;
+        (mockReq as unknown as Record<string, unknown>).end = vi.fn();
+        return mockReq;
+      }) as typeof http.request
+    );
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/logs/admin?follow=false&tail=10',
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as Array<{ timestamp: string; level: string; message: string; service: string }>;
+    expect(body).toHaveLength(1);
+    // Docker 타임스탬프가 사용되어야 한다 (new Date() 현재 시각 X)
+    expect(body[0].timestamp).toBe('2026-04-26T15:12:40.807230828Z');
+    // pino level=30 → INFO
+    expect(body[0].level).toBe('INFO');
+    // message는 pino msg 필드 값이어야 한다 (raw JSON 전체 X)
+    expect(body[0].message).toBe('incoming request');
+    expect(body[0].service).toBe('admin');
+  });
+
+  it('pino JSON 형식(Admin 서비스) — level 50(ERROR)을 올바르게 파싱한다', async () => {
+    // pino level 50 = ERROR, 40 = WARN, 20 = DEBUG, 10 = TRACE 매핑 검증
+    const app = await createApp();
+    const mockRes = new PassThrough() as unknown as IncomingMessage;
+    (mockRes as unknown as Record<string, unknown>).statusCode = 200;
+
+    vi.spyOn(http, 'request').mockImplementationOnce(
+      ((_opts, cb?: RequestCallback): ClientRequest => {
+        if (cb) cb(mockRes);
+        const pinoJson = JSON.stringify({
+          level: 50, time: 1777216400000, pid: 1,
+          hostname: 'test-host',
+          err: { message: 'DB connection failed', stack: '...' },
+          msg: 'unhandled error',
+        });
+        const line = `2026-04-26T15:13:20.000000000Z ${pinoJson}\n`;
+        const hdr = Buffer.alloc(8);
+        hdr[0] = 1;
+        hdr.writeUInt32BE(line.length, 4);
+        (mockRes as unknown as PassThrough).write(Buffer.concat([hdr, Buffer.from(line)]));
+        (mockRes as unknown as PassThrough).end();
+        const mockReq = new PassThrough() as unknown as ClientRequest;
+        (mockReq as unknown as Record<string, unknown>).end = vi.fn();
+        return mockReq;
+      }) as typeof http.request
+    );
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/logs/admin?follow=false&tail=10',
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as Array<{ timestamp: string; level: string; message: string }>;
+    expect(body).toHaveLength(1);
+    expect(body[0].timestamp).toBe('2026-04-26T15:13:20.000000000Z');
+    // pino level=50 → ERROR
+    expect(body[0].level).toBe('ERROR');
+    expect(body[0].message).toBe('unhandled error');
+  });
+
   it('Docker timestamps=1 + Rust tracing ANSI 컬러 형식을 올바르게 파싱한다', async () => {
     // 재현: Docker API timestamps=1 옵션 활성화 시 실제 출력 형식
     // "2026-04-26T12:45:11.701717732Z [2m2026-04-26T12:45:11.701563Z[0m [33m WARN[0m [2mproxy[0m[2m:[0m 미등록 도메인"

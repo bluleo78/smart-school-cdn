@@ -82,6 +82,26 @@ function parseLine(raw: string, service: string): LogLine | null {
     };
   }
 
+  // pino JSON 형식 파싱 — Admin 서비스(Fastify/pino) 로그 처리
+  // Docker timestamps=1 형식: "<docker_ts> <pino_json>"
+  // pino 레벨 숫자 매핑: 10=TRACE, 20=DEBUG, 30=INFO, 40=WARN, 50=ERROR, 60=FATAL(→ERROR)
+  const pinoMatch = clean.match(/^(\d{4}-\d{2}-\d{2}T[\d:.Z]+)\s+(\{.+\})$/);
+  if (pinoMatch) {
+    try {
+      const pinoLog = JSON.parse(pinoMatch[2]) as { level?: unknown; msg?: unknown };
+      const n = typeof pinoLog.level === 'number' ? pinoLog.level : -1;
+      const pinoLevel: LogLine['level'] =
+        n >= 50 ? 'ERROR' :
+        n >= 40 ? 'WARN'  :
+        n >= 30 ? 'INFO'  :
+        n >= 20 ? 'DEBUG' : 'TRACE';
+      const msg = typeof pinoLog.msg === 'string' && pinoLog.msg.length > 0
+        ? pinoLog.msg
+        : clean;
+      return { timestamp: pinoMatch[1], level: pinoLevel, message: msg, service };
+    } catch { /* JSON 파싱 실패 시 fallback으로 진행 */ }
+  }
+
   // 기타 형식: level 추측, ANSI 제거된 텍스트 사용
   const level: LogLine['level'] =
     /error/i.test(clean) ? 'ERROR' :
