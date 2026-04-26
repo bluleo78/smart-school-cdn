@@ -439,6 +439,61 @@ test.describe('도메인 관리 — 검색 필터 URL 동기화 (#68)', () => {
 });
 
 /**
+ * 이슈 #70 회귀 방지 — 토글/퍼지 버튼 뮤테이션 진행 중 disabled 미처리
+ * toggleMutation 또는 purgeMutation이 isPending 상태일 때,
+ * 토글/퍼지 버튼이 disabled 처리되어 중복 클릭이 불가능해야 한다.
+ */
+test.describe('도메인 관리 — 토글/퍼지 중복 클릭 방지 (#70)', () => {
+  test('토글 API 요청 중에는 토글 버튼이 disabled 상태가 된다', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+    // 토글 API를 300ms 지연시켜 isPending 상태를 관찰한다
+    await mockApi(page, 'POST', '/domains/textbook.com/toggle', { host: 'textbook.com', origin: 'https://textbook.com', enabled: 0, description: '', created_at: 1700000000, updated_at: 1700000000 }, { delay: 300 });
+
+    await page.goto('/domains');
+    await expect(page.getByTestId('domains-table')).toBeVisible();
+
+    const toggleBtn = page.getByTestId('domain-toggle-textbook.com');
+
+    // 클릭 전: 버튼이 활성화되어 있어야 한다
+    await expect(toggleBtn).not.toBeDisabled();
+
+    // 토글 클릭 — 응답 대기 없이 즉시 disabled 상태 확인
+    await toggleBtn.click();
+
+    // 뮤테이션 진행 중: 버튼이 disabled 상태여야 한다 (#70 핵심)
+    await expect(toggleBtn).toBeDisabled();
+
+    // 응답 완료 후: 버튼이 다시 활성화되어야 한다
+    await expect(toggleBtn).not.toBeDisabled({ timeout: 2000 });
+  });
+
+  test('퍼지 API 요청 중에는 퍼지 버튼이 disabled 상태가 된다', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+    // 퍼지 API를 300ms 지연시켜 isPending 상태를 관찰한다
+    await mockApi(page, 'POST', '/domains/textbook.com/purge', null, { delay: 300 });
+
+    await page.goto('/domains');
+    await expect(page.getByTestId('domains-table')).toBeVisible();
+
+    const purgeBtn = page.getByTestId('domain-purge-textbook.com');
+
+    // 클릭 전: 버튼이 활성화되어 있어야 한다
+    await expect(purgeBtn).not.toBeDisabled();
+
+    // 퍼지 클릭 — 응답 대기 없이 즉시 disabled 상태 확인
+    await purgeBtn.click();
+
+    // 뮤테이션 진행 중: 버튼이 disabled 상태여야 한다 (#70 핵심)
+    await expect(purgeBtn).toBeDisabled();
+
+    // 응답 완료 후: 버튼이 다시 활성화되어야 한다
+    await expect(purgeBtn).not.toBeDisabled({ timeout: 2000 });
+  });
+});
+
+/**
  * 이슈 #29 — 포커스 복귀 및 포커스 트랩 회귀 테스트
  * Radix UI Dialog 교체 후 WCAG 2.4.3 준수 검증:
  * 1. 닫힘 후 트리거 버튼으로 포커스 복귀

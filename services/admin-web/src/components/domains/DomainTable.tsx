@@ -29,6 +29,10 @@ interface DomainTableProps {
    * 검색어가 있으면 "검색 결과 없음", 없으면 "도메인 미등록" CTA를 표시한다.
    */
   searchQuery?: string;
+  /** 토글 뮤테이션 진행 중 여부 — 중복 클릭 방지를 위해 버튼을 disabled 처리한다 */
+  isTogglePending?: boolean;
+  /** 퍼지 뮤테이션 진행 중 여부 — 중복 클릭 방지를 위해 버튼을 disabled 처리한다 */
+  isPurgePending?: boolean;
 }
 
 export function DomainTable({
@@ -41,6 +45,8 @@ export function DomainTable({
   onDelete,
   onAddDomain,
   searchQuery,
+  isTogglePending = false,
+  isPurgePending = false,
 }: DomainTableProps) {
   // 로딩 상태: 5행 스켈레톤
   if (isLoading) {
@@ -193,10 +199,11 @@ export function DomainTable({
               {/* 액션 버튼 */}
               <TableCell className="text-right">
                 <div className="flex items-center justify-end gap-1">
-                  {/* 캐시 퍼지 */}
+                  {/* 캐시 퍼지 — isPurgePending 중에는 disabled 처리하여 중복 클릭 방지 */}
                   <button
                     onClick={() => onPurge(domain.host)}
-                    className="rounded p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
+                    disabled={isPurgePending}
+                    className="rounded p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     title="캐시 퍼지"
                     data-testid={`domain-purge-${domain.host}`}
                     aria-label={`${domain.host} 캐시 퍼지`}
@@ -204,10 +211,11 @@ export function DomainTable({
                     <RefreshCw size={14} />
                   </button>
 
-                  {/* 활성/비활성 토글 */}
+                  {/* 활성/비활성 토글 — isTogglePending 중에는 disabled 처리하여 중복 클릭 방지 */}
                   <button
                     onClick={() => onToggle(domain.host)}
-                    className="rounded p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
+                    disabled={isTogglePending}
+                    className="rounded p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     title={isEnabled ? '비활성화' : '활성화'}
                     data-testid={`domain-toggle-${domain.host}`}
                     aria-label={`${domain.host} ${isEnabled ? '비활성화' : '활성화'}`}
