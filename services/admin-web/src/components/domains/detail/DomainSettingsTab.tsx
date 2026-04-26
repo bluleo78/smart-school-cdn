@@ -168,7 +168,7 @@ function TlsSection() {
       <CardContent>
         <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
           <TlsRow label="상태">
-            <span className="text-green-400">유효</span>
+            <span className="text-success">유효</span>
           </TlsRow>
           <TlsRow label="발급자">자동 발급</TlsRow>
           <TlsRow label="만료일">정보 없음</TlsRow>

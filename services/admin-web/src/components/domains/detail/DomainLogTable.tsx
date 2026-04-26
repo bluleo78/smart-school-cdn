@@ -20,13 +20,13 @@ interface Props {
 /** HTTP 상태 코드별 색상 클래스 반환 */
 function statusColor(code: number): string {
   if (code >= 500) return 'text-destructive';
-  if (code >= 400) return 'text-yellow-400';
-  return 'text-green-400';
+  if (code >= 400) return 'text-warning';
+  return 'text-success';
 }
 
 /** 캐시 상태별 색상 클래스 반환 */
 function cacheColor(status: 'HIT' | 'MISS'): string {
-  return status === 'HIT' ? 'text-green-400' : 'text-destructive';
+  return status === 'HIT' ? 'text-success' : 'text-destructive';
 }
 
 export function DomainLogTable({ host, period, range, refetchIntervalMs = false }: Props) {

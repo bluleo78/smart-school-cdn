@@ -119,7 +119,7 @@ export function DomainUrlOptimizationTable({ host, period = '24h' }: { host: str
                     <td className="py-2 pr-3">{formatBytes(it.total_out)}</td>
                     <td
                       className={`py-2 pr-3 ${
-                        it.savings_ratio > 0 ? 'text-green-500 font-semibold' : 'text-muted-foreground'
+                        it.savings_ratio > 0 ? 'text-success font-semibold' : 'text-muted-foreground'
                       }`}
                     >
                       {(it.savings_ratio * 100).toFixed(0)}%

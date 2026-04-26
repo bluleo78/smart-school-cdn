@@ -40,7 +40,7 @@ export function DomainInfoCards({ domain }: Props) {
   const tlsStatus = (() => {
     if (daysUntilExpiry === null) return { label: '미발급', ok: false, color: 'text-muted-foreground' };
     if (daysUntilExpiry <= 0) return { label: '만료됨', ok: false, color: 'text-destructive' };
-    if (daysUntilExpiry <= 30) return { label: `만료 ${daysUntilExpiry}일 전`, ok: true, color: 'text-yellow-400' };
+    if (daysUntilExpiry <= 30) return { label: `만료 ${daysUntilExpiry}일 전`, ok: true, color: 'text-warning' };
     return { label: '유효', ok: true, color: 'text-success' };
   })();
 

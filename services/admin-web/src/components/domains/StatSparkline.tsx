@@ -9,7 +9,7 @@ export function BarSparkline({ values }: { values: number[] }) {
       {values.map((v, i) => (
         <div
           key={i}
-          className="w-[5px] rounded-sm bg-indigo-500 opacity-70"
+          className="w-[5px] rounded-sm bg-primary opacity-70"
           style={{ height: `${Math.max(4, (v / max) * 36)}px` }}
         />
       ))}

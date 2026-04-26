@@ -133,7 +133,7 @@ function HitMissBarChart({
       {/* 범례 */}
       <div className="flex gap-3 text-xs">
         <span className="flex items-center gap-1">
-          <span className="inline-block w-2 h-2 rounded-sm bg-green-500" />
+          <span className="inline-block w-2 h-2 rounded-sm bg-success" />
           HIT
         </span>
         <span className="flex items-center gap-1">
@@ -163,7 +163,7 @@ function HitMissBarChart({
                 {/* MISS (위) */}
                 <div className="w-full bg-destructive/70" style={{ height: `${missPct}%` }} />
                 {/* HIT (아래) */}
-                <div className="w-full bg-green-500/70" style={{ height: `${hitPct}%` }} />
+                <div className="w-full bg-success/70" style={{ height: `${hitPct}%` }} />
               </div>
             </div>
           );
@@ -208,7 +208,7 @@ function BandwidthResponseChart({
       {/* 응답 시간 에어리어 */}
       <div>
         <p className="text-xs text-muted-foreground mb-1">응답 시간</p>
-        <MiniAreaChart values={responseTime} maxValue={maxRt} color="rgb(168 85 247)" formatValue={(v) => `${v}ms`} />
+        <MiniAreaChart values={responseTime} maxValue={maxRt} color="var(--color-primary)" formatValue={(v) => `${v}ms`} />
       </div>
 
       {/* X축 레이블 */}

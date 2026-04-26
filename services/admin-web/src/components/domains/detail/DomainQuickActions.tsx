@@ -73,7 +73,7 @@ function ProxyTestDialog({
               aria-pressed={protocol === p}
               className={`px-3 py-1 rounded text-xs border ${
                 protocol === p
-                  ? 'bg-indigo-600 border-indigo-600 text-white'
+                  ? 'bg-primary border-primary text-primary-foreground'
                   : 'border-border text-muted-foreground'
               }`}
             >
@@ -88,7 +88,7 @@ function ProxyTestDialog({
           value={path}
           onChange={(e) => setPath(e.target.value)}
           placeholder="/path/to/resource"
-          className="w-full rounded-md border border-border bg-muted/30 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-indigo-500"
+          className="w-full rounded-md border border-border bg-muted/30 px-3 py-2 text-sm font-mono focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           data-testid="proxy-test-path-input"
         />
 
