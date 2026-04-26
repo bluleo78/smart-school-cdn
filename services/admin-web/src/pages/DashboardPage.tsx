@@ -52,8 +52,8 @@ export function DashboardPage() {
         <BypassRateCard />
       </div>
 
-      {/* 2행: 스택 차트(2/3) + 디스크(1/3) */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-stretch">
+      {/* 2행: 스택 차트(2/3) + 디스크(1/3) — items-start로 각 셀이 자체 콘텐츠 높이만큼만 차지하도록 제한 */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
         <div className="lg:col-span-2 min-h-0">
           <CacheHitRateChart />
         </div>
