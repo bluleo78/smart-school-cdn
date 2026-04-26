@@ -12,6 +12,15 @@ import { Dialog, DialogContent, DialogTitle } from '../components/ui/dialog';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Badge } from '../components/ui/badge';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '../components/ui/table';
+import { Skeleton } from '../components/ui/skeleton';
 
 const createSchema = z.object({
   username: z.string().email('이메일 형식이 아닙니다'),
@@ -27,7 +36,8 @@ export function UsersPage() {
   const { state } = useAuth();
   const myId = state.status === 'authenticated' ? state.user.id : null;
 
-  const { data: users } = useQuery({ queryKey: ['users'], queryFn: listUsers });
+  // isLoading: 데이터 로딩 중 스켈레톤 표시, isError: API 실패 시 에러 메시지 표시
+  const { data: users, isLoading, isError } = useQuery({ queryKey: ['users'], queryFn: listUsers });
 
   const createMut = useMutation({
     mutationFn: (d: CreateFormData) => createUser(d.username, d.password),
@@ -63,49 +73,64 @@ export function UsersPage() {
 
   return (
     <div className="space-y-4">
+      {/* 페이지 헤더 — h2로 통일 (다른 페이지와 일관성), 설명 텍스트 추가 */}
       <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold">사용자 관리</h1>
+        <div>
+          <h2 className="text-2xl font-semibold tracking-tight">사용자 관리</h2>
+          <p className="text-sm text-muted-foreground mt-1">관리자 계정을 추가하거나 비밀번호를 재설정합니다.</p>
+        </div>
         <Button onClick={() => { createForm.reset(); setCreateOpen(true); }}>+ 사용자 추가</Button>
       </div>
 
-      <table className="w-full">
-        <thead>
-          <tr className="border-b text-left text-sm text-muted-foreground">
-            <th className="pb-2 font-medium">이메일</th>
-            <th className="pb-2 font-medium">생성일</th>
-            <th className="pb-2 font-medium">마지막 로그인</th>
-            <th className="pb-2 font-medium">상태</th>
-            <th className="pb-2 font-medium">액션</th>
-          </tr>
-        </thead>
-        <tbody>
-          {users?.map((u) => (
-            <tr key={u.id} className="border-b" data-testid={`user-row-${u.id}`}>
-              <td className="py-2">{u.username}</td>
-              <td className="py-2 text-sm text-muted-foreground">{new Date(u.created_at).toLocaleDateString()}</td>
-              <td className="py-2 text-sm text-muted-foreground">{u.last_login_at ? new Date(u.last_login_at).toLocaleString() : '—'}</td>
-              <td className="py-2">{u.disabled_at ? <Badge variant="outline">비활성</Badge> : <Badge variant="success">활성</Badge>}</td>
-              <td className="py-2 space-x-2">
-                <Button
-                  variant="outline"
-                  size="xs"
-                  onClick={() => { passwordForm.reset(); setPasswordTarget(u); }}
-                >
-                  비밀번호 재설정
-                </Button>
-                <Button
-                  variant="destructive"
-                  size="xs"
-                  disabled={u.id === myId || !!u.disabled_at}
-                  onClick={() => { if (confirm(`${u.username} 을 비활성화하시겠습니까?`)) disableMut.mutate(u.id); }}
-                >
-                  비활성화
-                </Button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      {/* 로딩 상태 — 스켈레톤으로 레이아웃 시프트 방지 */}
+      {isLoading && <Skeleton className="h-40 w-full" />}
+
+      {/* 에러 상태 — API 실패 시 빈 화면 대신 메시지 표시 */}
+      {isError && (
+        <p className="py-8 text-center text-sm text-muted-foreground">사용자 목록을 불러오지 못했습니다.</p>
+      )}
+
+      {/* 데이터 로드 완료 후 — shadcn Table 컴포넌트로 다른 페이지와 스타일 통일 */}
+      {!isLoading && !isError && (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>이메일</TableHead>
+              <TableHead>생성일</TableHead>
+              <TableHead>마지막 로그인</TableHead>
+              <TableHead>상태</TableHead>
+              <TableHead>액션</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {users?.map((u) => (
+              <TableRow key={u.id} data-testid={`user-row-${u.id}`}>
+                <TableCell>{u.username}</TableCell>
+                <TableCell className="text-muted-foreground">{new Date(u.created_at).toLocaleDateString()}</TableCell>
+                <TableCell className="text-muted-foreground">{u.last_login_at ? new Date(u.last_login_at).toLocaleString() : '—'}</TableCell>
+                <TableCell>{u.disabled_at ? <Badge variant="outline">비활성</Badge> : <Badge variant="success">활성</Badge>}</TableCell>
+                <TableCell className="space-x-2">
+                  <Button
+                    variant="outline"
+                    size="xs"
+                    onClick={() => { passwordForm.reset(); setPasswordTarget(u); }}
+                  >
+                    비밀번호 재설정
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="xs"
+                    disabled={u.id === myId || !!u.disabled_at}
+                    onClick={() => { if (confirm(`${u.username} 을 비활성화하시겠습니까?`)) disableMut.mutate(u.id); }}
+                  >
+                    비활성화
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
 
       {/* 사용자 추가 다이얼로그 */}
       <Dialog open={createOpen} onClose={() => setCreateOpen(false)}>
