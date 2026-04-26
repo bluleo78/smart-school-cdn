@@ -11,6 +11,15 @@ import { DnsPage } from './pages/DnsPage';
 import { SystemPage } from './pages/SystemPage';
 import { UsersPage } from './pages/UsersPage';
 
+/**
+ * E2E 테스트 전용 컴포넌트 — 렌더 시 즉시 예외를 throw한다.
+ * ErrorBoundary 동작 검증용으로만 사용하며, DEV 환경에서만 라우트가 활성화된다.
+ * null 반환 타입은 throw로 인해 실제로는 도달하지 않지만 TSX 타입 요건을 충족한다.
+ */
+function ThrowOnRender(): null {
+  throw new Error('E2E 테스트용 강제 렌더 오류');
+}
+
 /** 404 — 존재하지 않는 경로 접근 시 표시. 대시보드 복귀 CTA 포함. */
 function NotFoundPage() {
   return (
@@ -49,6 +58,10 @@ export function App() {
             <Route path="dns" element={<DnsPage />} />
             <Route path="users" element={<UsersPage />} />
             <Route path="system" element={<SystemPage />} />
+            {/* DEV 전용 라우트 — ErrorBoundary E2E 테스트에서 강제 렌더 오류를 발생시키는 용도 */}
+            {import.meta.env.DEV && (
+              <Route path="__e2e/throw" element={<ThrowOnRender />} />
+            )}
             <Route path="*" element={<NotFoundPage />} />
           </Route>
         </Route>
