@@ -34,9 +34,11 @@ export function TableRow({ className, ...props }: HTMLAttributes<HTMLTableRowEle
   );
 }
 
-export function TableHead({ className, ...props }: ThHTMLAttributes<HTMLTableCellElement>) {
+/** TableHead — th 요소에 scope="col" 기본값 설정 (스크린 리더가 열 헤더 인식) */
+export function TableHead({ className, scope = 'col', ...props }: ThHTMLAttributes<HTMLTableCellElement>) {
   return (
     <th
+      scope={scope}
       className={cn('h-10 px-4 text-left font-semibold align-middle', className)}
       {...props}
     />
