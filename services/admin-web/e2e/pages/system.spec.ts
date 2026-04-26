@@ -264,4 +264,36 @@ test.describe('LogViewer', () => {
 
     await expect(page.getByTestId('log-empty')).toBeVisible();
   });
+
+  test('로그 메시지에 ANSI escape code가 표시되지 않는다 — 회귀 방지 #18', async ({ page }) => {
+    // ESC 문자(0x1b)를 리터럴 대신 fromCharCode로 생성 — no-control-regex lint 규칙 준수
+    const ESC = String.fromCharCode(27);
+    // Rust 서비스 컬러 출력 형태의 ANSI code가 포함된 메시지를 SSE로 전달
+    await page.route('**/api/logs/**', async (route) => {
+      const body = `data: ${JSON.stringify({
+        timestamp: '2026-04-26T10:00:00.000Z',
+        level: 'WARN',
+        message: `${ESC}[2m2026-04-26T10:00:00Z${ESC}[0m ${ESC}[33m WARN${ESC}[0m ${ESC}[2mproxy::clients${ESC}[0m: admin snapshot 실패`,
+        service: 'proxy',
+      })}\n\n`;
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        headers: { 'Cache-Control': 'no-cache' },
+        body,
+      });
+    });
+    await page.goto('/system');
+
+    // 로그 줄이 렌더링될 때까지 대기
+    await page.waitForFunction(() =>
+      document.querySelector('[data-testid="log-scroll-area"]')?.textContent?.includes('admin snapshot 실패'),
+    );
+
+    // ANSI escape code(ESC[ 시퀀스)가 DOM 텍스트에 노출되지 않아야 한다
+    const scrollAreaText = await page.getByTestId('log-scroll-area').textContent();
+    const ansiPattern = new RegExp(`${ESC}\\[`);
+    expect(scrollAreaText).not.toMatch(ansiPattern);
+    expect(scrollAreaText).toContain('admin snapshot 실패');
+  });
 });

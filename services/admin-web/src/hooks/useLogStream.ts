@@ -1,6 +1,7 @@
 /// 실시간 로그 SSE 스트림 훅
 /// EventSource로 /api/logs/:service를 구독하고 링 버퍼로 최근 1000줄을 유지한다.
 import { useEffect, useCallback, useReducer } from 'react';
+import { stripAnsi } from '../lib/stripAnsi';
 
 /** 로그 한 줄의 데이터 구조 */
 export interface LogLine {
@@ -83,7 +84,9 @@ export function useLogStream(service: string, tail = 100) {
     es.onmessage = (event) => {
       try {
         const logLine: LogLine = JSON.parse(event.data as string);
-        dispatch({ type: 'APPEND', line: logLine });
+        // Rust 서비스 컬러 출력으로 인한 ANSI escape code 제거 — UI 판독성 확보
+        const cleanLine: LogLine = { ...logLine, message: stripAnsi(logLine.message) };
+        dispatch({ type: 'APPEND', line: cleanLine });
       } catch {
         // JSON 파싱 실패 — 무시
       }
