@@ -76,6 +76,27 @@ test.describe('도메인 관리 — 로딩 및 에러 상태', () => {
   });
 });
 
+test.describe('도메인 관리 — 요약 카드', () => {
+  test('오늘 대역폭 카드에 절감량 bytes 값이 표시된다 (#30 회귀 방지)', async ({ page }) => {
+    // 1.5 MB 절감 시나리오 — formatBytes 변환 후 숫자 표시 검증
+    await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
+    await mockApi(page, 'GET', '/proxy/requests', []);
+    await mockApi(page, 'GET', '/domains/summary', {
+      ...createDomainSummary(),
+      todayBandwidth: 1572864, // 1.5 MB
+    });
+    await mockApi(page, 'GET', '/domains', createDomains());
+
+    await page.goto('/domains');
+
+    const bandwidthCard = page.getByTestId('summary-card-bandwidth');
+    await expect(bandwidthCard).toBeVisible();
+    // 큰 폰트 숫자값이 카드 안에 표시되어야 한다
+    await expect(bandwidthCard.locator('p.text-3xl')).toBeVisible();
+    await expect(bandwidthCard.locator('p.text-3xl')).toHaveText('1.5 MB');
+  });
+});
+
 test.describe('도메인 관리 — 도메인 목록', () => {
   test('등록된 도메인이 테이블에 표시된다', async ({ page }) => {
     await setupBaseMocks(page);

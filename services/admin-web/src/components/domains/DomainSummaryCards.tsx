@@ -66,21 +66,17 @@ export function DomainSummaryCards() {
         </CardContent>
       </Card>
 
-      {/* 카드 4: 대역폭 — min-w-0/truncate로 텍스트가 스파크라인 영역과 충돌하지 않도록 보호 */}
+      {/* 카드 4: 대역폭 — whitespace-nowrap으로 포맷된 bytes 값이 줄바꿈 없이 표시되도록 */}
       <Card data-testid="summary-card-bandwidth">
         <CardHeader><CardTitle>오늘 대역폭</CardTitle></CardHeader>
         <CardContent>
-          <div className="flex items-end justify-between gap-2">
-            {/* flex-1 min-w-0: 남은 너비를 모두 사용하되 0까지 수축 허용 — 스파크라인이 shrink-0으로 자리 확보 */}
-            <div className="min-w-0 flex-1">
-              <p className="text-3xl font-bold truncate">{formatBytes(data?.todayBandwidth ?? 0)}</p>
-              {/* whitespace-nowrap: "절감량" 3글자가 세로로 분리되지 않도록 줄바꿈 방지 */}
-              <span className="text-xs text-muted-foreground whitespace-nowrap">절감량</span>
+          <div className="flex items-end justify-between">
+            {/* whitespace-nowrap: "0 B" / "1.2 MB" 등이 공백 기준으로 줄바꿈되지 않도록 */}
+            <div>
+              <p className="text-3xl font-bold whitespace-nowrap">{formatBytes(data?.todayBandwidth ?? 0)}</p>
+              <span className="text-xs text-muted-foreground">절감량</span>
             </div>
-            {/* shrink-0 래퍼: 스파크라인 너비를 고정하여 텍스트 영역이 잠식당하지 않게 함 */}
-            <div className="shrink-0">
-              <BarSparkline values={data?.hourlyBandwidth ?? Array(24).fill(0)} />
-            </div>
+            <BarSparkline values={data?.hourlyBandwidth ?? Array(24).fill(0)} />
           </div>
         </CardContent>
       </Card>
