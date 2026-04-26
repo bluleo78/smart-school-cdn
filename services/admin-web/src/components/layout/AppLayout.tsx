@@ -91,17 +91,24 @@ export function AppLayout() {
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* 헤더 — h-14 고정, sticky + backdrop-blur */}
         {state.status === 'authenticated' && (
-          <header className="h-14 px-4 md:px-6 flex items-center justify-between border-b border-border bg-background/80 backdrop-blur-sm sticky top-0 z-10">
-            <div className="flex items-center gap-2">
-              <button
-                aria-label="메뉴 열기"
-                className="lg:hidden p-2 -ml-2 rounded-md hover:bg-accent text-foreground"
-                onClick={() => setMobileOpen(true)}
-              >
-                <MenuIcon size={18} />
-              </button>
-            </div>
-            <div className="flex items-center gap-3" />
+          <header className="h-14 px-4 md:px-6 flex items-center gap-3 border-b border-border bg-background/80 backdrop-blur-sm sticky top-0 z-10">
+            {/* 모바일 햄버거 버튼 — 데스크탑에서 숨김 */}
+            <button
+              aria-label="메뉴 열기"
+              className="lg:hidden p-2 -ml-2 rounded-md hover:bg-accent text-foreground shrink-0"
+              onClick={() => setMobileOpen(true)}
+            >
+              <MenuIcon size={18} />
+            </button>
+            {/* 현재 페이지 제목 — navItems에서 pathname 매핑,
+                서브 라우트(예: /domains/123)는 상위 경로로 fallback */}
+            <span className="text-sm font-medium text-foreground truncate">
+              {navItems.find(({ to }) =>
+                to === '/'
+                  ? location.pathname === '/'
+                  : location.pathname.startsWith(to),
+              )?.label ?? ''}
+            </span>
           </header>
         )}
         <main className="flex-1 overflow-auto bg-gradient-main">

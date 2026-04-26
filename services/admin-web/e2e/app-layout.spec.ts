@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures/test';
+import { mockApi } from './fixtures/api-mock';
 
 test.describe('AppLayout', () => {
   test('사이드바와 대시보드 페이지가 렌더링된다', async ({ page }) => {
@@ -35,6 +36,27 @@ test.describe('AppLayout', () => {
     // 대시보드로 복귀
     await page.getByRole('link', { name: '대시보드' }).click();
     await expect(page.getByRole('heading', { name: '대시보드' })).toBeVisible();
+  });
+
+  test('헤더가 현재 라우트에 맞는 페이지 제목을 표시한다', async ({ page }) => {
+    // 각 라우트마다 헤더에 올바른 페이지 제목이 표시되는지 검증
+    // (빈 div placeholder 제거 → 실제 제목 노출 회귀 방지)
+    // /users 라우트는 사용자 목록 API 모킹 필요 — 없으면 로딩 후 빈 상태로 렌더링됨
+    await mockApi(page, 'GET', '/users', []);
+
+    const cases: { path: string; label: string }[] = [
+      { path: '/', label: '대시보드' },
+      { path: '/domains', label: '도메인 관리' },
+      { path: '/dns', label: 'DNS' },
+      { path: '/users', label: '사용자 관리' },
+      { path: '/system', label: '시스템' },
+    ];
+
+    for (const { path, label } of cases) {
+      await page.goto(path);
+      // banner role = <header> — 그 안에 페이지 제목 span이 포함돼야 함
+      await expect(page.getByRole('banner').getByText(label)).toBeVisible();
+    }
   });
 
   test('/cache 접근 시 /domains로 리다이렉트된다', async ({ page }) => {
