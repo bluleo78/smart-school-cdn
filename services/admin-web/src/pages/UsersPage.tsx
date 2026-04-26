@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogTitle } from '../components/ui/dialog';
 // 비활성화 확인 다이얼로그 — 네이티브 confirm() 대신 shadcn AlertDialog 사용 (디자인 시스템 일관성)
 import { AlertDialog, AlertDialogContent, AlertDialogTitle } from '../components/ui/alert-dialog';
 import { Input } from '../components/ui/input';
+import { PasswordInput } from '../components/ui/password-input';
 import { Label } from '../components/ui/label';
 import { Badge } from '../components/ui/badge';
 import {
@@ -173,8 +174,8 @@ export function UsersPage() {
             </div>
             <div>
               <Label>비밀번호</Label>
-              {/* 새 비밀번호 입력 — autocomplete="new-password"로 브라우저 자동완성 힌트 제공 */}
-              <Input type="password" autoComplete="new-password" {...createForm.register('password')} />
+              {/* PasswordInput — 표시/숨기기 토글 포함, autocomplete="new-password"로 자동완성 힌트 유지 (#76) */}
+              <PasswordInput autoComplete="new-password" {...createForm.register('password')} />
               {createForm.formState.errors.password && <p className="text-xs text-destructive">{createForm.formState.errors.password.message}</p>}
             </div>
             <div className="flex justify-end gap-2 pt-2">
@@ -207,8 +208,8 @@ export function UsersPage() {
             />
             <div>
               <Label>새 비밀번호</Label>
-              {/* 비밀번호 재설정 입력 — autocomplete="new-password"로 브라우저 자동완성 힌트 제공 */}
-              <Input type="password" autoComplete="new-password" {...passwordForm.register('password')} />
+              {/* PasswordInput — 표시/숨기기 토글 포함, autocomplete="new-password"로 자동완성 힌트 유지 (#76) */}
+              <PasswordInput autoComplete="new-password" {...passwordForm.register('password')} />
               {passwordForm.formState.errors.password && <p className="text-xs text-destructive">{passwordForm.formState.errors.password.message}</p>}
             </div>
             <div className="flex justify-end gap-2 pt-2">

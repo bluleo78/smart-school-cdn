@@ -7,6 +7,7 @@ import { useAuth } from '../components/auth/use-auth';
 import { usePageTitle } from '../hooks/usePageTitle';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Input } from '../components/ui/input';
+import { PasswordInput } from '../components/ui/password-input';
 import { Button } from '../components/ui/button';
 import { Label } from '../components/ui/label';
 
@@ -64,7 +65,8 @@ export function LoginPage() {
             </div>
             <div>
               <Label htmlFor="password">비밀번호</Label>
-              <Input id="password" type="password" autoComplete="current-password" {...register('password')} />
+              {/* PasswordInput — 표시/숨기기 토글 버튼 포함 (#76) */}
+              <PasswordInput id="password" autoComplete="current-password" {...register('password')} />
               {errors.password && <p className="text-xs text-destructive mt-1" role="alert">{errors.password.message}</p>}
             </div>
             {serverError && <p className="text-sm text-destructive" role="alert" data-testid="server-error">{serverError}</p>}

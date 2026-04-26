@@ -111,4 +111,22 @@ test.describe('인증', () => {
     // 내부 경로로 정상 이동해야 한다
     await expect(page).toHaveURL('http://localhost:4173/domains');
   });
+
+  // 이슈 #76 회귀 방지 — 로그인 페이지 비밀번호 표시/숨기기 토글 버튼 없음
+  test('로그인 비밀번호 필드 — 표시/숨기기 토글 동작', async ({ page }) => {
+    await mockUnauthenticated(page);
+    await page.goto('/login');
+
+    // 기본값: type=password (숨김 상태)
+    const passwordInput = page.locator('input[name=password]');
+    await expect(passwordInput).toHaveAttribute('type', 'password');
+
+    // 토글 버튼 클릭 → type=text (표시 상태)
+    await page.getByRole('button', { name: '비밀번호 표시' }).click();
+    await expect(passwordInput).toHaveAttribute('type', 'text');
+
+    // 다시 클릭 → type=password (숨김 상태로 복귀)
+    await page.getByRole('button', { name: '비밀번호 숨기기' }).click();
+    await expect(passwordInput).toHaveAttribute('type', 'password');
+  });
 });

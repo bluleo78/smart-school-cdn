@@ -317,6 +317,49 @@ test.describe('사용자 관리', () => {
     await expect(page.getByRole('table')).not.toBeVisible();
   });
 
+  // 이슈 #76 회귀 방지 — 사용자 추가 다이얼로그 비밀번호 필드 표시/숨기기 토글 없음
+  test('사용자 추가 다이얼로그 — 비밀번호 표시/숨기기 토글 동작', async ({ page }) => {
+    await mockApi(page, 'GET', '/users', baseUsers);
+
+    await page.goto('/users');
+    await page.getByRole('button', { name: '+ 사용자 추가' }).click();
+
+    // 기본값: type=password (숨김 상태)
+    const passwordInput = page.locator('input[name=password]');
+    await expect(passwordInput).toHaveAttribute('type', 'password');
+
+    // 토글 버튼 클릭 → type=text (표시 상태)
+    await page.getByRole('button', { name: '비밀번호 표시' }).click();
+    await expect(passwordInput).toHaveAttribute('type', 'text');
+
+    // 다시 클릭 → type=password (숨김 상태로 복귀)
+    await page.getByRole('button', { name: '비밀번호 숨기기' }).click();
+    await expect(passwordInput).toHaveAttribute('type', 'password');
+  });
+
+  // 이슈 #76 회귀 방지 — 비밀번호 재설정 다이얼로그 비밀번호 필드 표시/숨기기 토글 없음
+  test('비밀번호 재설정 다이얼로그 — 비밀번호 표시/숨기기 토글 동작', async ({ page }) => {
+    await mockApi(page, 'GET', '/users', baseUsers);
+
+    await page.goto('/users');
+
+    // other 사용자 행의 비밀번호 재설정 버튼 클릭
+    const otherRow = page.getByTestId('user-row-2');
+    await otherRow.getByRole('button', { name: '비밀번호 재설정' }).click();
+
+    // 기본값: type=password (숨김 상태)
+    const passwordInput = page.locator('input[name=password]');
+    await expect(passwordInput).toHaveAttribute('type', 'password');
+
+    // 토글 버튼 클릭 → type=text (표시 상태)
+    await page.getByRole('button', { name: '비밀번호 표시' }).click();
+    await expect(passwordInput).toHaveAttribute('type', 'text');
+
+    // 다시 클릭 → type=password (숨김 상태로 복귀)
+    await page.getByRole('button', { name: '비밀번호 숨기기' }).click();
+    await expect(passwordInput).toHaveAttribute('type', 'password');
+  });
+
   // 이슈 #63 회귀 방지 — 사용자 추가 뮤테이션 실패(409) 시 다이얼로그가 즉시 닫히는 낙관적 닫기 버그
   test('사용자 추가 409 오류 시 다이얼로그 유지 + 입력값 보존', async ({ page }) => {
     await page.route('**/api/users', async (route) => {
