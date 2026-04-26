@@ -111,7 +111,14 @@ await app.register(rateLimit, { global: false });
 app.addHook('preHandler', requireInternalToken);
 app.addHook('preHandler', requireAuth);
 
-await app.register(cors);
+// CORS 설정 — admin-server는 내부 전용이므로 허용 origin을 명시적으로 제한한다.
+// 와일드카드(`*`) + credentials 조합은 브라우저가 거부하고, 외부 origin이 쿠키 세션을
+// 탈취할 수 있으므로 허용 origin을 허용 목록으로 제한한다.
+// 운영 배포 시 ALLOWED_ORIGINS 환경변수로 admin-web 주소만 허용 (콤마 구분).
+await app.register(cors, {
+  origin: process.env.ALLOWED_ORIGINS?.split(',') ?? ['http://localhost:4173', 'http://localhost:7777'],
+  credentials: true,  // HttpOnly 쿠키 세션 사용 — credentials 허용 필수
+});
 
 // gRPC 클라이언트 생성 — 환경변수로 각 서비스 주소 주입 가능
 // @grpc/grpc-js는 'host:port' 형식 필요 — 'http://' 프리픽스 제거
