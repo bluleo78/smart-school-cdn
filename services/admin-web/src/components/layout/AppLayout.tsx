@@ -32,6 +32,18 @@ export function AppLayout() {
     setMobileOpen(false);
   }, [location.pathname]);
 
+  // 페이지 이동 시 document.title 업데이트 — WCAG 2.4.2 Page Titled 준수
+  // navItems에서 현재 pathname에 매핑되는 레이블을 찾아 "레이블 | Smart School CDN" 형태로 설정
+  const currentPageLabel =
+    navItems.find(({ to }) =>
+      to === '/' ? location.pathname === '/' : location.pathname.startsWith(to),
+    )?.label ?? '';
+  useEffect(() => {
+    document.title = currentPageLabel
+      ? `${currentPageLabel} | Smart School CDN`
+      : 'Smart School CDN';
+  }, [currentPageLabel]);
+
   return (
     <div className="flex h-screen bg-background text-foreground">
       {/* 모바일 백드롭 — 사이드바 열렸을 때만 */}
