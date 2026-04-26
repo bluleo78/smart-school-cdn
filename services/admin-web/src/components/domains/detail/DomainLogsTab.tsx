@@ -83,7 +83,8 @@ function DomainTrafficChartsSection({
         {isLoading || !data ? (
           <Skeleton className="h-64 w-full" />
         ) : (
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-1">
+          // 모바일(기본) 1열, 데스크톱(md 이상) 2열 — Tailwind mobile-first 순서 수정 (#85)
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2" data-testid="traffic-charts-grid">
             <Card>
               <CardHeader><CardTitle className="text-sm">요청 수 추이</CardTitle></CardHeader>
               <CardContent>

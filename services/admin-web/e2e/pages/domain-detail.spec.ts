@@ -1151,4 +1151,27 @@ test.describe('도메인 상세 — 탭 URL searchParam 동기화 (#61)', () => 
     // overview 탭 내용(origin)이 표시되어야 한다
     await expect(page.getByText('https://textbook.com')).toBeVisible();
   });
+
+  test('트래픽 차트 그리드가 모바일(380px)에서 1열, 데스크톱(1200px)에서 2열이다 (회귀: #85)', async ({ page }) => {
+    // 버그: grid-cols-2 md:grid-cols-1 — Tailwind mobile-first 순서 역전으로
+    //       모바일에서 2열, 데스크톱에서 1열로 표시되던 문제 수정 검증
+    await setupDetailMocks(page);
+    // stats 엔드포인트는 ?period=24h 쿼리 파라미터를 포함하므로 wildcard(**) suffix 사용
+    await page.route('**/api/domains/textbook.com/stats**', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(createDomainStats()) }),
+    );
+    await page.goto('/domains/textbook.com?tab=traffic');
+
+    // 데이터 로드 후 그리드가 표시될 때까지 대기 (스켈레톤 → 차트 전환)
+    const gridLocator = page.getByTestId('traffic-charts-grid');
+    await expect(gridLocator).toBeVisible();
+
+    const gridClass = await gridLocator.getAttribute('class');
+    // grid-cols-1이 기본(모바일) 클래스여야 한다 (모바일 1열)
+    expect(gridClass).toContain('grid-cols-1');
+    // md:grid-cols-2가 breakpoint 클래스여야 한다 (데스크톱 2열)
+    expect(gridClass).toContain('md:grid-cols-2');
+    // 역전된 클래스(원래 버그)가 없어야 한다
+    expect(gridClass).not.toContain('grid-cols-2 ');
+  });
 });
