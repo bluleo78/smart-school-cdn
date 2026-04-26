@@ -50,9 +50,12 @@ export function UsersPage() {
 
   const createMut = useMutation({
     mutationFn: (d: CreateFormData) => createUser(d.username, d.password),
+    // 성공 시에만 다이얼로그 닫기 + 폼 초기화 — 오류 시 입력값 보존을 위해 onSuccess로 이동
     onSuccess: () => {
       toast.success('사용자가 추가되었습니다');
       void qc.invalidateQueries({ queryKey: ['users'] });
+      setCreateOpen(false);
+      createForm.reset();
     },
     onError: (e) => {
       const status = (e as { response?: { status?: number } }).response?.status;
@@ -62,7 +65,11 @@ export function UsersPage() {
 
   const passwordMut = useMutation({
     mutationFn: ({ id, password }: { id: number; password: string }) => updatePassword(id, password),
-    onSuccess: () => toast.success('비밀번호가 재설정되었습니다'),
+    // 성공 시에만 다이얼로그 닫기 — 오류 시 입력값 보존을 위해 onSuccess로 이동
+    onSuccess: () => {
+      toast.success('비밀번호가 재설정되었습니다');
+      setPasswordTarget(null);
+    },
     onError: () => toast.error('비밀번호 재설정에 실패했습니다.'),
   });
 
@@ -157,7 +164,7 @@ export function UsersPage() {
       <Dialog open={createOpen} onClose={() => setCreateOpen(false)}>
         <DialogContent>
           <DialogTitle>사용자 추가</DialogTitle>
-          <form onSubmit={createForm.handleSubmit((d) => { createMut.mutate(d); setCreateOpen(false); })} className="space-y-3">
+          <form onSubmit={createForm.handleSubmit((d) => { createMut.mutate(d); })} className="space-y-3">
             <div>
               <Label>이메일</Label>
               {/* 이메일 입력 — autocomplete="username"으로 브라우저 자동완성·비밀번호 매니저 연동 지원 */}
@@ -172,7 +179,8 @@ export function UsersPage() {
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>취소</Button>
-              <Button type="submit">추가</Button>
+              {/* isPending 중 disabled + 로딩 텍스트 — 중복 제출 방지 */}
+              <Button type="submit" disabled={createMut.isPending}>{createMut.isPending ? '추가 중…' : '추가'}</Button>
             </div>
           </form>
         </DialogContent>
@@ -185,8 +193,8 @@ export function UsersPage() {
           <form
             onSubmit={passwordForm.handleSubmit((d) => {
               if (!passwordTarget) return;
+              // 다이얼로그 닫기는 onSuccess에서 처리 — 오류 시 입력값 보존
               passwordMut.mutate({ id: passwordTarget.id, password: d.password });
-              setPasswordTarget(null);
             })}
             className="space-y-3"
           >
@@ -205,7 +213,8 @@ export function UsersPage() {
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <Button type="button" variant="outline" onClick={() => setPasswordTarget(null)}>취소</Button>
-              <Button type="submit">재설정</Button>
+              {/* isPending 중 disabled + 로딩 텍스트 — 중복 제출 방지 */}
+              <Button type="submit" disabled={passwordMut.isPending}>{passwordMut.isPending ? '재설정 중…' : '재설정'}</Button>
             </div>
           </form>
         </DialogContent>

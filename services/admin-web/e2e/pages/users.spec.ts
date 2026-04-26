@@ -316,4 +316,136 @@ test.describe('사용자 관리', () => {
     // 테이블은 표시되지 않아야 함
     await expect(page.getByRole('table')).not.toBeVisible();
   });
+
+  // 이슈 #63 회귀 방지 — 사용자 추가 뮤테이션 실패(409) 시 다이얼로그가 즉시 닫히는 낙관적 닫기 버그
+  test('사용자 추가 409 오류 시 다이얼로그 유지 + 입력값 보존', async ({ page }) => {
+    await page.route('**/api/users', async (route) => {
+      if (route.request().method() === 'POST') {
+        // 409 충돌 응답 — 이미 존재하는 이메일 시나리오
+        await route.fulfill({
+          status: 409,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: 'already_exists' }),
+        });
+      } else {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(baseUsers),
+        });
+      }
+    });
+
+    await page.goto('/users');
+    await page.getByRole('button', { name: '+ 사용자 추가' }).click();
+
+    const testEmail = 'existing@example.com';
+    await page.fill('input[type=email]', testEmail);
+    await page.fill('input[type=password]', 'password1234');
+
+    await page.getByRole('button', { name: '추가', exact: true }).click();
+
+    // 오류 시 다이얼로그는 열린 상태를 유지해야 함 (낙관적 닫기 버그 재현 방지)
+    await expect(page.getByRole('dialog', { name: '사용자 추가' })).toBeVisible();
+
+    // 입력값이 보존되어야 함 — 사용자가 재입력할 필요 없음
+    await expect(page.locator('input[type=email]')).toHaveValue(testEmail);
+  });
+
+  // 이슈 #63 회귀 방지 — 추가 버튼이 제출 중 disabled 처리 안 되는 버그 (중복 제출 가능)
+  test('사용자 추가 — 제출 중 추가 버튼 disabled', async ({ page }) => {
+    let resolveRequest: (value: unknown) => void;
+    const requestPromise = new Promise((resolve) => { resolveRequest = resolve; });
+
+    await page.route('**/api/users', async (route) => {
+      if (route.request().method() === 'POST') {
+        // 요청을 의도적으로 보류해 isPending 상태를 유지
+        await requestPromise;
+        await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify(baseUsers[0]) });
+      } else {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(baseUsers) });
+      }
+    });
+
+    await page.goto('/users');
+    await page.getByRole('button', { name: '+ 사용자 추가' }).click();
+
+    await page.fill('input[type=email]', 'new@example.com');
+    await page.fill('input[type=password]', 'password1234');
+
+    await page.getByRole('button', { name: '추가', exact: true }).click();
+
+    // 제출 중 버튼이 disabled 상태여야 함 — 중복 제출 방지
+    await expect(page.getByRole('button', { name: '추가 중…' })).toBeDisabled();
+
+    // 요청 완료
+    resolveRequest!(null);
+  });
+
+  // 이슈 #63 회귀 방지 — 비밀번호 재설정 뮤테이션 실패 시 다이얼로그가 즉시 닫히는 낙관적 닫기 버그
+  test('비밀번호 재설정 오류 시 다이얼로그 유지 + 입력값 보존', async ({ page }) => {
+    await mockApi(page, 'GET', '/users', baseUsers);
+
+    // PUT /users/:id/password — 서버 오류 응답
+    await page.route('**/api/users/2/password', async (route) => {
+      if (route.request().method() === 'PUT') {
+        await route.fulfill({
+          status: 500,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: 'internal_error' }),
+        });
+      } else {
+        return route.fallback();
+      }
+    });
+
+    await page.goto('/users');
+
+    const otherRow = page.getByTestId('user-row-2');
+    await otherRow.getByRole('button', { name: '비밀번호 재설정' }).click();
+
+    const newPassword = 'newpassword1234';
+    await page.fill('input[type=password]', newPassword);
+
+    await page.getByRole('button', { name: '재설정', exact: true }).click();
+
+    // 오류 시 다이얼로그는 열린 상태를 유지해야 함
+    await expect(page.getByRole('dialog')).toBeVisible();
+
+    // 입력값이 보존되어야 함
+    await expect(page.locator('input[type=password]')).toHaveValue(newPassword);
+  });
+
+  // 이슈 #63 회귀 방지 — 비밀번호 재설정 버튼이 제출 중 disabled 처리 안 되는 버그
+  test('비밀번호 재설정 — 제출 중 재설정 버튼 disabled', async ({ page }) => {
+    await mockApi(page, 'GET', '/users', baseUsers);
+
+    let resolveRequest: (value: unknown) => void;
+    const requestPromise = new Promise((resolve) => { resolveRequest = resolve; });
+
+    await page.route('**/api/users/2/password', async (route) => {
+      if (route.request().method() === 'PUT') {
+        // 요청을 의도적으로 보류해 isPending 상태를 유지
+        await requestPromise;
+        await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+      } else {
+        return route.fallback();
+      }
+    });
+
+    await page.goto('/users');
+
+    const otherRow = page.getByTestId('user-row-2');
+    await otherRow.getByRole('button', { name: '비밀번호 재설정' }).click();
+
+    await page.fill('input[type=password]', 'newpassword1234');
+
+    await page.getByRole('button', { name: '재설정', exact: true }).click();
+
+    // 제출 중 버튼이 disabled 상태여야 함
+    await expect(page.getByRole('button', { name: '재설정 중…' })).toBeDisabled();
+
+    // 요청 완료
+    resolveRequest!(null);
+  });
 });
