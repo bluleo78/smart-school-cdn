@@ -93,23 +93,51 @@ function ProxyTestDialog({
           data-testid="proxy-test-path-input"
         />
 
-        {/* 결과 영역 */}
-        {result && (
-          <div
-            className={`rounded-md px-3 py-2 text-sm ${
-              result.success ? 'bg-success/10 text-success' : 'bg-destructive/10 text-destructive'
-            }`}
-            data-testid="proxy-test-result"
-          >
-            {result.success ? (
-              <>
-                ✓ {result.status_code} — {result.response_time_ms}ms
-              </>
-            ) : (
-              <>✗ {result.error || `HTTP ${result.status_code}`}</>
-            )}
-          </div>
-        )}
+        {/* 결과 영역 — HTTP 상태 코드 범위별로 색상·아이콘을 구분한다 */}
+        {result && (() => {
+          // 네트워크 오류(success=false): 프록시 서버 자체에 연결 불가
+          if (!result.success) {
+            return (
+              <div
+                className="rounded-md px-3 py-2 text-sm bg-destructive/10 text-destructive"
+                data-testid="proxy-test-result"
+              >
+                ✗ {result.error || `HTTP ${result.status_code}`}
+              </div>
+            );
+          }
+          // 4xx / 5xx — 오류 응답
+          if (result.status_code >= 400) {
+            return (
+              <div
+                className="rounded-md px-3 py-2 text-sm bg-destructive/10 text-destructive"
+                data-testid="proxy-test-result"
+              >
+                ✗ {result.status_code} — {result.response_time_ms}ms
+              </div>
+            );
+          }
+          // 3xx — 리다이렉트
+          if (result.status_code >= 300) {
+            return (
+              <div
+                className="rounded-md px-3 py-2 text-sm bg-warning/10 text-warning"
+                data-testid="proxy-test-result"
+              >
+                ↗ {result.status_code} — {result.response_time_ms}ms
+              </div>
+            );
+          }
+          // 2xx — 성공
+          return (
+            <div
+              className="rounded-md px-3 py-2 text-sm bg-success/10 text-success"
+              data-testid="proxy-test-result"
+            >
+              ✓ {result.status_code} — {result.response_time_ms}ms
+            </div>
+          );
+        })()}
 
         <div className="flex justify-end gap-2 pt-1">
           <Button variant="outline" onClick={handleClose}>
