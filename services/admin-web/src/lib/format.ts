@@ -23,7 +23,8 @@ export function formatDate(value: string | number): string {
   return new Date(value).toLocaleDateString('ko-KR');
 }
 
-/** 날짜 문자열·타임스탬프를 ko-KR 날짜+시간 포맷(YYYY. M. D. 오전/오후 HH:MM:SS)으로 변환한다 */
+/** 날짜 문자열·타임스탬프를 ko-KR 24시간제 날짜+시간 포맷(YYYY. M. D. HH:MM:SS)으로 변환한다 */
 export function formatDateTime(value: string | number): string {
-  return new Date(value).toLocaleString('ko-KR');
+  // hour12: false — 앱 전체 24시간제 표기 정책(로그 뷰어, 도메인 로그, 대시보드)과 통일
+  return new Date(value).toLocaleString('ko-KR', { hour12: false });
 }

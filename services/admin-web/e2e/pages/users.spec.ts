@@ -459,6 +459,26 @@ test.describe('사용자 관리', () => {
     await expect(page.locator('input[type=password]')).toHaveValue(newPassword);
   });
 
+  // 이슈 #77 회귀 방지 — formatDateTime 12시간제(오전/오후) 표기 버그
+  test('마지막 로그인 컬럼 — 24시간제 표기 (오전/오후 없음)', async ({ page }) => {
+    // TEST_USER.last_login_at = '2026-04-25T00:00:00.000Z' (한국 시간 09:00:00)
+    // 24시간제라면 "9시 00분 00초" 또는 "9:00:00" 형태여야 하고, "오전/오후" 문자열이 없어야 함
+    await mockApi(page, 'GET', '/users', baseUsers);
+
+    await page.goto('/users');
+
+    const myRow = page.getByTestId(`user-row-${TEST_USER.id}`);
+    await expect(myRow).toBeVisible();
+
+    // 마지막 로그인 셀 — 오전/오후 텍스트가 포함되어서는 안 됨 (24시간제 정책)
+    const lastLoginCell = myRow.locator('td').nth(2);
+    const cellText = await lastLoginCell.textContent();
+    expect(cellText).not.toContain('오전');
+    expect(cellText).not.toContain('오후');
+    expect(cellText).not.toContain('AM');
+    expect(cellText).not.toContain('PM');
+  });
+
   // 이슈 #63 회귀 방지 — 비밀번호 재설정 버튼이 제출 중 disabled 처리 안 되는 버그
   test('비밀번호 재설정 — 제출 중 재설정 버튼 disabled', async ({ page }) => {
     await mockApi(page, 'GET', '/users', baseUsers);
