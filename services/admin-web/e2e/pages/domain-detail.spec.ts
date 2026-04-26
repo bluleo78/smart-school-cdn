@@ -1,5 +1,5 @@
 /// 도메인 상세 페이지 E2E 테스트
-/// Overview(개요), Stats(통계), Logs(로그), Settings(설정) 4개 탭의 핵심 시나리오를 검증한다.
+/// Overview(개요), Optimizer(최적화), Traffic(트래픽), Settings(설정) 4개 탭의 핵심 시나리오를 검증한다.
 import type { Page } from '@playwright/test';
 import { test, expect } from '../fixtures/test';
 import { mockApi } from '../fixtures/api-mock';
@@ -859,20 +859,24 @@ test.describe('도메인 상세 — 탭 URL searchParam 동기화 (#61)', () => 
     await expect(page).toHaveURL(/tab=settings/);
   });
 
-  test('최적화 탭 클릭 시 ?tab=stats 가 URL에 추가된다', async ({ page }) => {
+  test('최적화 탭 클릭 시 ?tab=optimizer 가 URL에 추가된다 (회귀: #64)', async ({ page }) => {
+    // 수정 전: value="stats" → ?tab=stats (레이블 "최적화"와 불일치)
+    // 수정 후: value="optimizer" → ?tab=optimizer
     await setupDetailMocks(page);
     await page.goto('/domains/textbook.com');
 
     await page.getByRole('tab', { name: '최적화' }).click();
-    await expect(page).toHaveURL(/tab=stats/);
+    await expect(page).toHaveURL(/tab=optimizer/);
   });
 
-  test('트래픽 탭 클릭 시 ?tab=logs 가 URL에 추가된다', async ({ page }) => {
+  test('트래픽 탭 클릭 시 ?tab=traffic 이 URL에 추가된다 (회귀: #64)', async ({ page }) => {
+    // 수정 전: value="logs" → ?tab=logs (레이블 "트래픽"과 불일치)
+    // 수정 후: value="traffic" → ?tab=traffic
     await setupDetailMocks(page);
     await page.goto('/domains/textbook.com');
 
     await page.getByRole('tab', { name: '트래픽' }).click();
-    await expect(page).toHaveURL(/tab=logs/);
+    await expect(page).toHaveURL(/tab=traffic/);
   });
 
   test('?tab=settings 로 직접 접근하면 설정 탭이 활성화된다', async ({ page }) => {
@@ -883,16 +887,18 @@ test.describe('도메인 상세 — 탭 URL searchParam 동기화 (#61)', () => 
     await expect(page.getByTestId('domain-settings-tab')).toBeVisible();
   });
 
-  test('?tab=stats 로 직접 접근하면 최적화 탭이 활성화된다', async ({ page }) => {
+  test('?tab=optimizer 로 직접 접근하면 최적화 탭이 활성화된다 (회귀: #64)', async ({ page }) => {
+    // value 식별자 stats→optimizer 변경 후 북마크/공유 링크 직접 접근 검증
     await setupDetailMocks(page);
-    await page.goto('/domains/textbook.com?tab=stats');
+    await page.goto('/domains/textbook.com?tab=optimizer');
 
     await expect(page.getByTestId('domain-optimization-tab')).toBeVisible();
   });
 
-  test('?tab=logs 로 직접 접근하면 트래픽 탭이 활성화된다', async ({ page }) => {
+  test('?tab=traffic 으로 직접 접근하면 트래픽 탭이 활성화된다 (회귀: #64)', async ({ page }) => {
+    // value 식별자 logs→traffic 변경 후 북마크/공유 링크 직접 접근 검증
     await setupDetailMocks(page);
-    await page.goto('/domains/textbook.com?tab=logs');
+    await page.goto('/domains/textbook.com?tab=traffic');
 
     await expect(page.getByTestId('domain-traffic-tab')).toBeVisible();
   });

@@ -1,4 +1,4 @@
-/// 도메인 상세 탭 — Overview / Stats / Logs / Settings.
+/// 도메인 상세 탭 — Overview / Optimizer / Traffic / Settings.
 /// URL searchParam(?tab=...)과 탭 상태를 동기화하여 뒤로가기/북마크/공유 링크가 올바른 탭을 유지한다.
 import { useSearchParams } from 'react-router';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../ui/tabs';
@@ -8,8 +8,9 @@ import { DomainStatsTab } from './DomainStatsTab';
 import { DomainLogsTab } from './DomainLogsTab';
 import { DomainSettingsTab } from './DomainSettingsTab';
 
-/** 허용된 탭 값 목록 — 잘못된 파라미터가 들어올 경우 overview로 폴백한다 */
-const VALID_TABS = ['overview', 'stats', 'logs', 'settings'] as const;
+/** 허용된 탭 값 목록 — 잘못된 파라미터가 들어올 경우 overview로 폴백한다.
+ *  value 식별자가 UI 레이블과 일치하도록 stats→optimizer, logs→traffic 으로 변경 (#64) */
+const VALID_TABS = ['overview', 'optimizer', 'traffic', 'settings'] as const;
 type TabValue = (typeof VALID_TABS)[number];
 
 function isValidTab(value: string | null): value is TabValue {
@@ -36,17 +37,17 @@ export function DomainDetailTabs({ domain }: Props) {
     <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full" data-testid="domain-detail-tabs">
       <TabsList>
         <TabsTrigger value="overview">개요</TabsTrigger>
-        <TabsTrigger value="stats">최적화</TabsTrigger>
-        <TabsTrigger value="logs">트래픽</TabsTrigger>
+        <TabsTrigger value="optimizer">최적화</TabsTrigger>
+        <TabsTrigger value="traffic">트래픽</TabsTrigger>
         <TabsTrigger value="settings">설정</TabsTrigger>
       </TabsList>
       <TabsContent value="overview" className="mt-4">
         <DomainOverviewTab domain={domain} />
       </TabsContent>
-      <TabsContent value="stats" className="mt-4">
+      <TabsContent value="optimizer" className="mt-4">
         <DomainStatsTab host={domain.host} />
       </TabsContent>
-      <TabsContent value="logs" className="mt-4">
+      <TabsContent value="traffic" className="mt-4">
         <DomainLogsTab host={domain.host} />
       </TabsContent>
       <TabsContent value="settings" className="mt-4">
