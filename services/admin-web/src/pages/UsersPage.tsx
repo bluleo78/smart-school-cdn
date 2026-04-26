@@ -190,6 +190,13 @@ export function UsersPage() {
             })}
             className="space-y-3"
           >
+            {/* 비밀번호 매니저가 어떤 계정의 비밀번호인지 인식할 수 있도록 숨김 username 필드 제공 */}
+            <input
+              type="hidden"
+              name="username"
+              autoComplete="username"
+              value={passwordTarget?.username ?? ''}
+            />
             <div>
               <Label>새 비밀번호</Label>
               {/* 비밀번호 재설정 입력 — autocomplete="new-password"로 브라우저 자동완성 힌트 제공 */}

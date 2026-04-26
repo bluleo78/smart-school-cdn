@@ -282,6 +282,29 @@ test.describe('사용자 관리', () => {
     await expect(page.getByRole('table')).toBeVisible();
   });
 
+  // 이슈 #58 회귀 방지 — 비밀번호 재설정 폼에 username 숨김 필드 누락 (비밀번호 매니저 연동 불가)
+  test('비밀번호 재설정 다이얼로그 — username 숨김 필드 존재 및 값 일치', async ({ page }) => {
+    await mockApi(page, 'GET', '/users', baseUsers);
+
+    await page.goto('/users');
+
+    // other 사용자 행의 비밀번호 재설정 버튼 클릭
+    const otherRow = page.getByTestId('user-row-2');
+    await otherRow.getByRole('button', { name: '비밀번호 재설정' }).click();
+
+    // 숨김 username 필드가 폼 내에 존재해야 함 — 비밀번호 매니저 연동을 위한 필수 필드
+    const hiddenUsername = page.locator('input[type=hidden][name=username]');
+    await expect(hiddenUsername).toHaveCount(1);
+
+    // 값이 해당 사용자의 username과 일치해야 함
+    const usernameValue = await hiddenUsername.inputValue();
+    expect(usernameValue).toBe('other@example.com');
+
+    // autocomplete="username" 속성이 있어야 함
+    const autocomplete = await hiddenUsername.getAttribute('autocomplete');
+    expect(autocomplete).toBe('username');
+  });
+
   test('API 에러 시 에러 메시지 표시', async ({ page }) => {
     // API 실패 응답 모킹 — 빈 화면 대신 에러 메시지가 표시되어야 함
     await mockApi(page, 'GET', '/users', { error: 'Internal Server Error' }, { status: 500 });
