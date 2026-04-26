@@ -11,7 +11,7 @@ import { ServiceStatusCard } from '../components/system/ServiceStatusCard';
 import { useCacheStats } from '../hooks/useCacheStats';
 import { Link } from 'react-router';
 import { Button } from '../components/ui/button';
-import { Badge } from '../components/ui/badge';
+import { TlsStatusBadge } from '../components/TlsStatusBadge';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Skeleton } from '../components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
@@ -30,23 +30,6 @@ const SERVICE_LABELS: Record<keyof SystemStatus, string> = {
   optimizer: 'Optimizer',
 };
 
-/** 인증서 만료일 기준 상태 배지 */
-function certStatusBadge(expiresAt: string) {
-  const diff = new Date(expiresAt).getTime() - Date.now();
-  const days = diff / (1000 * 60 * 60 * 24);
-  if (days < 0) return <Badge variant="destructive">만료</Badge>;
-  if (days < 7)
-    return (
-      <Badge variant="warning">
-        경고
-      </Badge>
-    );
-  return (
-    <Badge variant="success">
-      활성
-    </Badge>
-  );
-}
 
 export function SystemPage() {
   const [currentTheme, setCurrentTheme] = useState<Theme>(getTheme);
@@ -259,7 +242,7 @@ export function SystemPage() {
                     <TableCell className="text-muted-foreground">
                       {new Date(cert.expires_at).toLocaleDateString('ko-KR')}
                     </TableCell>
-                    <TableCell>{certStatusBadge(cert.expires_at)}</TableCell>
+                    <TableCell><TlsStatusBadge expiresAt={cert.expires_at} /></TableCell>
                   </TableRow>
                 ))}
               </TableBody>

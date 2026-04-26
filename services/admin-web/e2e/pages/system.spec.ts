@@ -66,31 +66,31 @@ test.describe('발급된 인증서 목록', () => {
     await expect(page.getByTestId('certificates-empty')).toBeVisible({ timeout: 10000 });
   });
 
-  test('활성 인증서에 활성 배지가 표시된다', async ({ page }) => {
-    // textbook.co.kr 행은 30일 후 만료 → 활성 배지
+  test('유효 인증서에 유효 배지가 표시된다', async ({ page }) => {
+    // textbook.co.kr 행은 60일 후 만료 → 유효 배지 (TlsStatusBadge: >30일)
     await mockApi(page, 'GET', '/tls/certificates', createCertList());
     await page.goto('/system');
 
     const row = page.locator('tr', { hasText: 'textbook.co.kr' });
-    await expect(row.getByText('활성')).toBeVisible({ timeout: 10000 });
+    await expect(row.getByText('유효')).toBeVisible({ timeout: 10000 });
   });
 
-  test('경고 인증서에 경고 배지가 표시된다', async ({ page }) => {
-    // cdn.edunet.net 행은 3일 후 만료 → 경고 배지
+  test('만료 임박 인증서에 만료 N일 전 배지가 표시된다', async ({ page }) => {
+    // cdn.edunet.net 행은 3일 후 만료 → 만료 3일 전 배지 (TlsStatusBadge: 1~30일)
     await mockApi(page, 'GET', '/tls/certificates', createCertList());
     await page.goto('/system');
 
     const row = page.locator('tr', { hasText: 'cdn.edunet.net' });
-    await expect(row.getByText('경고')).toBeVisible({ timeout: 10000 });
+    await expect(row.getByText(/만료 \d+일 전/)).toBeVisible({ timeout: 10000 });
   });
 
-  test('만료 인증서에 만료 배지가 표시된다', async ({ page }) => {
-    // expired.test 행은 이미 만료 → 만료 배지
+  test('만료 인증서에 만료됨 배지가 표시된다', async ({ page }) => {
+    // expired.test 행은 이미 만료 → 만료됨 배지 (TlsStatusBadge: ≤0일)
     await mockApi(page, 'GET', '/tls/certificates', createCertList());
     await page.goto('/system');
 
     const row = page.locator('tr', { hasText: 'expired.test' });
-    await expect(row.getByText('만료')).toBeVisible({ timeout: 10000 });
+    await expect(row.getByText('만료됨')).toBeVisible({ timeout: 10000 });
   });
 
   // 30초마다 자동 갱신: useTls 훅의 refetchInterval: 30_000 옵션으로 구현됨.
@@ -165,9 +165,11 @@ test.describe('서비스 상태 그리드', () => {
     await mockApi(page, 'GET', '/system/status', partialOffline);
     await page.goto('/system');
 
+    // 오프라인 서비스 카드가 렌더링될 때까지 대기한 뒤 텍스트 수집
     const latencies = page.getByTestId('service-status-latency');
+    await expect(latencies).toHaveCount(5, { timeout: 10000 });
     const texts = await latencies.allTextContents();
-    // 최소 1개는 대시
+    // 최소 1개는 대시 (dns: online=false → —)
     expect(texts.some(t => t === '—')).toBe(true);
   });
 

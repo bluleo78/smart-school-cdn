@@ -1,5 +1,5 @@
 /// 도메인 설정 탭 — Origin 편집, 캐시 퍼지, 최적화 프로파일, TLS 정보, 위험 영역(삭제)
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import type { Domain } from '../../../api/domain-types';
 import { useUpdateDomain } from '../../../hooks/useUpdateDomain';
@@ -12,6 +12,7 @@ import { Label } from '../../ui/label';
 import { Dialog, DialogContent, DialogTitle } from '../../ui/dialog';
 import { DomainCacheSection } from './DomainCacheSection';
 import { DomainOptimizerSection } from './DomainOptimizerSection';
+import { TlsStatusBadge } from '../../TlsStatusBadge';
 import { toast } from 'sonner';
 
 interface Props {
@@ -161,25 +162,11 @@ function OriginSection({ domain }: { domain: Domain }) {
   );
 }
 
-/** TLS / 인증서 카드 — useDomainTls hook으로 실제 인증서 데이터 표시 */
+/** TLS / 인증서 카드 — useDomainTls hook으로 실제 인증서 데이터 표시
+ * 상태 표시는 TlsStatusBadge로 통일 (#73)
+ */
 function TlsSection({ host }: { host: string }) {
   const { data: cert } = useDomainTls(host);
-
-  /** TLS 만료까지 남은 일수 — cert가 바뀔 때만 재계산 */
-  const daysUntilExpiry = useMemo(() => {
-    if (!cert) return null;
-    const expires = new Date(cert.expires_at).getTime();
-    // eslint-disable-next-line react-hooks/purity -- 만료일 계산에 현재 시간 필요
-    return Math.floor((expires - Date.now()) / 86_400_000);
-  }, [cert]);
-
-  /** TLS 상태 판별 — 만료/임박/유효/미발급 */
-  const tlsStatus = (() => {
-    if (daysUntilExpiry === null) return { label: '미발급', color: 'text-muted-foreground' };
-    if (daysUntilExpiry <= 0) return { label: '만료됨', color: 'text-destructive' };
-    if (daysUntilExpiry <= 30) return { label: `만료 ${daysUntilExpiry}일 전`, color: 'text-warning' };
-    return { label: '유효', color: 'text-success' };
-  })();
 
   /** ISO 8601 문자열 → 한국어 날짜 문자열 (없으면 '—') */
   const toKoDate = (iso: string | undefined) =>
@@ -197,7 +184,7 @@ function TlsSection({ host }: { host: string }) {
       <CardContent>
         <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
           <TlsRow label="상태">
-            <span className={tlsStatus.color}>{tlsStatus.label}</span>
+            <TlsStatusBadge expiresAt={cert?.expires_at} />
           </TlsRow>
           <TlsRow label="발급자">자동 발급</TlsRow>
           <TlsRow label="만료일">{toKoDate(cert?.expires_at)}</TlsRow>

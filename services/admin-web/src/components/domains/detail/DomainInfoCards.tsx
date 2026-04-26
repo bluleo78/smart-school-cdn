@@ -1,8 +1,8 @@
 /// 도메인 기본 정보 + TLS 상태 카드 — 2컬럼 레이아웃
-import { useMemo } from 'react';
 import type { Domain } from '../../../api/domain-types';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { useDomainTls } from '../../../hooks/useDomainTls';
+import { TlsStatusBadge } from '../../TlsStatusBadge';
 
 interface Props {
   domain: Domain;
@@ -20,22 +20,6 @@ function InfoRow({ label, children }: { label: string; children: React.ReactNode
 
 export function DomainInfoCards({ domain }: Props) {
   const { data: cert } = useDomainTls(domain.host);
-
-  /** TLS 만료까지 남은 일수 계산 — cert가 갱신될 때만 재계산 */
-  const daysUntilExpiry = useMemo(() => {
-    if (!cert) return null;
-    const expires = new Date(cert.expires_at).getTime();
-    // eslint-disable-next-line react-hooks/purity -- 만료일 계산에 현재 시간 필요
-    return Math.floor((expires - Date.now()) / 86_400_000);
-  }, [cert]);
-
-  /** TLS 상태 판별 — 만료/임박/유효/미발급 */
-  const tlsStatus = (() => {
-    if (daysUntilExpiry === null) return { label: '미발급', ok: false, color: 'text-muted-foreground' };
-    if (daysUntilExpiry <= 0) return { label: '만료됨', ok: false, color: 'text-destructive' };
-    if (daysUntilExpiry <= 30) return { label: `만료 ${daysUntilExpiry}일 전`, ok: true, color: 'text-warning' };
-    return { label: '유효', ok: true, color: 'text-success' };
-  })();
 
   /** 타임스탬프(초) → 한국어 날짜 문자열 */
   const toKoDate = (ts: number) =>
@@ -63,9 +47,9 @@ export function DomainInfoCards({ domain }: Props) {
           <CardTitle>TLS 상태</CardTitle>
         </CardHeader>
         <CardContent>
+          {/* TlsStatusBadge로 통일 — raw ● + text-* span 제거 (#73) */}
           <InfoRow label="TLS 상태">
-            <span className={tlsStatus.color}>● </span>
-            {tlsStatus.label}
+            <TlsStatusBadge expiresAt={cert?.expires_at} />
           </InfoRow>
           <InfoRow label="TLS 만료일">
             {cert ? new Date(cert.expires_at).toLocaleDateString('ko-KR') : '—'}
