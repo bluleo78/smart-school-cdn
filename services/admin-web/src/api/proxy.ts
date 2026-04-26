@@ -36,6 +36,8 @@ export interface ProxyTestResult {
   success: boolean;
   status_code: number;
   response_time_ms: number;
+  /** CDN 관련 주요 응답 헤더 (X-Cache, Content-Type 등) — 서버가 없거나 오류 시 undefined */
+  response_headers?: Record<string, string>;
   error?: string;
 }
 

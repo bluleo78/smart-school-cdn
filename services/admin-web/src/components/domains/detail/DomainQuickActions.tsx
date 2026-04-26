@@ -34,6 +34,8 @@ function ProxyTestDialog({
     success: boolean;
     status_code: number;
     response_time_ms: number;
+    /** CDN 관련 주요 응답 헤더 — 서버가 반환한 경우에만 존재 */
+    response_headers?: Record<string, string>;
     error?: string;
   } | null>(null);
 
@@ -135,6 +137,20 @@ function ProxyTestDialog({
               data-testid="proxy-test-result"
             >
               ✓ {result.status_code} — {result.response_time_ms}ms
+              {/* 응답 헤더가 있으면 CDN 캐시 상태 확인용으로 목록 표시 */}
+              {result.response_headers && Object.keys(result.response_headers).length > 0 && (
+                <dl
+                  className="mt-2 space-y-0.5 font-mono text-xs"
+                  data-testid="proxy-test-headers"
+                >
+                  {Object.entries(result.response_headers).map(([k, v]) => (
+                    <div key={k} className="flex gap-1">
+                      <dt className="shrink-0 font-medium">{k}:</dt>
+                      <dd className="truncate">{v}</dd>
+                    </div>
+                  ))}
+                </dl>
+              )}
             </div>
           );
         })()}

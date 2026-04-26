@@ -125,7 +125,7 @@ describe('프록시 라우트', () => {
 
   it('프록시 테스트 성공 시 status_code와 response_time_ms를 반환한다', async () => {
     // 프록시 서버가 200 응답을 돌려주는 상황
-    mockAxiosGet.mockResolvedValueOnce({ status: 200 });
+    mockAxiosGet.mockResolvedValueOnce({ status: 200, headers: {} });
 
     const app = await createApp({ domainRepo: makeMockDomainRepo() });
     const res = await app.inject({
@@ -140,9 +140,50 @@ describe('프록시 라우트', () => {
     expect(body.success).toBe(true);
     expect(body.status_code).toBe(200);
     expect(typeof body.response_time_ms).toBe('number');
+    // 헤더가 없는 경우 빈 객체를 반환해야 한다
+    expect(body.response_headers).toEqual({});
   });
 
-  it('프록시 서버 연결 실패 시 success: false와 error를 반환한다', async () => {
+  it('프록시 테스트 성공 시 CDN 관련 헤더를 response_headers로 반환한다', async () => {
+    // 프록시가 X-Cache, Content-Type 등 CDN 관련 헤더를 포함하여 응답하는 상황
+    mockAxiosGet.mockResolvedValueOnce({
+      status: 200,
+      headers: {
+        'x-cache': 'HIT',
+        'x-cache-status': 'HIT',
+        'content-type': 'text/html; charset=utf-8',
+        'cache-control': 'max-age=3600',
+        'etag': '"abc123"',
+        'server': 'nginx',       // RELEVANT_HEADERS에 없으므로 제외되어야 한다
+        'x-custom': 'ignored',   // RELEVANT_HEADERS에 없으므로 제외되어야 한다
+      },
+    });
+
+    const app = await createApp({ domainRepo: makeMockDomainRepo() });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/proxy/test',
+      headers: { 'content-type': 'application/json' },
+      payload: { domain: 'httpbin.org', path: '/get' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.success).toBe(true);
+    // CDN 관련 주요 5개 헤더가 모두 반환되어야 한다
+    expect(body.response_headers).toEqual({
+      'x-cache': 'HIT',
+      'x-cache-status': 'HIT',
+      'content-type': 'text/html; charset=utf-8',
+      'cache-control': 'max-age=3600',
+      'etag': '"abc123"',
+    });
+    // 관련 없는 헤더(server, x-custom)는 제외되어야 한다
+    expect(body.response_headers).not.toHaveProperty('server');
+    expect(body.response_headers).not.toHaveProperty('x-custom');
+  });
+
+  it('프록시 서버 연결 실패 시 success: false와 error를 반환한다 (response_headers 없음)', async () => {
     // 프록시 서버 자체에 연결할 수 없는 상황
     mockAxiosGet.mockRejectedValueOnce(new Error('connect ECONNREFUSED 127.0.0.1:8080'));
 

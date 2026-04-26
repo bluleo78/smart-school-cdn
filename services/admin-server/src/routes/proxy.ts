@@ -9,6 +9,12 @@ import type { DomainRepository } from '../db/domain-repo.js';
 /** Proxy 관리 API 기본 URL */
 const PROXY_ADMIN_URL = process.env.PROXY_ADMIN_URL || 'http://localhost:8081';
 
+/**
+ * 프록시 테스트 응답에서 수집할 헤더 목록
+ * CDN 동작 확인(캐시 히트/미스, 콘텐츠 타입, ETag)에 직접 필요한 헤더만 선택
+ */
+const RELEVANT_HEADERS = ['x-cache', 'x-cache-status', 'content-type', 'cache-control', 'etag'] as const;
+
 /** 프록시 서버 URL — HTTP 테스트 요청 대상 */
 const PROXY_URL = process.env.PROXY_HTTP_URL || 'http://localhost:8080';
 /** 프록시 HTTPS URL — HTTPS 테스트 요청 대상 */
@@ -89,10 +95,19 @@ export async function proxyRoutes(app: FastifyInstance, opts: ProxyRouteOptions 
         // HTTPS 테스트: 자체 CA이므로 인증서 검증 생략
         ...(protocol === 'https' ? { httpsAgent } : {}),
       });
+
+      // CDN 관련 주요 헤더만 선택적으로 수집한다 — 전체 헤더 노출 방지 + 클라이언트 표시 최적화
+      const response_headers: Record<string, string> = {};
+      for (const k of RELEVANT_HEADERS) {
+        const v = res.headers[k];
+        if (v !== undefined && v !== null) response_headers[k] = String(v);
+      }
+
       return {
         success: true,
         status_code: res.status,
         response_time_ms: Date.now() - startMs,
+        response_headers,
       };
     } catch (err) {
       // 프록시 서버 자체에 연결할 수 없는 경우

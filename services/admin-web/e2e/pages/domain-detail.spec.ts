@@ -324,6 +324,64 @@ test.describe('도메인 상세 — Overview 탭', () => {
     await expect(page.getByTestId('proxy-test-result')).toContainText('200');
   });
 
+  test('프록시 테스트 다이얼로그 — 2xx 응답 시 response_headers가 헤더 목록으로 표시된다 (회귀: #69)', async ({ page }) => {
+    // 서버가 CDN 관련 헤더를 포함한 응답을 반환하는 시나리오 모킹
+    await setupDetailMocks(page);
+    await mockApi(page, 'POST', '/proxy/test', {
+      success: true,
+      status_code: 200,
+      response_time_ms: 32,
+      response_headers: {
+        'x-cache': 'HIT',
+        'content-type': 'text/html; charset=utf-8',
+        'cache-control': 'max-age=3600',
+      },
+    });
+    await page.goto('/domains/textbook.com');
+
+    // 프록시 테스트 다이얼로그 열기 → 경로 입력 → 테스트 실행
+    await page.getByTestId('proxy-test-open').click();
+    await expect(page.getByTestId('proxy-test-dialog')).toBeVisible();
+    await page.getByTestId('proxy-test-path-input').fill('/');
+    await page.getByTestId('proxy-test-submit').click();
+
+    // 결과가 2xx 성공 스타일로 표시되어야 한다
+    const result = page.getByTestId('proxy-test-result');
+    await expect(result).toBeVisible();
+    const className = await result.getAttribute('class');
+    expect(className).toContain('bg-success');
+
+    // 응답 헤더 목록이 렌더링되어야 한다 (input → process → output 파이프라인 검증)
+    const headers = page.getByTestId('proxy-test-headers');
+    await expect(headers).toBeVisible();
+    await expect(headers).toContainText('x-cache:');
+    await expect(headers).toContainText('HIT');
+    await expect(headers).toContainText('content-type:');
+    await expect(headers).toContainText('text/html; charset=utf-8');
+    await expect(headers).toContainText('cache-control:');
+    await expect(headers).toContainText('max-age=3600');
+  });
+
+  test('프록시 테스트 다이얼로그 — response_headers가 없는 경우 헤더 목록이 표시되지 않는다', async ({ page }) => {
+    // 레거시 서버 응답 또는 헤더 없는 케이스 — 헤더 섹션이 렌더링되지 않아야 한다
+    await setupDetailMocks(page);
+    await mockApi(page, 'POST', '/proxy/test', {
+      success: true,
+      status_code: 200,
+      response_time_ms: 20,
+      // response_headers 필드 없음 — 구버전 서버 호환성
+    });
+    await page.goto('/domains/textbook.com');
+
+    await page.getByTestId('proxy-test-open').click();
+    await expect(page.getByTestId('proxy-test-dialog')).toBeVisible();
+    await page.getByTestId('proxy-test-submit').click();
+
+    await expect(page.getByTestId('proxy-test-result')).toBeVisible();
+    // 헤더 목록 섹션이 렌더링되지 않아야 한다
+    await expect(page.getByTestId('proxy-test-headers')).not.toBeVisible();
+  });
+
   test('Overview — Quick Actions 4개 버튼이 동일 y 오프셋에 정렬된다', async ({ page }) => {
     await setupDetailMocks(page);
     await page.goto('/domains/textbook.com');
