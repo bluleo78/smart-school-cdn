@@ -17,3 +17,13 @@ export function formatUptime(seconds: number): string {
   parts.push(`${minutes}분`);
   return parts.join(' ');
 }
+
+/** 날짜 문자열·타임스탬프를 ko-KR 날짜 포맷(YYYY. M. D.)으로 변환한다 */
+export function formatDate(value: string | number): string {
+  return new Date(value).toLocaleDateString('ko-KR');
+}
+
+/** 날짜 문자열·타임스탬프를 ko-KR 날짜+시간 포맷(YYYY. M. D. 오전/오후 HH:MM:SS)으로 변환한다 */
+export function formatDateTime(value: string | number): string {
+  return new Date(value).toLocaleString('ko-KR');
+}

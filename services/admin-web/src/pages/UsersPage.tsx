@@ -6,6 +6,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { listUsers, createUser, updatePassword, disableUser, type UserItem } from '../api/users';
+import { formatDate, formatDateTime } from '../lib/format';
 import { useAuth } from '../components/auth/use-auth';
 import { Button } from '../components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '../components/ui/dialog';
@@ -111,8 +112,9 @@ export function UsersPage() {
               // hover:bg-muted/50 — 클릭 가능한 행임을 시각적으로 전달 (ByDomainTable 패턴과 일관성)
               <TableRow key={u.id} className="hover:bg-muted/50 transition-colors" data-testid={`user-row-${u.id}`}>
                 <TableCell>{u.username}</TableCell>
-                <TableCell className="text-muted-foreground">{new Date(u.created_at).toLocaleDateString()}</TableCell>
-                <TableCell className="text-muted-foreground">{u.last_login_at ? new Date(u.last_login_at).toLocaleString() : '—'}</TableCell>
+                {/* formatDate/formatDateTime — ko-KR 로케일 명시, 앱 전역 포맷 통일 */}
+                <TableCell className="text-muted-foreground">{formatDate(u.created_at)}</TableCell>
+                <TableCell className="text-muted-foreground">{u.last_login_at ? formatDateTime(u.last_login_at) : '—'}</TableCell>
                 <TableCell>{u.disabled_at ? <Badge variant="outline">비활성</Badge> : <Badge variant="success">활성</Badge>}</TableCell>
                 <TableCell className="space-x-2">
                   <Button
