@@ -28,28 +28,44 @@ import { DomainBulkDeleteDialog } from '../components/domains/DomainBulkDeleteDi
 function AddDomainDialog({ onClose }: { onClose: () => void }) {
   const [host, setHost] = useState('');
   const [origin, setOrigin] = useState('');
-  const [error, setError] = useState<string | null>(null);
+  // 필드별 개별 에러 상태 — 각 입력 필드 바로 아래에 인라인으로 표시하기 위해 분리
+  const [hostError, setHostError] = useState<string | null>(null);
+  const [originError, setOriginError] = useState<string | null>(null);
+  // 서버 오류 등 전역 에러(어느 필드에 귀속시키기 어려운 경우)
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const addDomain = useAddDomain();
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
+    // 제출 시 기존 에러 초기화
+    setHostError(null);
+    setOriginError(null);
+    setSubmitError(null);
+
     const h = host.trim();
     const o = origin.trim();
-    if (!h || !o) {
-      setError('도메인과 원본 URL을 모두 입력해주세요.');
-      return;
+
+    // 필드별 유효성 검사 — 오류를 해당 필드 에러 상태에 개별 반영
+    let hasError = false;
+    if (!h) {
+      setHostError('도메인을 입력해주세요.');
+      hasError = true;
     }
-    if (!o.startsWith('http://') && !o.startsWith('https://')) {
-      setError('원본 URL은 http:// 또는 https://로 시작해야 합니다.');
-      return;
+    if (!o) {
+      setOriginError('원본 URL을 입력해주세요.');
+      hasError = true;
+    } else if (!o.startsWith('http://') && !o.startsWith('https://')) {
+      setOriginError('원본 URL은 http:// 또는 https://로 시작해야 합니다.');
+      hasError = true;
     }
+    if (hasError) return;
+
     try {
       await addDomain.mutateAsync({ host: h, origin: o });
       toast.success(`${h} 도메인이 추가되었습니다.`);
       onClose();
     } catch {
-      setError('도메인 추가에 실패했습니다.');
+      setSubmitError('도메인 추가에 실패했습니다.');
     }
   }
 
@@ -64,11 +80,17 @@ function AddDomainDialog({ onClose }: { onClose: () => void }) {
           <Input
             id="add-host"
             value={host}
-            onChange={(e) => setHost(e.target.value)}
+            onChange={(e) => { setHost(e.target.value); setHostError(null); }}
             placeholder="textbook.com 또는 *.textbook.com"
             data-testid="add-domain-host"
             autoFocus
           />
+          {/* 도메인 필드 인라인 에러 */}
+          {hostError && (
+            <p className="text-xs text-destructive" data-testid="add-domain-host-error">
+              {hostError}
+            </p>
+          )}
         </div>
         <div className="space-y-1">
           <label htmlFor="add-origin" className="text-xs font-medium text-muted-foreground">
@@ -77,14 +99,21 @@ function AddDomainDialog({ onClose }: { onClose: () => void }) {
           <Input
             id="add-origin"
             value={origin}
-            onChange={(e) => setOrigin(e.target.value)}
+            onChange={(e) => { setOrigin(e.target.value); setOriginError(null); }}
             placeholder="https://textbook.com"
             data-testid="add-domain-origin"
           />
+          {/* 원본 URL 필드 인라인 에러 */}
+          {originError && (
+            <p className="text-xs text-destructive" data-testid="add-domain-origin-error">
+              {originError}
+            </p>
+          )}
         </div>
-        {error && (
+        {/* 서버 제출 오류 등 전역 에러 */}
+        {submitError && (
           <p className="text-xs text-destructive" data-testid="add-domain-error">
-            {error}
+            {submitError}
           </p>
         )}
         <div className="flex justify-end gap-2 pt-2">

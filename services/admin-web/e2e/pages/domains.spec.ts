@@ -171,7 +171,8 @@ test.describe('도메인 관리 — 도메인 추가', () => {
     await page.getByTestId('add-domain-origin').fill('newdomain.com');
     await page.getByTestId('add-domain-submit').click();
 
-    await expect(page.getByTestId('add-domain-error')).toBeVisible();
+    // 원본 URL 필드 바로 아래 인라인 에러로 표시 (#16 인라인 에러 개선)
+    await expect(page.getByTestId('add-domain-origin-error')).toBeVisible();
   });
 
   test('host 입력 없이 제출 시 오류가 표시된다', async ({ page }) => {
@@ -185,7 +186,8 @@ test.describe('도메인 관리 — 도메인 추가', () => {
     await page.getByTestId('add-domain-origin').fill('https://newdomain.com');
     await page.getByTestId('add-domain-submit').click();
 
-    await expect(page.getByTestId('add-domain-error')).toBeVisible();
+    // 도메인 필드 바로 아래 인라인 에러로 표시 (#16 인라인 에러 개선)
+    await expect(page.getByTestId('add-domain-host-error')).toBeVisible();
     // 실패 시 다이얼로그는 닫히지 않아야 한다
     await expect(page.getByTestId('add-domain-dialog')).toBeVisible();
   });
