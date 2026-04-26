@@ -990,6 +990,43 @@ test.describe('도메인 상세 — 헤더 액션 에러 처리 (#45)', () => {
   });
 });
 
+// ─── Tooltip 포맷 (#86 회귀) ─────────────────────────────────
+test.describe('도메인 상세 — DomainStackedChart Tooltip 포맷 (#86)', () => {
+  test('스택 차트 hover tooltip이 소수 대신 % 형식으로 표시된다', async ({ page }) => {
+    // 버그: stackOffset="expand" 사용 시 Recharts 내부값(0~1 소수)이 tooltip에 그대로 노출됨
+    // 수정 후: formatter가 Math.round(v * 100)% 변환을 적용해야 한다
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com');
+
+    // 최적화 탭으로 전환해 DomainStackedChart가 렌더되도록 한다
+    await page.getByRole('tab', { name: '최적화' }).click();
+
+    // 차트가 렌더링될 때까지 대기
+    const chart = page.getByTestId('domain-overview-stacked-chart');
+    await expect(chart).toBeVisible();
+
+    // 차트 SVG 위로 마우스를 이동해 tooltip을 활성화한다
+    const chartBox = await chart.boundingBox();
+    if (chartBox) {
+      await page.mouse.move(
+        chartBox.x + chartBox.width * 0.4,
+        chartBox.y + chartBox.height * 0.5,
+      );
+    }
+
+    // Recharts tooltip이 DOM에 추가되기를 기다린다
+    const tooltip = page.locator('.recharts-tooltip-wrapper');
+    await expect(tooltip).toBeVisible({ timeout: 3000 });
+
+    // tooltip 텍스트에 '%'가 포함되어야 한다 (소수 원시값 0.xx 노출 방지)
+    await expect(tooltip).toContainText('%');
+
+    // tooltip 텍스트에 소수 패턴(0.숫자숫자)이 없어야 한다 (예: 0.75, 0.7500000000000001)
+    const tooltipText = await tooltip.textContent();
+    expect(tooltipText).not.toMatch(/\b0\.\d{2,}/);
+  });
+});
+
 // ─── 빈 데이터 empty state (#21 회귀) ─────────────────────────
 test.describe('도메인 상세 — DomainStackedChart empty state (#21)', () => {
   test('캐시 시계열 데이터가 없으면 차트 대신 empty state 메시지가 표시된다', async ({ page }) => {

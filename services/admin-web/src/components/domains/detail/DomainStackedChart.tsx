@@ -58,7 +58,9 @@ export function DomainStackedChart({ host, range }: Props) {
               tickFormatter={(v) => `${Math.round(v * 100)}%`}
               tick={{ fontSize: 10 }}
             />
-            <ChartTooltip formatter={(v: number) => v.toLocaleString()} />
+            {/* stackOffset="expand" 사용 시 Recharts 내부값이 0~1 소수로 정규화됨.
+                YAxis tickFormatter와 동일하게 백분율(%) 문자열로 변환해야 한다. */}
+            <ChartTooltip formatter={(v: number) => `${Math.round(v * 100)}%`} />
             <Legend wrapperStyle={{ fontSize: 12 }} />
             <Area
               type="monotone"
