@@ -30,31 +30,65 @@ function stripDockerHeader(chunk: Buffer): string {
   return lines.length > 0 ? lines.join('') : chunk.toString('utf8');
 }
 
-/** Rust tracing / pino 로그 라인 파싱 */
+/** ANSI 이스케이프 시퀀스 제거 — Rust tracing_subscriber color 출력 처리 */
+// eslint-disable-next-line no-control-regex
+const ANSI_RE = /\x1b\[[0-9;]*m/g;
+
+/** Rust tracing / pino 로그 라인 파싱
+ *
+ * Docker API timestamps=1 옵션 활성화 시 실제 로그 형식:
+ *   <docker_ts> [ANSI]<rust_ts>[ANSI] [ANSI]LEVEL[ANSI] [ANSI]target[ANSI]: message
+ *
+ * 예: "2026-04-26T12:45:11.701717732Z [2m2026-04-26T12:45:11.701563Z[0m [33m WARN[0m ..."
+ *
+ * 전략:
+ *  1. ANSI 코드를 제거하여 파싱 가능한 텍스트로 변환
+ *  2. 첫 번째 타임스탬프(Docker 타임스탬프)를 기준으로 파싱 — 항상 깨끗한 ISO 8601 형식
+ *  3. Docker 타임스탬프 뒤에 두 번째 타임스탬프(Rust tracing)가 있을 수 있으므로 선택적으로 처리
+ */
 function parseLine(raw: string, service: string): LogLine | null {
   const line = raw.trim();
   if (!line) return null;
 
-  // Rust tracing_subscriber fmt 형식: "2026-04-14T10:00:00.000Z INFO  proxy: message"
-  const rustMatch = line.match(
-    /^(\d{4}-\d{2}-\d{2}T[\d:.]+Z)\s+(TRACE|DEBUG|INFO|WARN|ERROR)\s+(.+)$/
+  // ANSI 이스케이프 코드 제거
+  const clean = line.replace(ANSI_RE, '').trim();
+
+  // Docker timestamps=1 + Rust tracing 형식:
+  //   "<docker_ts> <rust_ts> LEVEL target: message"  (두 타임스탬프 모두 있는 경우)
+  //   "<docker_ts> LEVEL target: message"            (단일 타임스탬프)
+  // Docker 타임스탬프를 사용하되, Rust tracing 타임스탬프가 있으면 건너뜀
+  const dockerPlusRustMatch = clean.match(
+    /^(\d{4}-\d{2}-\d{2}T[\d:.Z]+)\s+\d{4}-\d{2}-\d{2}T[\d:.Z]+\s+(TRACE|DEBUG|INFO|WARN|ERROR)\s+(.+)$/
   );
-  if (rustMatch) {
+  if (dockerPlusRustMatch) {
     return {
-      timestamp: rustMatch[1],
-      level: rustMatch[2] as LogLine['level'],
-      message: rustMatch[3],
+      timestamp: dockerPlusRustMatch[1],
+      level: dockerPlusRustMatch[2] as LogLine['level'],
+      message: dockerPlusRustMatch[3],
       service,
     };
   }
 
-  // 기타 형식: level 추측
-  const level: LogLine['level'] =
-    /error/i.test(line) ? 'ERROR' :
-    /warn/i.test(line)  ? 'WARN'  :
-    /debug/i.test(line) ? 'DEBUG' : 'INFO';
+  // 단일 타임스탬프 형식: "<ts> LEVEL target: message"
+  const singleMatch = clean.match(
+    /^(\d{4}-\d{2}-\d{2}T[\d:.Z]+)\s+(TRACE|DEBUG|INFO|WARN|ERROR)\s+(.+)$/
+  );
+  if (singleMatch) {
+    return {
+      timestamp: singleMatch[1],
+      level: singleMatch[2] as LogLine['level'],
+      message: singleMatch[3],
+      service,
+    };
+  }
 
-  return { timestamp: new Date().toISOString(), level, message: line, service };
+  // 기타 형식: level 추측, ANSI 제거된 텍스트 사용
+  const level: LogLine['level'] =
+    /error/i.test(clean) ? 'ERROR' :
+    /warn/i.test(clean)  ? 'WARN'  :
+    /debug/i.test(clean) ? 'DEBUG' : 'INFO';
+
+  return { timestamp: new Date().toISOString(), level, message: clean, service };
 }
 
 export interface LogLine {

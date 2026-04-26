@@ -96,4 +96,47 @@ describe('GET /api/logs/:service', () => {
     expect(body[0].service).toBe('proxy');
     expect(body[1].level).toBe('WARN');
   });
+
+  it('Docker timestamps=1 + Rust tracing ANSI 컬러 형식을 올바르게 파싱한다', async () => {
+    // 재현: Docker API timestamps=1 옵션 활성화 시 실제 출력 형식
+    // "2026-04-26T12:45:11.701717732Z [2m2026-04-26T12:45:11.701563Z[0m [33m WARN[0m [2mproxy[0m[2m:[0m 미등록 도메인"
+    // 이 형식이 기존 정규식과 매칭되지 않아 모든 항목이 new Date() 현재 시각으로 표시되는 버그를 회귀 방지
+    const app = await createApp();
+    const mockRes = new PassThrough() as unknown as IncomingMessage;
+    (mockRes as unknown as Record<string, unknown>).statusCode = 200;
+
+    vi.spyOn(http, 'request').mockImplementationOnce(
+      ((_opts, cb?: RequestCallback): ClientRequest => {
+        if (cb) cb(mockRes);
+        // 실제 Docker + Rust tracing_subscriber 컬러 출력 형식 (ANSI 이스케이프 포함)
+        const ansiLine =
+          '2026-04-26T12:45:11.701717732Z \x1b[2m2026-04-26T12:45:11.701563Z\x1b[0m' +
+          ' \x1b[33m WARN\x1b[0m \x1b[2mproxy\x1b[0m\x1b[2m:\x1b[0m 미등록 도메인 요청 host=localhost:8080\n';
+        const hdr = Buffer.alloc(8);
+        hdr[0] = 1;
+        hdr.writeUInt32BE(ansiLine.length, 4);
+        (mockRes as unknown as PassThrough).write(Buffer.concat([hdr, Buffer.from(ansiLine)]));
+        (mockRes as unknown as PassThrough).end();
+        const mockReq = new PassThrough() as unknown as ClientRequest;
+        (mockReq as unknown as Record<string, unknown>).end = vi.fn();
+        return mockReq;
+      }) as typeof http.request
+    );
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/logs/proxy?follow=false&tail=5',
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as Array<{ timestamp: string; level: string; message: string; service: string }>;
+    expect(body).toHaveLength(1);
+    // Docker 타임스탬프가 그대로 사용되어야 한다 (new Date() 현재 시각 X)
+    expect(body[0].timestamp).toBe('2026-04-26T12:45:11.701717732Z');
+    expect(body[0].level).toBe('WARN');
+    expect(body[0].message).toContain('미등록 도메인');
+    // ANSI 코드가 message에 포함되지 않아야 한다
+    expect(body[0].message).not.toContain('\x1b[');
+    expect(body[0].service).toBe('proxy');
+  });
 });
