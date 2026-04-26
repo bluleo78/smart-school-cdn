@@ -17,7 +17,7 @@ function SummaryCards({ host }: { host: string }) {
   const { data, isLoading } = useDomainStats(host, '24h');
   if (isLoading) {
     return (
-      <div className="grid grid-cols-4 gap-4 md:grid-cols-2 sm:grid-cols-1">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4">
         {[...Array(4)].map((_, i) => (
           <Card key={i}>
             <CardHeader><CardTitle><Skeleton className="h-4 w-24" /></CardTitle></CardHeader>
@@ -34,7 +34,7 @@ function SummaryCards({ host }: { host: string }) {
   const ts = data?.timeseries;
   const hourlyRequests = ts ? ts.hits.map((h, i) => h + (ts.misses[i] ?? 0)) : Array(24).fill(0);
   return (
-    <div className="grid grid-cols-4 gap-4 md:grid-cols-2 sm:grid-cols-1" data-testid="domain-stat-cards">
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4" data-testid="domain-stat-cards">
       <Card data-testid="stat-card-requests">
         <CardHeader><CardTitle>오늘 요청</CardTitle></CardHeader>
         <CardContent>

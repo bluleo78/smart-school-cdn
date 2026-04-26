@@ -62,7 +62,8 @@ export function DomainTextCompressStats({ host, period = '30d' }: Props) {
         <p className="text-sm text-muted-foreground">Phase 15 brotli/gzip 프리컴프레스 결과</p>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-3 gap-4 md:grid-cols-1">
+        {/* mobile-first: 1열 → md 3열 */}
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <Card>
             <CardHeader>
               <CardTitle className="text-sm">처리 이벤트</CardTitle>
