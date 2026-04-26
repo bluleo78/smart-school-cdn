@@ -51,6 +51,20 @@ test.describe('대시보드 — 인기 콘텐츠', () => {
     await expect(page.getByText('412')).toBeVisible();
     await expect(page.getByText('387')).toBeVisible();
   });
+
+  // 회귀 테스트: shadcn Table 컴포넌트 사용 여부 검증 (#10)
+  // 네이티브 <table> 대신 shadcn Table이 렌더되면 data-testid="popular-content-table"이 존재한다
+  test('인기 콘텐츠 테이블이 shadcn Table 컴포넌트로 렌더링된다 (#10)', async ({ page }) => {
+    await setupDashboardMocks(page);
+    await page.goto('/');
+
+    // shadcn Table 컴포넌트로 교체되면 data-testid 가 DOM에 존재
+    await expect(page.getByTestId('popular-content-table')).toBeVisible();
+    // TableHeader(thead)와 TableBody(tbody)가 존재하는지 확인
+    const table = page.getByTestId('popular-content-table');
+    await expect(table.locator('thead')).toBeVisible();
+    await expect(table.locator('tbody')).toBeVisible();
+  });
 });
 
 // ─── 전체 캐시 퍼지 ──────────────────────────────────────────
