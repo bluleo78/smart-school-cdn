@@ -25,13 +25,19 @@ import {
 } from '../components/ui/table';
 import { Skeleton } from '../components/ui/skeleton';
 
+// 빈 입력 우선 체크 → 포맷/길이 검증 순서로 단계적으로 에러 메시지 표시
 const createSchema = z.object({
-  username: z.string().email('이메일 형식이 아닙니다'),
-  password: z.string().min(8, '8자 이상'),
+  username: z.string()
+    .min(1, '이메일을 입력해주세요.')
+    .email('이메일 형식이 아닙니다.'),
+  password: z.string()
+    .min(1, '비밀번호를 입력해주세요.')
+    .min(8, '8자 이상 입력해주세요.'),
 });
 type CreateFormData = z.infer<typeof createSchema>;
 
-const passwordSchema = z.object({ password: z.string().min(8, '8자 이상') });
+// 비밀번호 재설정 폼: 빈 값 입력 시 명확한 안내 메시지 제공
+const passwordSchema = z.object({ password: z.string().min(1, '비밀번호를 입력해주세요.').min(8, '8자 이상 입력해주세요.') });
 type PasswordFormData = z.infer<typeof passwordSchema>;
 
 export function UsersPage() {

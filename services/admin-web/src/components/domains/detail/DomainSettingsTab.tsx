@@ -69,7 +69,7 @@ function OriginSection({ domain }: { domain: Domain }) {
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between pb-2">
-        <CardTitle className="text-sm">Origin 설정</CardTitle>
+        <CardTitle className="text-sm">오리진 설정</CardTitle>
         {!editing && (
           <Button
             variant="outline"

@@ -19,6 +19,22 @@ test.describe('인증', () => {
     await expect(page.getByRole('button', { name: '로그인' })).toBeVisible();
   });
 
+  // 이슈 #34 회귀 방지 — 빈 입력 시 포맷/길이 에러 대신 "입력해주세요" 메시지 표시
+  test('빈 입력으로 로그인 시도 → "입력해주세요" 메시지 표시', async ({ page }) => {
+    await mockUnauthenticated(page);
+    await page.goto('/login');
+
+    // 이메일·비밀번호 모두 비우고 로그인 클릭
+    await page.getByRole('button', { name: '로그인' }).click();
+
+    // 빈 입력 에러: 포맷/길이 에러가 아닌 "입력해주세요" 메시지가 표시되어야 함
+    await expect(page.getByRole('alert').filter({ hasText: '이메일을 입력해주세요.' })).toBeVisible();
+    await expect(page.getByRole('alert').filter({ hasText: '비밀번호를 입력해주세요.' })).toBeVisible();
+    // 이전 잘못된 에러 메시지가 표시되지 않아야 함
+    await expect(page.getByText('이메일 형식이 아닙니다')).not.toBeVisible();
+    await expect(page.getByText('8자 이상')).not.toBeVisible();
+  });
+
   test('잘못된 자격증명 → 에러 메시지', async ({ page }) => {
     await mockUnauthenticated(page);
     await mockLoginFailure(page);

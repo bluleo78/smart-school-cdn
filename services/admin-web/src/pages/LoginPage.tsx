@@ -9,9 +9,14 @@ import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
 import { Label } from '../components/ui/label';
 
+// 빈 입력 우선 체크 → 포맷/길이 검증 순서로 단계적으로 에러 메시지 표시
 const schema = z.object({
-  username: z.string().email('이메일 형식이 아닙니다'),
-  password: z.string().min(8, '8자 이상'),
+  username: z.string()
+    .min(1, '이메일을 입력해주세요.')
+    .email('이메일 형식이 아닙니다.'),
+  password: z.string()
+    .min(1, '비밀번호를 입력해주세요.')
+    .min(8, '8자 이상 입력해주세요.'),
 });
 
 type FormData = z.infer<typeof schema>;

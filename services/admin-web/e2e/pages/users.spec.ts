@@ -92,6 +92,22 @@ test.describe('사용자 관리', () => {
     await expect(page.getByText(newEmail)).toBeVisible();
   });
 
+  // 이슈 #34 회귀 방지 — 사용자 추가 다이얼로그 빈 입력 시 "입력해주세요" 메시지 표시
+  test('사용자 추가 다이얼로그 — 빈 입력 시 "입력해주세요" 메시지 표시', async ({ page }) => {
+    await mockApi(page, 'GET', '/users', baseUsers);
+    await page.goto('/users');
+
+    // 추가 버튼 클릭 → 다이얼로그
+    await page.getByRole('button', { name: '+ 사용자 추가' }).click();
+
+    // 다이얼로그 내부 "추가" 버튼을 빈 입력으로 클릭
+    await page.getByRole('button', { name: '추가', exact: true }).click();
+
+    // 빈 입력 에러: 포맷/길이 에러가 아닌 "입력해주세요" 메시지가 표시되어야 함
+    await expect(page.getByText('이메일을 입력해주세요.')).toBeVisible();
+    await expect(page.getByText('비밀번호를 입력해주세요.')).toBeVisible();
+  });
+
   test('자기 자신 비활성화 버튼 disabled', async ({ page }) => {
     await mockApi(page, 'GET', '/users', baseUsers);
 
