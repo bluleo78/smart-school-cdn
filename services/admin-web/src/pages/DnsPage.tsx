@@ -237,8 +237,10 @@ function StatsTab() {
         <CardHeader className="flex flex-row items-center justify-between gap-4">
           <CardTitle>쿼리 추이</CardTitle>
           <div className="flex gap-2">
+            {/* aria-pressed: 스크린 리더가 현재 선택된 기간을 인식할 수 있도록 토글 상태 노출 */}
             <Button
               variant={range === '1h' ? 'default' : 'outline'}
+              aria-pressed={range === '1h'}
               onClick={() => setRange('1h')}
               size="xs"
             >
@@ -246,6 +248,7 @@ function StatsTab() {
             </Button>
             <Button
               variant={range === '24h' ? 'default' : 'outline'}
+              aria-pressed={range === '24h'}
               onClick={() => setRange('24h')}
               size="xs"
             >
