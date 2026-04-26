@@ -167,15 +167,17 @@ export function UsersPage() {
           <DialogTitle>사용자 추가</DialogTitle>
           <form onSubmit={createForm.handleSubmit((d) => { createMut.mutate(d); })} className="space-y-3">
             <div>
-              <Label>이메일</Label>
+              {/* htmlFor/id 연결 — 레이블 클릭 시 입력 필드 포커스·스크린 리더 연동 (#79) */}
+              <Label htmlFor="add-user-email">이메일</Label>
               {/* 이메일 입력 — autocomplete="username"으로 브라우저 자동완성·비밀번호 매니저 연동 지원 */}
-              <Input type="email" autoComplete="username" {...createForm.register('username')} />
+              <Input id="add-user-email" type="email" autoComplete="username" {...createForm.register('username')} />
               {createForm.formState.errors.username && <p className="text-xs text-destructive">{createForm.formState.errors.username.message}</p>}
             </div>
             <div>
-              <Label>비밀번호</Label>
+              {/* htmlFor/id 연결 — 레이블 클릭 시 입력 필드 포커스·스크린 리더 연동 (#79) */}
+              <Label htmlFor="add-user-password">비밀번호</Label>
               {/* PasswordInput — 표시/숨기기 토글 포함, autocomplete="new-password"로 자동완성 힌트 유지 (#76) */}
-              <PasswordInput autoComplete="new-password" {...createForm.register('password')} />
+              <PasswordInput id="add-user-password" autoComplete="new-password" {...createForm.register('password')} />
               {createForm.formState.errors.password && <p className="text-xs text-destructive">{createForm.formState.errors.password.message}</p>}
             </div>
             <div className="flex justify-end gap-2 pt-2">
@@ -207,9 +209,10 @@ export function UsersPage() {
               value={passwordTarget?.username ?? ''}
             />
             <div>
-              <Label>새 비밀번호</Label>
+              {/* htmlFor/id 연결 — 레이블 클릭 시 입력 필드 포커스·스크린 리더 연동 (#79) */}
+              <Label htmlFor="reset-password">새 비밀번호</Label>
               {/* PasswordInput — 표시/숨기기 토글 포함, autocomplete="new-password"로 자동완성 힌트 유지 (#76) */}
-              <PasswordInput autoComplete="new-password" {...passwordForm.register('password')} />
+              <PasswordInput id="reset-password" autoComplete="new-password" {...passwordForm.register('password')} />
               {passwordForm.formState.errors.password && <p className="text-xs text-destructive">{passwordForm.formState.errors.password.message}</p>}
             </div>
             <div className="flex justify-end gap-2 pt-2">
