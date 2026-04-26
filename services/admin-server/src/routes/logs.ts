@@ -22,7 +22,7 @@ function stripDockerHeader(chunk: Buffer): string {
   while (offset + 8 <= chunk.length) {
     const size = chunk.readUInt32BE(offset + 4);
     if (offset + 8 + size > chunk.length) break;
-    const payload = chunk.slice(offset + 8, offset + 8 + size).toString('utf8');
+    const payload = chunk.subarray(offset + 8, offset + 8 + size).toString('utf8');
     lines.push(payload);
     offset += 8 + size;
   }
@@ -142,7 +142,7 @@ export async function logRoutes(app: FastifyInstance) {
                 const size = buf.readUInt32BE(offset + 4);
                 if (offset + 8 + size > buf.length) break;
                 const payload = buf
-                  .slice(offset + 8, offset + 8 + size)
+                  .subarray(offset + 8, offset + 8 + size)
                   .toString('utf8');
                 offset += 8 + size;
 
@@ -153,7 +153,7 @@ export async function logRoutes(app: FastifyInstance) {
                   }
                 }
               }
-              buf = buf.slice(offset);
+              buf = buf.subarray(offset);
             });
 
             // 중복 종료 방지 플래그 — resolve/end는 한 번만
