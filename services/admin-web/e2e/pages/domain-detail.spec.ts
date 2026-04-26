@@ -363,6 +363,50 @@ test.describe('도메인 상세 — Logs 탭', () => {
     await expect(select).toBeVisible();
     await expect(select).toContainText('30초');
   });
+
+  test('"에러만" 토글 — 4xx 에러가 목록에 표시된다 (회귀: #46)', async ({ page }) => {
+    // 버그: errorsOnly=true 시 status=5xx만 전송 → 4xx 에러(404 등)가 누락됨
+    // 수정: status=error(4xx+5xx 통합)로 전송하여 4xx 에러도 포함되어야 한다
+    await setupDetailMocks(page);
+
+    // 로그 mock: 에러 필터(status=error) 시 4xx 로그 반환, 필터 없으면 전체 반환
+    let filteredCallUrl = '';
+    await page.route('**/api/domains/textbook.com/logs*', (route) => {
+      const url = new URL(route.request().url());
+      const status = url.searchParams.get('status');
+      filteredCallUrl = route.request().url();
+      if (status === 'error') {
+        // 수정 후 동작: 4xx + 5xx 모두 반환
+        return route.fulfill({
+          json: [
+            { timestamp: 1700000100, status_code: 404, cache_status: 'MISS', path: '/missing.png', size: 0 },
+            { timestamp: 1700000000, status_code: 500, cache_status: 'MISS', path: '/server-error', size: 0 },
+          ],
+        });
+      }
+      // 필터 없음: 전체 반환
+      return route.fulfill({ json: createDomainLogs() });
+    });
+
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '트래픽' }).click();
+
+    // "에러만" 토글 활성화
+    await page.getByRole('button', { name: '에러만' }).click();
+
+    // 4xx 에러(404)가 목록에 표시되어야 한다
+    const logTable = page.locator('table');
+    await expect(logTable).toBeVisible();
+    await expect(logTable).toContainText('/missing.png');
+    await expect(logTable).toContainText('404');
+
+    // 5xx 에러도 함께 표시되어야 한다
+    await expect(logTable).toContainText('/server-error');
+    await expect(logTable).toContainText('500');
+
+    // 서버에 status=error로 전송되어야 한다 (5xx만 보내지 않음)
+    expect(filteredCallUrl).toContain('status=error');
+  });
 });
 
 // ─────────────────────────────────────────────

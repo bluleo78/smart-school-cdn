@@ -64,6 +64,8 @@ async function fetchProxyLogs(filters: ProxyLogFilters): Promise<DomainLogRow[]>
     if (filters.until !== undefined && tsSec > filters.until) continue;
     if (filters.status === '5xx' && r.status_code < 500) continue;
     if (filters.status === '4xx' && !(r.status_code >= 400 && r.status_code < 500)) continue;
+    // 'error': 4xx + 5xx 통합 필터 — 클라이언트의 "에러만" 토글에서 사용
+    if (filters.status === 'error' && r.status_code < 400) continue;
     if (filters.cache === 'hit' && r.cache_status.toUpperCase() !== 'HIT') continue;
     if (filters.cache === 'miss' && r.cache_status.toUpperCase() !== 'MISS') continue;
 
@@ -506,11 +508,14 @@ export async function domainRoutes(
         params.push(until);
       }
 
-      // status 필터: '5xx' → 500+, '4xx' → 400~499
+      // status 필터: '5xx' → 500+, '4xx' → 400~499, 'error' → 4xx+5xx 통합
       if (status === '5xx') {
         conditions.push('status_code >= 500');
       } else if (status === '4xx') {
         conditions.push('status_code >= 400 AND status_code < 500');
+      } else if (status === 'error') {
+        // 'error': 4xx + 5xx 모두 포함 — 클라이언트의 "에러만" 토글에서 사용
+        conditions.push('status_code >= 400');
       }
 
       // cache 필터: 'hit' / 'miss'

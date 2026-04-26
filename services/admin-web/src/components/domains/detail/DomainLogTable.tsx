@@ -43,7 +43,8 @@ export function DomainLogTable({ host, period, range, refetchIntervalMs = false 
       limit,
       offset: 0,
       q: search || undefined,
-      status: errorsOnly ? '5xx' : undefined,
+      // 'error' 필터: 4xx + 5xx 모두 포함 — '5xx'만 전송 시 4xx 에러가 누락되는 버그 수정 (#46)
+      status: errorsOnly ? 'error' : undefined,
       period,
       from: range?.from,
       to: range?.to,

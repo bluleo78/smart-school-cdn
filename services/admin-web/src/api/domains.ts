@@ -109,7 +109,8 @@ export async function fetchDomainStats(
 export interface DomainLogsOptions {
   limit?: number;
   offset?: number;
-  status?: '5xx' | '4xx';
+  /** 상태 필터: '5xx' → 서버 에러만, '4xx' → 클라이언트 에러만, 'error' → 4xx+5xx 통합 */
+  status?: '5xx' | '4xx' | 'error';
   cache?: 'hit' | 'miss';
   q?: string;
   period?: StatsPeriod;
