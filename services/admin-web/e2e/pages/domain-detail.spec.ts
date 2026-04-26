@@ -170,6 +170,15 @@ async function setupDetailMocks(page: Page) {
       ] },
     }),
   );
+  // URL별 최적화 내역 mock — optimization/url-breakdown 엔드포인트
+  await page.route('**/api/domains/textbook.com/optimization/url-breakdown*', (route) =>
+    route.fulfill({
+      json: {
+        total: 0,
+        items: [],
+      },
+    }),
+  );
 }
 
 // ─────────────────────────────────────────────
@@ -392,9 +401,43 @@ test.describe('도메인 상세 — 통계 탭', () => {
     await expect(page.getByTestId('domain-optimization-tab')).toBeVisible();
     await expect(page.getByTestId('text-compress-stats')).toBeVisible();
     await expect(page.getByTestId('url-optimization-table')).toBeVisible();
-    // 필터/정렬 동작 스모크
-    await page.getByTestId('url-opt-sort').selectOption('events');
+    // 정렬 Select 동작 스모크 — shadcn Select(Radix) 인터랙션: trigger 클릭 → item 선택
+    await page.getByTestId('url-opt-sort').click();
+    await page.getByRole('option', { name: '이벤트 수 ↓' }).click();
     await expect(page.getByTestId('url-optimization-table')).toBeVisible();
+  });
+
+  /**
+   * 이슈 #54 회귀 방지 — DomainUrlOptimizationTable의 raw HTML 요소 → shadcn 컴포넌트 교체
+   * - raw <select> → shadcn Select
+   * - raw <table> → shadcn Table
+   * - raw <button> → shadcn Button
+   * - "decision" 헤더 → "최적화 결정" 한국어 통일
+   */
+  test('URL별 내역 표 — shadcn Select 트리거가 h-9 높이를 갖고 decision 드롭다운이 shadcn Select다 (회귀: #54)', async ({ page }) => {
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '최적화' }).click();
+    await expect(page.getByTestId('url-optimization-table')).toBeVisible();
+
+    // shadcn SelectTrigger는 h-9(36px)를 적용해야 한다 (raw <select>는 h-9 클래스가 없음)
+    const decisionTrigger = page.getByTestId('url-opt-decision');
+    await expect(decisionTrigger).toBeVisible();
+    const decisionBox = await decisionTrigger.boundingBox();
+    expect(decisionBox).not.toBeNull();
+    expect(decisionBox!.height).toBeCloseTo(36, 0);
+
+    const sortTrigger = page.getByTestId('url-opt-sort');
+    await expect(sortTrigger).toBeVisible();
+    const sortBox = await sortTrigger.boundingBox();
+    expect(sortBox).not.toBeNull();
+    expect(sortBox!.height).toBeCloseTo(36, 0);
+
+    // decision 드롭다운을 열면 shadcn Select 옵션들이 노출되어야 한다
+    await decisionTrigger.click();
+    await expect(page.getByRole('option', { name: '이미지 · 최적화됨' })).toBeVisible();
+    // Radix 포탈 닫기 — Escape 키
+    await page.keyboard.press('Escape');
   });
 
   /**
