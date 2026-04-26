@@ -273,6 +273,24 @@ test.describe('도메인 상세 — 통계 탭', () => {
     await expect(page.getByTestId('period-custom')).toBeVisible();
   });
 
+  test('커스텀 기간 날짜 입력이 shadcn Input 컴포넌트를 사용한다 — 포커스 링 클래스 존재 (회귀: #8)', async ({ page }) => {
+    // raw <input> 대신 <Input> 컴포넌트를 사용해야 focus-visible:ring-* 클래스가 적용된다
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '최적화' }).click();
+
+    // 커스텀 버튼 클릭 → 날짜 입력 2개가 표시된다
+    await page.getByTestId('period-custom').click();
+    await expect(page.getByTestId('period-custom-from')).toBeVisible();
+    await expect(page.getByTestId('period-custom-to')).toBeVisible();
+
+    // shadcn Input 컴포넌트가 주입하는 focus-visible:ring-2 클래스가 있어야 한다
+    const fromClass = await page.getByTestId('period-custom-from').getAttribute('class');
+    const toClass = await page.getByTestId('period-custom-to').getAttribute('class');
+    expect(fromClass).toContain('focus-visible:ring-2');
+    expect(toClass).toContain('focus-visible:ring-2');
+  });
+
   test('Stats 탭 수동 새로고침 버튼이 존재', async ({ page }) => {
     await setupDetailMocks(page);
     await page.goto('/domains/textbook.com');
