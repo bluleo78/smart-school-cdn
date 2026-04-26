@@ -9,8 +9,9 @@ export function DomainSummaryCards() {
   const { data, isLoading } = useDomainSummary();
 
   if (isLoading) {
+    // md(768px) 미만에서 2열로 전환하여 카드 너비 확보 — BarSparkline overflow 방지 (#71)
     return (
-      <div className="grid grid-cols-4 gap-4" data-testid="domain-summary-cards">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4" data-testid="domain-summary-cards">
         {[...Array(4)].map((_, i) => (
           <Card key={i}>
             <CardHeader><CardTitle><Skeleton className="h-4 w-24" /></CardTitle></CardHeader>
@@ -25,7 +26,8 @@ export function DomainSummaryCards() {
   }
 
   return (
-    <div className="grid grid-cols-4 gap-4" data-testid="domain-summary-cards">
+    // md(768px) 미만에서 2열로 전환하여 카드 너비 확보 — BarSparkline overflow 방지 (#71)
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-4" data-testid="domain-summary-cards">
       {/* 카드 1: 전체 도메인 (스파크라인 없음, 활성/비활성 카운트) */}
       <Card data-testid="summary-card-total">
         <CardHeader><CardTitle>전체 도메인</CardTitle></CardHeader>

@@ -95,6 +95,44 @@ test.describe('도메인 관리 — 요약 카드', () => {
     await expect(bandwidthCard.locator('p.text-3xl')).toBeVisible();
     await expect(bandwidthCard.locator('p.text-3xl')).toHaveText('1.5 MB');
   });
+
+  /**
+   * 이슈 #71 회귀 방지 — 768px 뷰포트에서 grid-cols-4 고정으로 스파크라인 overflow
+   * 768px 미만 뷰포트에서 요약 카드 컨테이너가 grid-cols-2로 전환되어
+   * 카드 너비가 충분히 확보되는지 검증한다.
+   */
+  test('768px 뷰포트에서 요약 카드 그리드가 2열로 전환된다 (#71 회귀 방지)', async ({ page }) => {
+    await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
+    await mockApi(page, 'GET', '/proxy/requests', []);
+    await mockApi(page, 'GET', '/domains/summary', createDomainSummary());
+    await mockApi(page, 'GET', '/domains', createDomains());
+
+    // 768px 뷰포트로 설정하여 모바일/태블릿 환경 재현
+    await page.setViewportSize({ width: 768, height: 900 });
+    await page.goto('/domains');
+
+    const summaryCards = page.getByTestId('domain-summary-cards');
+    await expect(summaryCards).toBeVisible();
+
+    // md(768px) 미만에서 grid-cols-2가 적용되어 카드 너비가 확보되어야 한다 (#71 핵심)
+    // Tailwind의 md 브레이크포인트는 768px — setViewportSize(768)는 md 경계에 해당하므로
+    // grid-cols-2 md:grid-cols-4에서 md가 활성화된 상태(4열)가 된다.
+    // 767px으로 테스트하여 sm(< md) 구간을 명시적으로 검증한다.
+    await page.setViewportSize({ width: 767, height: 900 });
+    await page.reload();
+    await expect(summaryCards).toBeVisible();
+
+    // 각 카드 너비가 overflow를 유발하던 168px 이상이어야 한다 (2열이면 ~340px 이상)
+    const cardWidths = await summaryCards.evaluate((el) => {
+      const cards = el.querySelectorAll('[data-testid^="summary-card-"]');
+      return Array.from(cards).map((c) => c.getBoundingClientRect().width);
+    });
+
+    // 2열이면 카드 너비가 300px 이상이어야 한다 (767 / 2 - gap ≈ 375px)
+    for (const w of cardWidths) {
+      expect(w).toBeGreaterThan(300);
+    }
+  });
 });
 
 test.describe('도메인 관리 — 도메인 목록', () => {
