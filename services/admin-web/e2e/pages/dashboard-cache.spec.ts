@@ -36,6 +36,24 @@ test.describe('대시보드 — 캐시 재설계 카드 렌더링', () => {
     await page.getByTestId('cache-range-24h').click();
     await req;
   });
+
+  // 회귀 테스트: #47 — 범위 토글 버튼에 aria-pressed ARIA 상태 속성 누락
+  test('범위 토글 버튼에 aria-pressed 속성이 올바르게 반영된다 (#47)', async ({ page }) => {
+    await setupDashboardMocks(page);
+    await page.goto('/');
+
+    const btn1h = page.getByTestId('cache-range-1h');
+    const btn24h = page.getByTestId('cache-range-24h');
+
+    // 초기 상태: 1시간이 선택(true), 24시간은 미선택(false)
+    await expect(btn1h).toHaveAttribute('aria-pressed', 'true');
+    await expect(btn24h).toHaveAttribute('aria-pressed', 'false');
+
+    // 24시간 클릭 후: 상태 반전
+    await btn24h.click();
+    await expect(btn24h).toHaveAttribute('aria-pressed', 'true');
+    await expect(btn1h).toHaveAttribute('aria-pressed', 'false');
+  });
 });
 
 // ─── 인기 콘텐츠 테이블 ───────────────────────────────────────

@@ -41,8 +41,10 @@ export function CacheHitRateChart() {
       <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle>캐시 결과 분포 (100% 스택)</CardTitle>
         <div className="flex gap-2">
+          {/* aria-pressed: 스크린 리더가 현재 선택된 범위를 인식할 수 있도록 ARIA 상태 추가 */}
           <Button
             variant={range === '1h' ? 'default' : 'outline'}
+            aria-pressed={range === '1h'}
             onClick={() => setRange('1h')}
             data-testid="cache-range-1h"
             size="xs"
@@ -51,6 +53,7 @@ export function CacheHitRateChart() {
           </Button>
           <Button
             variant={range === '24h' ? 'default' : 'outline'}
+            aria-pressed={range === '24h'}
             onClick={() => setRange('24h')}
             data-testid="cache-range-24h"
             size="xs"

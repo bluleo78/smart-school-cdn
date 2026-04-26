@@ -377,9 +377,11 @@ function QueriesTab() {
         <CardTitle>최근 쿼리 ({visible.length} / {queries?.length ?? 0})</CardTitle>
         <div className="flex gap-2">
           {(['matched', 'forwarded', 'nxdomain'] as DnsQueryResultLabel[]).map(r => (
+            // aria-pressed: 스크린 리더가 필터 활성 상태를 인식할 수 있도록 ARIA 상태 추가
             <Button
               key={r}
               variant={filter.has(r) ? 'default' : 'outline'}
+              aria-pressed={filter.has(r)}
               onClick={() => toggle(r)}
               size="xs"
               data-testid={`filter-${r}`}

@@ -164,6 +164,23 @@ test.describe('DNS 관리 페이지', () => {
     await expect(page.getByText('a.test')).not.toBeVisible();
     await expect(page.getByText('b.test')).toBeVisible();
   });
+
+  // 회귀 테스트: #47 — 필터 토글 버튼에 aria-pressed ARIA 상태 속성 누락
+  test('최근 쿼리 필터 버튼에 aria-pressed 속성이 올바르게 반영된다 (#47)', async ({ page }) => {
+    await mockDnsDefaults(page);
+    await page.goto('/dns');
+    await page.getByTestId('tab-queries').click();
+
+    // 초기 상태: 3개 필터 모두 활성(true)
+    await expect(page.getByTestId('filter-matched')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByTestId('filter-forwarded')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByTestId('filter-nxdomain')).toHaveAttribute('aria-pressed', 'true');
+
+    // matched 토글 해제 → matched만 false, 나머지는 true 유지
+    await page.getByTestId('filter-matched').click();
+    await expect(page.getByTestId('filter-matched')).toHaveAttribute('aria-pressed', 'false');
+    await expect(page.getByTestId('filter-forwarded')).toHaveAttribute('aria-pressed', 'true');
+  });
 });
 
 // ─── 빈 데이터 empty state (#21 회귀) ─────────────────────────
