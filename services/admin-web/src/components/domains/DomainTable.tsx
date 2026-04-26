@@ -104,7 +104,8 @@ export function DomainTable({
             />
           </TableHead>
           <TableHead>도메인</TableHead>
-          <TableHead>Origin</TableHead>
+          {/* 이슈 #24: "Origin" 영문 → "오리진"으로 한국어 통일 (도메인 상세의 "오리진" 표기와 일관성) */}
+          <TableHead>오리진</TableHead>
           <TableHead>상태</TableHead>
           <TableHead className="text-right">요청(24h)</TableHead>
           <TableHead className="text-right">캐시 히트</TableHead>
