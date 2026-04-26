@@ -13,7 +13,7 @@ export function EdgeHitRateCard() {
 
   if (isLoading) {
     return (
-      <Card variant="glass" data-testid="edge-hit-rate-loading">
+      <Card data-testid="edge-hit-rate-loading">
         <CardHeader><CardTitle>엣지 히트율 (L1+L2)</CardTitle></CardHeader>
         <CardContent className="space-y-2">
           <Skeleton className="h-8 w-20" />
@@ -25,7 +25,7 @@ export function EdgeHitRateCard() {
 
   if (error || !data) {
     return (
-      <Card variant="glass">
+      <Card>
         <CardHeader><CardTitle>엣지 히트율 (L1+L2)</CardTitle></CardHeader>
         <CardContent><p className="text-sm text-destructive">연결 실패</p></CardContent>
       </Card>
@@ -35,7 +35,7 @@ export function EdgeHitRateCard() {
   const edgeHits = data.l1_hits + data.l2_hits;
 
   return (
-    <Card variant="glass" data-testid="edge-hit-rate-card">
+    <Card data-testid="edge-hit-rate-card">
       <CardHeader><CardTitle>엣지 히트율 (L1+L2)</CardTitle></CardHeader>
       <CardContent>
         <p

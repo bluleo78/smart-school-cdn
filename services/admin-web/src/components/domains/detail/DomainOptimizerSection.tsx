@@ -36,7 +36,7 @@ export function DomainOptimizerSection({ host }: Props) {
   }
 
   return (
-    <Card variant="glass" data-testid="domain-optimizer-section">
+    <Card data-testid="domain-optimizer-section">
       <CardHeader className="pb-2">
         <CardTitle className="text-sm">최적화 프로파일</CardTitle>
       </CardHeader>

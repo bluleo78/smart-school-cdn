@@ -54,11 +54,6 @@
   /* 사이드바 — 그라데이션 폐기, 흰색/뉴트럴 단일 배경 */
   --color-sidebar-bg: oklch(1 0 0);
   --color-sidebar-border: oklch(0.905 0.008 264);
-
-  /* 대시보드 글래스 영역 그라데이션 */
-  --color-glass-from: oklch(0.941 0.04 260.91);
-  --color-glass-via: oklch(0.962 0.021 272.31);
-  --color-glass-to: oklch(0.961 0.04 350);
 }
 
 /* 다크모드 */
@@ -104,10 +99,6 @@
 
   --color-sidebar-bg: oklch(0.140 0.020 280);
   --color-sidebar-border: oklch(0.280 0.015 264);
-
-  --color-glass-from: oklch(0.205 0.09 281.29);
-  --color-glass-via: oklch(0.257 0.09 281.29);
-  --color-glass-to: oklch(0.245 0.08 310);
 
   color-scheme: dark;
 }

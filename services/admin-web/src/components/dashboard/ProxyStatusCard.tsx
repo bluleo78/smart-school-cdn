@@ -10,7 +10,7 @@ export function ProxyStatusCard() {
 
   if (isLoading) {
     return (
-      <Card variant="glass" data-testid="proxy-status-loading">
+      <Card data-testid="proxy-status-loading">
         <CardHeader><CardTitle>프록시 상태</CardTitle></CardHeader>
         <CardContent className="space-y-3">
           <Skeleton className="h-5 w-16" />
@@ -23,7 +23,7 @@ export function ProxyStatusCard() {
 
   if (error) {
     return (
-      <Card variant="glass">
+      <Card>
         <CardHeader><CardTitle>프록시 상태</CardTitle></CardHeader>
         <CardContent>
           <p className="text-sm text-destructive">연결 실패</p>
@@ -35,7 +35,7 @@ export function ProxyStatusCard() {
   const isOnline = data?.online ?? false;
 
   return (
-    <Card variant="glass">
+    <Card>
       <CardHeader><CardTitle>프록시 상태</CardTitle></CardHeader>
       <CardContent>
         <Badge variant={isOnline ? 'success' : 'destructive'}>

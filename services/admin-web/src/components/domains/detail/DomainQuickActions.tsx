@@ -177,7 +177,7 @@ function ActionCard({
   children: React.ReactNode;
 }) {
   return (
-    <Card variant="glass" className="flex h-full flex-col gap-3">
+    <Card className="flex h-full flex-col gap-3">
       <CardHeader className="pb-0">
         <CardTitle className="flex items-center gap-2 text-sm">
           <span className="text-lg [&>svg]:h-4 [&>svg]:w-4">{icon}</span>

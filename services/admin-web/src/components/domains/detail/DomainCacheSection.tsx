@@ -45,7 +45,7 @@ export function DomainCacheSection({ host }: Props) {
   }
 
   return (
-    <Card variant="glass" data-testid="domain-cache-section">
+    <Card data-testid="domain-cache-section">
       <CardHeader className="pb-2">
         <CardTitle className="text-sm">캐시 퍼지</CardTitle>
       </CardHeader>

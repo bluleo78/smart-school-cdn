@@ -13,7 +13,7 @@ export function BypassRateCard() {
 
   if (isLoading) {
     return (
-      <Card variant="glass" data-testid="bypass-rate-loading">
+      <Card data-testid="bypass-rate-loading">
         <CardHeader><CardTitle>BYPASS 비율</CardTitle></CardHeader>
         <CardContent className="space-y-2">
           <Skeleton className="h-8 w-20" />
@@ -25,7 +25,7 @@ export function BypassRateCard() {
 
   if (error || !data) {
     return (
-      <Card variant="glass">
+      <Card>
         <CardHeader><CardTitle>BYPASS 비율</CardTitle></CardHeader>
         <CardContent><p className="text-sm text-destructive">연결 실패</p></CardContent>
       </Card>
@@ -33,7 +33,7 @@ export function BypassRateCard() {
   }
 
   return (
-    <Card variant="glass" data-testid="bypass-rate-card">
+    <Card data-testid="bypass-rate-card">
       <CardHeader><CardTitle>BYPASS 비율</CardTitle></CardHeader>
       <CardContent>
         <p

@@ -12,7 +12,7 @@ export function DomainSummaryCards() {
     return (
       <div className="grid grid-cols-4 gap-4" data-testid="domain-summary-cards">
         {[...Array(4)].map((_, i) => (
-          <Card key={i} variant="glass">
+          <Card key={i}>
             <CardHeader><CardTitle><Skeleton className="h-4 w-24" /></CardTitle></CardHeader>
             <CardContent className="space-y-2">
               <Skeleton className="h-8 w-20" />
@@ -27,7 +27,7 @@ export function DomainSummaryCards() {
   return (
     <div className="grid grid-cols-4 gap-4" data-testid="domain-summary-cards">
       {/* 카드 1: 전체 도메인 (스파크라인 없음, 활성/비활성 카운트) */}
-      <Card variant="glass" data-testid="summary-card-total">
+      <Card data-testid="summary-card-total">
         <CardHeader><CardTitle>전체 도메인</CardTitle></CardHeader>
         <CardContent>
           <p className="text-3xl font-bold">{data?.total ?? 0}</p>
@@ -39,7 +39,7 @@ export function DomainSummaryCards() {
       </Card>
 
       {/* 카드 2: 오늘 요청 */}
-      <Card variant="glass" data-testid="summary-card-requests">
+      <Card data-testid="summary-card-requests">
         <CardHeader><CardTitle>오늘 요청</CardTitle></CardHeader>
         <CardContent>
           <div className="flex items-end justify-between">
@@ -53,7 +53,7 @@ export function DomainSummaryCards() {
       </Card>
 
       {/* 카드 3: 캐시 히트율 */}
-      <Card variant="glass" data-testid="summary-card-cache-hit">
+      <Card data-testid="summary-card-cache-hit">
         <CardHeader><CardTitle>캐시 히트율</CardTitle></CardHeader>
         <CardContent>
           <div className="flex items-end justify-between">
@@ -67,7 +67,7 @@ export function DomainSummaryCards() {
       </Card>
 
       {/* 카드 4: 대역폭 */}
-      <Card variant="glass" data-testid="summary-card-bandwidth">
+      <Card data-testid="summary-card-bandwidth">
         <CardHeader><CardTitle>오늘 대역폭</CardTitle></CardHeader>
         <CardContent>
           <div className="flex items-end justify-between">

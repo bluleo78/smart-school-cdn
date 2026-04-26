@@ -23,13 +23,11 @@ export function DashboardPage() {
       </div>
 
       {/* 1행: 메트릭 카드 4개 — L1 히트율이 가장 중요 */}
-      <div className="rounded-2xl bg-gradient-to-br from-glass-from via-glass-via to-glass-to p-5">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <ProxyStatusCard />
-          <CacheHitRateCard />
-          <EdgeHitRateCard />
-          <BypassRateCard />
-        </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <ProxyStatusCard />
+        <CacheHitRateCard />
+        <EdgeHitRateCard />
+        <BypassRateCard />
       </div>
 
       {/* 2행: 스택 차트(2/3) + 디스크(1/3) */}

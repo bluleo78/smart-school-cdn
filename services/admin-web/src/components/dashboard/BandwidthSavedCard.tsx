@@ -9,7 +9,7 @@ export function BandwidthSavedCard() {
 
   if (isLoading) {
     return (
-      <Card variant="glass">
+      <Card>
         <CardHeader><CardTitle>총 요청 (24h)</CardTitle></CardHeader>
         <CardContent><Skeleton className="h-8 w-24" /></CardContent>
       </Card>
@@ -18,7 +18,7 @@ export function BandwidthSavedCard() {
 
   if (error || !data) {
     return (
-      <Card variant="glass">
+      <Card>
         <CardHeader><CardTitle>총 요청 (24h)</CardTitle></CardHeader>
         <CardContent><p className="text-sm text-destructive">연결 실패</p></CardContent>
       </Card>
@@ -26,7 +26,7 @@ export function BandwidthSavedCard() {
   }
 
   return (
-    <Card variant="glass" data-testid="total-requests-card">
+    <Card data-testid="total-requests-card">
       <CardHeader><CardTitle>총 요청 (24h)</CardTitle></CardHeader>
       <CardContent>
         <p

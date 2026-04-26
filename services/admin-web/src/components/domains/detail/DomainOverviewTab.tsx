@@ -19,7 +19,7 @@ function SummaryCards({ host }: { host: string }) {
     return (
       <div className="grid grid-cols-4 gap-4 md:grid-cols-2 sm:grid-cols-1">
         {[...Array(4)].map((_, i) => (
-          <Card key={i} variant="glass">
+          <Card key={i}>
             <CardHeader><CardTitle><Skeleton className="h-4 w-24" /></CardTitle></CardHeader>
             <CardContent className="space-y-2">
               <Skeleton className="h-8 w-20" />
@@ -35,7 +35,7 @@ function SummaryCards({ host }: { host: string }) {
   const hourlyRequests = ts ? ts.hits.map((h, i) => h + (ts.misses[i] ?? 0)) : Array(24).fill(0);
   return (
     <div className="grid grid-cols-4 gap-4 md:grid-cols-2 sm:grid-cols-1" data-testid="domain-stat-cards">
-      <Card variant="glass" data-testid="stat-card-requests">
+      <Card data-testid="stat-card-requests">
         <CardHeader><CardTitle>오늘 요청</CardTitle></CardHeader>
         <CardContent>
           <div className="flex items-end justify-between">
@@ -47,7 +47,7 @@ function SummaryCards({ host }: { host: string }) {
           </div>
         </CardContent>
       </Card>
-      <Card variant="glass" data-testid="stat-card-cache-hit">
+      <Card data-testid="stat-card-cache-hit">
         <CardHeader><CardTitle>캐시 히트율</CardTitle></CardHeader>
         <CardContent>
           <div className="flex items-end justify-between">
@@ -59,7 +59,7 @@ function SummaryCards({ host }: { host: string }) {
           </div>
         </CardContent>
       </Card>
-      <Card variant="glass" data-testid="stat-card-bandwidth">
+      <Card data-testid="stat-card-bandwidth">
         <CardHeader><CardTitle>오늘 대역폭</CardTitle></CardHeader>
         <CardContent>
           <div className="flex items-end justify-between">
@@ -71,7 +71,7 @@ function SummaryCards({ host }: { host: string }) {
           </div>
         </CardContent>
       </Card>
-      <Card variant="glass" data-testid="stat-card-response-time">
+      <Card data-testid="stat-card-response-time">
         <CardHeader><CardTitle>평균 응답시간</CardTitle></CardHeader>
         <CardContent>
           <div className="flex items-end justify-between">

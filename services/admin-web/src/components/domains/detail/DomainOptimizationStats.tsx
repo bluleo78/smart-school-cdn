@@ -27,7 +27,7 @@ export function DomainOptimizationStats({ host }: Props) {
       data-testid="domain-optimization-stats"
     >
       {/* 원본 용량 */}
-      <Card variant="glass">
+      <Card>
         <CardHeader className="pb-1">
           <CardTitle className="text-xs text-muted-foreground">원본 용량</CardTitle>
         </CardHeader>
@@ -37,7 +37,7 @@ export function DomainOptimizationStats({ host }: Props) {
       </Card>
 
       {/* 최적화 용량 */}
-      <Card variant="glass">
+      <Card>
         <CardHeader className="pb-1">
           <CardTitle className="text-xs text-muted-foreground">최적화 용량</CardTitle>
         </CardHeader>
@@ -47,7 +47,7 @@ export function DomainOptimizationStats({ host }: Props) {
       </Card>
 
       {/* 절감률 */}
-      <Card variant="glass">
+      <Card>
         <CardHeader className="pb-1">
           <CardTitle className="text-xs text-muted-foreground">절감률</CardTitle>
         </CardHeader>

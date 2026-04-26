@@ -84,7 +84,7 @@ function DomainTrafficChartsSection({
           <Skeleton className="h-64 w-full" />
         ) : (
           <div className="grid grid-cols-2 gap-4 md:grid-cols-1">
-            <Card variant="glass">
+            <Card>
               <CardHeader><CardTitle className="text-sm">요청 수 추이</CardTitle></CardHeader>
               <CardContent>
                 <HitMissBarChart
@@ -94,7 +94,7 @@ function DomainTrafficChartsSection({
                 />
               </CardContent>
             </Card>
-            <Card variant="glass">
+            <Card>
               <CardHeader><CardTitle className="text-sm">대역폭 &amp; 응답 시간</CardTitle></CardHeader>
               <CardContent>
                 <BandwidthResponseChart

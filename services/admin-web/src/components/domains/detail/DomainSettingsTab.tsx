@@ -66,7 +66,7 @@ function OriginSection({ domain }: { domain: Domain }) {
   }
 
   return (
-    <Card variant="glass">
+    <Card>
       <CardHeader className="flex flex-row items-center justify-between pb-2">
         <CardTitle className="text-sm">Origin 설정</CardTitle>
         {!editing && (
@@ -157,7 +157,7 @@ function OriginSection({ domain }: { domain: Domain }) {
 /** TLS / 인증서 카드 — 읽기 전용 정적 표시 */
 function TlsSection() {
   return (
-    <Card variant="glass">
+    <Card>
       <CardHeader className="flex flex-row items-center justify-between pb-2">
         <CardTitle className="text-sm">TLS / 인증서</CardTitle>
         {/* 1차 릴리스에서는 수동 갱신 비활성화 */}
@@ -212,7 +212,7 @@ function DangerSection({
   }
 
   return (
-    <Card variant="glass" className="border border-destructive/50">
+    <Card className="border border-destructive/50">
       <CardHeader className="pb-2">
         <CardTitle className="text-sm text-destructive">위험 영역</CardTitle>
       </CardHeader>

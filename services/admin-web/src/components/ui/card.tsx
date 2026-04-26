@@ -1,24 +1,20 @@
-/** Card 컴포넌트 — 기본: 소프트 쉐도우, glass: 글래스모피즘, interactive: 호버 시 살짝 떠오르는 카드 */
+/** Card 컴포넌트 — 기본 평면. interactive prop 으로 hover lift 켬 */
 import type { HTMLAttributes } from 'react';
 import { cn } from '../../lib/utils';
 
-type CardVariant = 'default' | 'glass';
-
 interface CardProps extends HTMLAttributes<HTMLDivElement> {
-  variant?: CardVariant;
-  /** true 면 hover 시 살짝 떠오르는 인터랙션 추가 (clickable 카드용) */
+  /** 클릭 가능한 카드 — hover 시 살짝 떠오름. 정적 카드는 false(기본) */
   interactive?: boolean;
 }
 
-const variantClass: Record<CardVariant, string> = {
-  default: 'rounded-xl border border-border bg-card text-card-foreground shadow-sm',
-  glass: 'rounded-xl bg-white/55 backdrop-blur-xl border border-white/60 dark:bg-white/8 dark:border-white/10 text-card-foreground',
-};
-
-export function Card({ variant = 'default', interactive = false, className, ...props }: CardProps) {
+export function Card({ interactive = false, className, ...props }: CardProps) {
   return (
     <div
-      className={cn(variantClass[variant], interactive && 'card-hover cursor-pointer', className)}
+      className={cn(
+        'rounded-xl border border-border bg-card text-card-foreground shadow-sm',
+        interactive && 'card-hover cursor-pointer',
+        className,
+      )}
       {...props}
     />
   );

@@ -47,7 +47,7 @@ export function DomainTextCompressStats({ host }: { host: string }) {
       </CardHeader>
       <CardContent>
         <div className="grid grid-cols-3 gap-4 md:grid-cols-1">
-          <Card variant="glass">
+          <Card>
             <CardHeader>
               <CardTitle className="text-sm">처리 이벤트</CardTitle>
             </CardHeader>
@@ -56,7 +56,7 @@ export function DomainTextCompressStats({ host }: { host: string }) {
               <p className="text-xs text-muted-foreground">br {brCount} · gzip {gzipCount}</p>
             </CardContent>
           </Card>
-          <Card variant="glass">
+          <Card>
             <CardHeader>
               <CardTitle className="text-sm">원본 → 압축</CardTitle>
             </CardHeader>
@@ -66,7 +66,7 @@ export function DomainTextCompressStats({ host }: { host: string }) {
               </p>
             </CardContent>
           </Card>
-          <Card variant="glass">
+          <Card>
             <CardHeader>
               <CardTitle className="text-sm">평균 절감</CardTitle>
             </CardHeader>

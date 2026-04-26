@@ -8,7 +8,7 @@ export function EntryCountCard() {
 
   if (isLoading) {
     return (
-      <Card variant="glass">
+      <Card>
         <CardHeader><CardTitle>캐시 항목</CardTitle></CardHeader>
         <CardContent><Skeleton className="h-8 w-16" /></CardContent>
       </Card>
@@ -17,7 +17,7 @@ export function EntryCountCard() {
 
   if (error || !data) {
     return (
-      <Card variant="glass">
+      <Card>
         <CardHeader><CardTitle>캐시 항목</CardTitle></CardHeader>
         <CardContent><p className="text-sm text-destructive">연결 실패</p></CardContent>
       </Card>
@@ -25,7 +25,7 @@ export function EntryCountCard() {
   }
 
   return (
-    <Card variant="glass" data-testid="entry-count-card">
+    <Card data-testid="entry-count-card">
       <CardHeader><CardTitle>캐시 항목</CardTitle></CardHeader>
       <CardContent>
         <p

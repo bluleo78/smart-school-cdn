@@ -8,7 +8,7 @@ export function PopularContentCard() {
 
   if (isLoading) {
     return (
-      <Card variant="glass">
+      <Card>
         <CardHeader><CardTitle>인기 콘텐츠 Top 5</CardTitle></CardHeader>
         <CardContent className="space-y-2">
           {Array.from({ length: 5 }).map((_, i) => (
@@ -21,7 +21,7 @@ export function PopularContentCard() {
 
   if (error) {
     return (
-      <Card variant="glass">
+      <Card>
         <CardHeader><CardTitle>인기 콘텐츠 Top 5</CardTitle></CardHeader>
         <CardContent>
           <p className="text-sm text-destructive">데이터 로드 실패</p>
@@ -33,7 +33,7 @@ export function PopularContentCard() {
   const items = (data ?? []).slice(0, 5);
 
   return (
-    <Card variant="glass">
+    <Card>
       <CardHeader><CardTitle>인기 콘텐츠 Top 5</CardTitle></CardHeader>
       <CardContent>
         {items.length === 0 ? (

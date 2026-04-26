@@ -31,7 +31,7 @@ export function CacheStatsCard() {
 
   if (isLoading) {
     return (
-      <Card variant="glass">
+      <Card>
         <CardHeader><CardTitle>BYPASS 사유 세부</CardTitle></CardHeader>
         <CardContent className="space-y-3">
           <Skeleton className="h-5 w-24" />
@@ -44,7 +44,7 @@ export function CacheStatsCard() {
 
   if (error || !data) {
     return (
-      <Card variant="glass">
+      <Card>
         <CardHeader><CardTitle>BYPASS 사유 세부</CardTitle></CardHeader>
         <CardContent>
           <p className="text-sm text-destructive">데이터 로드 실패</p>
@@ -55,7 +55,7 @@ export function CacheStatsCard() {
 
   return (
     <>
-      <Card variant="glass" data-testid="cache-stats-card">
+      <Card data-testid="cache-stats-card">
         <CardHeader><CardTitle>BYPASS 사유 세부</CardTitle></CardHeader>
         <CardContent className="space-y-3">
           {/* BYPASS 4분류 카운터 */}

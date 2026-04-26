@@ -51,7 +51,7 @@ export function DomainInfoCards({ domain }: Props) {
   return (
     <div className="grid grid-cols-2 gap-4">
       {/* 왼쪽: 기본 정보 */}
-      <Card variant="glass">
+      <Card>
         <CardHeader>
           <CardTitle>기본 정보</CardTitle>
         </CardHeader>
@@ -65,7 +65,7 @@ export function DomainInfoCards({ domain }: Props) {
       </Card>
 
       {/* 오른쪽: 동기화 & TLS — 실시간 상태 */}
-      <Card variant="glass">
+      <Card>
         <CardHeader>
           <CardTitle>동기화 &amp; TLS</CardTitle>
         </CardHeader>
