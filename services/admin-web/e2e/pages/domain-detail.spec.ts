@@ -78,6 +78,17 @@ function createOptimizationStats() {
   };
 }
 
+/** 텍스트 압축 통계 — /api/optimization/stats?type=text_compress 응답 */
+function createTextCompressStats() {
+  return {
+    total: 100,
+    by_decision: [
+      { decision: 'compressed_br', count: 60, total_orig: 600000, total_out: 200000 },
+      { decision: 'compressed_gzip', count: 40, total_orig: 400000, total_out: 150000 },
+    ],
+  };
+}
+
 /** 최적화 프로파일 */
 function createOptimizerProfile() {
   return {
@@ -144,6 +155,10 @@ async function setupDetailMocks(page: Page) {
     route.fulfill({
       json: { buckets: [{ ts: Date.now() - 60_000, l1_hits: 6, l2_hits: 1, miss: 2, bypass: 1 }] },
     }),
+  );
+  // 텍스트 압축 통계 — period 쿼리 파라미터를 무시하고 공통 응답 반환
+  await page.route('**/api/optimization/stats*', (route) =>
+    route.fulfill({ json: createTextCompressStats() }),
   );
   // Top URL 목록 mock
   await page.route('**/api/domains/textbook.com/top-urls*', (route) =>
@@ -354,6 +369,45 @@ test.describe('도메인 상세 — 통계 탭', () => {
     // 필터/정렬 동작 스모크
     await page.getByTestId('url-opt-sort').selectOption('events');
     await expect(page.getByTestId('url-optimization-table')).toBeVisible();
+  });
+
+  /**
+   * 이슈 #53 회귀 방지 — 텍스트 압축 통계 카드가 PeriodSelector 무시하고 항상 30d 조회
+   * 수정 후: PeriodSelector 기간 변경 시 텍스트 압축 카드 제목과 API 요청 period가 함께 바뀌어야 한다.
+   */
+  test('텍스트 압축 통계 카드 — PeriodSelector 선택 기간에 따라 카드 제목과 API period가 변경된다 (회귀: #53)', async ({ page }) => {
+    await setupDetailMocks(page);
+
+    // period 파라미터를 추적하여 API 호출 시 올바른 period가 전달되는지 검증한다
+    const capturedPeriods: string[] = [];
+    await page.route('**/api/optimization/stats*', (route) => {
+      const url = new URL(route.request().url());
+      const period = url.searchParams.get('period');
+      if (period) capturedPeriods.push(period);
+      return route.fulfill({ json: createTextCompressStats() });
+    });
+
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '최적화' }).click();
+
+    // 기본 기간(24h)에서 카드가 렌더링되어야 한다
+    await expect(page.getByTestId('text-compress-stats')).toBeVisible();
+
+    // 1시간 선택 → 카드 제목이 1시간 누적으로 변경되어야 한다
+    await page.getByTestId('period-1h').click();
+    await expect(page.getByTestId('text-compress-stats')).toContainText('1시간 누적');
+
+    // 7일 선택 → 카드 제목이 7일 누적으로 변경되어야 한다
+    await page.getByTestId('period-7d').click();
+    await expect(page.getByTestId('text-compress-stats')).toContainText('7일 누적');
+
+    // 30일 선택 → 카드 제목이 30일 누적으로 변경되어야 한다
+    await page.getByTestId('period-30d').click();
+    await expect(page.getByTestId('text-compress-stats')).toContainText('30일 누적');
+
+    // API 요청에 선택한 period가 포함되어야 한다 (30d 고정이 아님)
+    expect(capturedPeriods).toContain('1h');
+    expect(capturedPeriods).toContain('7d');
   });
 });
 

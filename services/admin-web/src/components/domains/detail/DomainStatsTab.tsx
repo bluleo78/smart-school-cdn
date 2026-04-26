@@ -62,8 +62,8 @@ export function DomainStatsTab({ host }: Props) {
         </CardContent>
       </Card>
 
-      {/* 텍스트 압축 섹션 (Phase 16-3) */}
-      <DomainTextCompressStats host={host} />
+      {/* 텍스트 압축 섹션 (Phase 16-3) — period를 전달하여 PeriodSelector 연동 (#53 수정) */}
+      <DomainTextCompressStats host={host} period={period.period === 'custom' ? '24h' : period.period} />
 
       {/* 최적화 섹션 */}
       <Card data-testid="stats-optimization-section">
