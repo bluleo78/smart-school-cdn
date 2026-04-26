@@ -194,10 +194,11 @@ test.describe('서비스 상태 그리드', () => {
 
 /// LogViewer — Phase 8-3 실시간 로그 뷰어 통합 테스트
 /// 커버리지:
-///   카드 렌더링     ✅
-///   서비스 셀렉트   ✅
-///   레벨 셀렉트     ✅
-///   지우기 버튼     ✅
+///   카드 렌더링               ✅
+///   서비스 셀렉트             ✅
+///   레벨 셀렉트               ✅
+///   지우기 버튼               ✅
+///   자동 스크롤 aria-pressed  ✅ (#62)
 test.describe('LogViewer', () => {
   /** SSE mock 설정 헬퍼 — 1줄 로그를 포함한 스트림 반환 */
   async function mockSse(page: import('@playwright/test').Page, withLine = false) {
@@ -263,6 +264,26 @@ test.describe('LogViewer', () => {
     await page.getByTestId('log-clear-btn').click();
 
     await expect(page.getByTestId('log-empty')).toBeVisible();
+  });
+
+  test('자동 스크롤 버튼에 aria-pressed 속성이 반영된다 — 회귀 방지 #62', async ({ page }) => {
+    // aria-pressed 없으면 스크린리더가 토글 상태 인식 불가 — #62 버그 수정 회귀 방지
+    await mockSse(page);
+    await page.goto('/system');
+
+    const btn = page.getByTestId('log-autoscroll-btn');
+    await expect(btn).toBeVisible();
+
+    // 초기 상태: autoScroll=true → aria-pressed="true"
+    await expect(btn).toHaveAttribute('aria-pressed', 'true');
+
+    // 클릭 후: autoScroll=false → aria-pressed="false"
+    await btn.click();
+    await expect(btn).toHaveAttribute('aria-pressed', 'false');
+
+    // 재클릭: autoScroll=true → aria-pressed="true"
+    await btn.click();
+    await expect(btn).toHaveAttribute('aria-pressed', 'true');
   });
 
   test('로그 메시지에 ANSI escape code가 표시되지 않는다 — 회귀 방지 #18', async ({ page }) => {

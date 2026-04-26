@@ -117,9 +117,11 @@ export function LogViewer() {
               </SelectContent>
             </Select>
 
+            {/* aria-pressed: 토글 상태를 스크린리더에 전달 — 시각 텍스트만으로는 보조기술이 pressed 여부를 알 수 없음 */}
             <Button
               variant={autoScroll ? 'default' : 'outline'}
               size="xs"
+              aria-pressed={autoScroll}
               onClick={() => setAutoScroll((v) => !v)}
               data-testid="log-autoscroll-btn"
             >
