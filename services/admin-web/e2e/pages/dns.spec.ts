@@ -53,8 +53,8 @@ test.describe('DNS 관리 페이지', () => {
     await expect(page.getByTestId('tab-queries')).toBeVisible();
   });
 
-  test('레코드 탭 — 존재하지 않는 호스트 검색 시 빈 상태 메시지가 표시된다', async ({ page }) => {
-    // 레코드가 있어도 필터에 걸리지 않으면 빈 상태로 전환되는지 검증
+  test('레코드 탭 — 검색어 입력 시 검색 결과 없음 메시지가 표시된다 (#41)', async ({ page }) => {
+    // 검색어가 있을 때는 "검색 결과 없음" 메시지, 데이터 자체 없음과 구분
     await mockApi(page, 'GET', '/dns/status', createDnsStatusOnline());
     await mockApi(page, 'GET', '/dns/records', createDnsRecords([
       { host: 'a.test', target: '10.0.0.1', rtype: 'A', source: 'override' },
@@ -66,8 +66,27 @@ test.describe('DNS 관리 페이지', () => {
     await page.getByTestId('tab-records').click();
 
     // 필터 입력 → 매칭되는 레코드가 없도록 임의의 문자열 입력
-    await page.getByTestId('records-filter').fill('nomatch-xyz-존재하지-않음');
+    const keyword = 'nomatch-xyz-존재하지-않음';
+    await page.getByTestId('records-filter').fill(keyword);
 
+    // 검색어 포함한 "일치하는 레코드 없음" 메시지가 표시되어야 한다
+    await expect(page.getByText(`"${keyword}"에 일치하는 레코드가 없습니다.`)).toBeVisible();
+    // 데이터 없음 메시지는 표시되지 않아야 한다
+    await expect(page.getByText('등록된 레코드가 없습니다.')).not.toBeVisible();
+  });
+
+  test('레코드 탭 — 레코드가 없을 때 데이터 없음 메시지가 표시된다 (#41)', async ({ page }) => {
+    // 데이터 자체가 없을 때는 "등록된 레코드가 없습니다." 메시지가 표시된다
+    await mockApi(page, 'GET', '/dns/status', createDnsStatusOnline());
+    // 빈 레코드 배열
+    await mockApi(page, 'GET', '/dns/records', createDnsRecords([]));
+    await mockDnsQuery(page, '/dns/queries', createDnsQueriesMixed());
+    await mockDnsQuery(page, '/dns/metrics', createDnsMetrics());
+
+    await page.goto('/dns');
+    await page.getByTestId('tab-records').click();
+
+    // 검색어 없이 데이터가 없으면 "등록된 레코드가 없습니다." 메시지 표시
     await expect(page.getByText('등록된 레코드가 없습니다.')).toBeVisible();
   });
 

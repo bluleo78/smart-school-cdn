@@ -165,8 +165,11 @@ function RecordsTab() {
         />
       </CardHeader>
       <CardContent>
+        {/* 검색어 유무에 따라 빈 상태 메시지 분기 — 검색 결과 없음과 데이터 없음을 구분 */}
         {filtered.length === 0 ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">등록된 레코드가 없습니다.</p>
+          <p className="py-8 text-center text-sm text-muted-foreground">
+            {q ? `"${q}"에 일치하는 레코드가 없습니다.` : '등록된 레코드가 없습니다.'}
+          </p>
         ) : (
           <Table>
             <TableHeader>
