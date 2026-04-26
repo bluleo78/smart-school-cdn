@@ -108,7 +108,8 @@ export function UsersPage() {
           </TableHeader>
           <TableBody>
             {users?.map((u) => (
-              <TableRow key={u.id} data-testid={`user-row-${u.id}`}>
+              // hover:bg-muted/50 — 클릭 가능한 행임을 시각적으로 전달 (ByDomainTable 패턴과 일관성)
+              <TableRow key={u.id} className="hover:bg-muted/50 transition-colors" data-testid={`user-row-${u.id}`}>
                 <TableCell>{u.username}</TableCell>
                 <TableCell className="text-muted-foreground">{new Date(u.created_at).toLocaleDateString()}</TableCell>
                 <TableCell className="text-muted-foreground">{u.last_login_at ? new Date(u.last_login_at).toLocaleString() : '—'}</TableCell>

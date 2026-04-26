@@ -190,6 +190,20 @@ test.describe('사용자 관리', () => {
     await expect(page.getByRole('table')).toBeVisible();
   });
 
+  // 이슈 #17 회귀 방지 — 테이블 행에 hover:bg-muted/50 transition-colors 클래스 적용
+  test('테이블 행에 hover 스타일 클래스 적용 확인', async ({ page }) => {
+    await mockApi(page, 'GET', '/users', baseUsers);
+
+    await page.goto('/users');
+
+    // 데이터 행이 hover:bg-muted/50 transition-colors 클래스를 가져야 함
+    const dataRow = page.getByTestId(`user-row-${TEST_USER.id}`);
+    await expect(dataRow).toBeVisible();
+    const classList = await dataRow.evaluate((el) => el.className);
+    expect(classList).toContain('hover:bg-muted/50');
+    expect(classList).toContain('transition-colors');
+  });
+
   test('API 에러 시 에러 메시지 표시', async ({ page }) => {
     // API 실패 응답 모킹 — 빈 화면 대신 에러 메시지가 표시되어야 함
     await mockApi(page, 'GET', '/users', { error: 'Internal Server Error' }, { status: 500 });
