@@ -452,6 +452,54 @@ test.describe('도메인 상세 — 설정 탭', () => {
     await expect(page.getByTestId('optimizer-save-btn')).toBeEnabled();
   });
 
+  test('최적화 프로파일 — quality=0 저장 시 클라이언트 검증 에러가 표시되고 PUT이 호출되지 않는다 (회귀: #48)', async ({ page }) => {
+    // 수정 전: 서버에 quality=0을 전송 후 400 응답을 받고 고정 메시지 "저장에 실패했습니다."를 표시
+    // 수정 후: 클라이언트 검증이 서버 전송을 막고 범위 오류 메시지를 표시해야 한다
+    await setupDetailMocks(page);
+    let putCallCount = 0;
+    await page.route('**/api/optimizer/profiles/textbook.com', (route) => {
+      if (route.request().method() === 'PUT') putCallCount++;
+      return route.fallback();
+    });
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '설정' }).click();
+
+    // quality에 범위 밖 값(0) 입력 후 저장
+    await page.getByTestId('optimizer-quality-input').fill('0');
+    await page.getByTestId('optimizer-save-btn').click();
+
+    // 클라이언트 검증 에러 토스트가 표시되어야 한다
+    await expect(page.getByText('품질은 1–100 사이여야 합니다.')).toBeVisible();
+    // 서버 PUT은 호출되지 않아야 한다
+    expect(putCallCount).toBe(0);
+  });
+
+  test('최적화 프로파일 — 서버 400 에러 시 응답 메시지가 toast에 표시된다 (회귀: #48)', async ({ page }) => {
+    // 수정 전: onError 콜백이 고정 문자열만 표시하여 서버 검증 메시지가 누락됨
+    // 수정 후: 서버 응답의 message 필드를 toast에 표시해야 한다
+    await setupDetailMocks(page);
+    // 서버가 400 + 구체적 메시지를 반환하는 시나리오 모킹
+    await page.route('**/api/optimizer/profiles/textbook.com', (route) => {
+      if (route.request().method() === 'PUT') {
+        return route.fulfill({
+          status: 400,
+          contentType: 'application/json',
+          body: JSON.stringify({ message: 'body/quality must be >= 1' }),
+        });
+      }
+      return route.fallback();
+    });
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '설정' }).click();
+
+    // 유효 범위 내 값으로 저장 (클라이언트 검증 통과 후 서버 에러 발생)
+    await page.getByTestId('optimizer-quality-input').fill('50');
+    await page.getByTestId('optimizer-save-btn').click();
+
+    // 서버 응답의 구체적 메시지가 toast에 표시되어야 한다
+    await expect(page.getByText('body/quality must be >= 1')).toBeVisible();
+  });
+
   test('TLS 카드가 "정보 없음" 대신 실제 만료일·갱신일을 표시한다 (회귀: #32)', async ({ page }) => {
     // createCertificates() 팩토리의 issued_at / expires_at 값이 화면에 나타나야 한다
     await setupDetailMocks(page);

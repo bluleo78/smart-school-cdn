@@ -1,5 +1,6 @@
 /// 도메인 설정 탭 — 최적화 프로파일 편집 섹션
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { useOptimizerProfile } from '../../../hooks/useOptimizerProfile';
 import { useUpdateOptimizerProfile } from '../../../hooks/useUpdateOptimizerProfile';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
@@ -25,8 +26,16 @@ export function DomainOptimizerSection({ host }: Props) {
   const maxWidth = localMaxWidth ?? profile?.max_width ?? 0;
   const enabled = localEnabled ?? profile?.enabled ?? true;
 
-  /** 저장 */
+  /** 저장 — 서버 전송 전 클라이언트 범위 검증으로 불필요한 API 호출을 방지한다 */
   function handleSave() {
+    if (quality < 1 || quality > 100) {
+      toast.error('품질은 1–100 사이여야 합니다.');
+      return;
+    }
+    if (maxWidth < 0) {
+      toast.error('최대 너비는 0 이상이어야 합니다.');
+      return;
+    }
     updateMutation.mutate({ domain: host, quality, max_width: maxWidth, enabled });
   }
 
