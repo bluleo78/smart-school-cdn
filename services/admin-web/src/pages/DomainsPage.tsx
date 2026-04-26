@@ -35,7 +35,7 @@ function AddDomainDialog({ onClose }: { onClose: () => void }) {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const addDomain = useAddDomain();
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     // 제출 시 기존 에러 초기화
     setHostError(null);
