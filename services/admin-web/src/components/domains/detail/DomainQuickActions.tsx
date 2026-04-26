@@ -5,6 +5,7 @@ import type { Domain } from '../../../api/domain-types';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { Button } from '../../ui/button';
 import { AlertDialog, AlertDialogContent, AlertDialogTitle } from '../../ui/alert-dialog';
+import { Input } from '../../ui/input';
 import { testProxy } from '../../../api/proxy';
 import { usePurgeDomain } from '../../../hooks/usePurgeDomain';
 import { useTlsRenew } from '../../../hooks/useTlsRenew';
@@ -82,13 +83,13 @@ function ProxyTestDialog({
           ))}
         </div>
 
-        {/* 경로 입력 */}
-        <input
+        {/* 경로 입력 — shadcn Input으로 디자인 시스템 일관성 유지 */}
+        <Input
           type="text"
           value={path}
           onChange={(e) => setPath(e.target.value)}
           placeholder="/path/to/resource"
-          className="w-full rounded-md border border-border bg-muted/30 px-3 py-2 text-sm font-mono focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          className="font-mono"
           data-testid="proxy-test-path-input"
         />
 

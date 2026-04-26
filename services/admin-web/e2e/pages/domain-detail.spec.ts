@@ -223,6 +223,32 @@ test.describe('도메인 상세 — Overview 탭', () => {
     await expect(page.getByTestId('purge-confirm-dialog')).not.toBeVisible();
   });
 
+  test('프록시 테스트 다이얼로그 — 경로 입력 필드가 shadcn Input 높이(h-9)를 갖는다 (#50)', async ({ page }) => {
+    // raw <input> → shadcn <Input> 교체 회귀 방지
+    await setupDetailMocks(page);
+    await mockApi(page, 'POST', '/proxy/test', {
+      success: true,
+      status_code: 200,
+      response_time_ms: 42,
+    });
+    await page.goto('/domains/textbook.com');
+
+    // 프록시 테스트 다이얼로그 열기
+    await page.getByTestId('proxy-test-open').click();
+    await expect(page.getByTestId('proxy-test-dialog')).toBeVisible();
+
+    // 경로 입력 필드가 shadcn Input의 표준 높이(h-9 = 36px)를 적용해야 한다
+    const inputBox = await page.getByTestId('proxy-test-path-input').boundingBox();
+    expect(inputBox).not.toBeNull();
+    expect(inputBox!.height).toBeCloseTo(36, 0);
+
+    // 경로 입력 후 테스트 요청 전송 → 결과 표시
+    await page.getByTestId('proxy-test-path-input').fill('/api/get');
+    await page.getByTestId('proxy-test-submit').click();
+    await expect(page.getByTestId('proxy-test-result')).toBeVisible();
+    await expect(page.getByTestId('proxy-test-result')).toContainText('200');
+  });
+
   test('Overview — Quick Actions 4개 버튼이 동일 y 오프셋에 정렬된다', async ({ page }) => {
     await setupDetailMocks(page);
     await page.goto('/domains/textbook.com');
