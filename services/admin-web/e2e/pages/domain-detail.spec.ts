@@ -317,6 +317,33 @@ test.describe('도메인 상세 — 통계 탭', () => {
     await expect(page.getByTestId('manual-refresh-btn')).toBeVisible();
   });
 
+  test('7d/30d 기간 선택 시 24h degrade 안내 배너가 표시된다 (회귀: #51)', async ({ page }) => {
+    // 7d/30d 선택 시 캐시 시계열이 24h로 degrade되는데 안내 없이 표시되던 버그.
+    // 수정 후: degrade 조건에서 안내 배너(data-testid=cache-series-degrade-notice)가 나타나야 한다.
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '최적화' }).click();
+
+    // 기본(24h) 상태에서는 안내 배너가 없어야 한다
+    await expect(page.getByTestId('cache-series-degrade-notice')).toHaveCount(0);
+
+    // 7d 선택 → 안내 배너 표시
+    await page.getByTestId('period-7d').click();
+    await expect(page.getByTestId('cache-series-degrade-notice')).toBeVisible();
+
+    // 30d 선택 → 안내 배너 표시
+    await page.getByTestId('period-30d').click();
+    await expect(page.getByTestId('cache-series-degrade-notice')).toBeVisible();
+
+    // 1h 선택 → 안내 배너 사라짐
+    await page.getByTestId('period-1h').click();
+    await expect(page.getByTestId('cache-series-degrade-notice')).toHaveCount(0);
+
+    // 24h 선택 → 안내 배너 없음
+    await page.getByTestId('period-24h').click();
+    await expect(page.getByTestId('cache-series-degrade-notice')).toHaveCount(0);
+  });
+
   test('최적화 탭에 텍스트 압축 통계와 URL별 내역 표가 보인다', async ({ page }) => {
     await setupDetailMocks(page);
     await page.goto('/domains/textbook.com');
