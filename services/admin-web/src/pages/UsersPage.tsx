@@ -160,7 +160,8 @@ export function UsersPage() {
           <form onSubmit={createForm.handleSubmit((d) => { createMut.mutate(d); setCreateOpen(false); })} className="space-y-3">
             <div>
               <Label>이메일</Label>
-              <Input type="email" {...createForm.register('username')} />
+              {/* 이메일 입력 — autocomplete="username"으로 브라우저 자동완성·비밀번호 매니저 연동 지원 */}
+              <Input type="email" autoComplete="username" {...createForm.register('username')} />
               {createForm.formState.errors.username && <p className="text-xs text-destructive">{createForm.formState.errors.username.message}</p>}
             </div>
             <div>
