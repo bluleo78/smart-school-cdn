@@ -1,9 +1,10 @@
 /// 도메인 설정 탭 — Origin 편집, 캐시 퍼지, 최적화 프로파일, TLS 정보, 위험 영역(삭제)
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import type { Domain } from '../../../api/domain-types';
 import { useUpdateDomain } from '../../../hooks/useUpdateDomain';
 import { useDeleteDomain } from '../../../hooks/useDeleteDomain';
+import { useDomainTls } from '../../../hooks/useDomainTls';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
@@ -31,7 +32,7 @@ export function DomainSettingsTab({ domain }: Props) {
       <DomainOptimizerSection host={domain.host} />
 
       {/* 4. TLS / 인증서 */}
-      <TlsSection />
+      <TlsSection host={domain.host} />
 
       {/* 3. 위험 영역 */}
       <DangerSection host={domain.host} navigate={navigate} />
@@ -154,8 +155,30 @@ function OriginSection({ domain }: { domain: Domain }) {
   );
 }
 
-/** TLS / 인증서 카드 — 읽기 전용 정적 표시 */
-function TlsSection() {
+/** TLS / 인증서 카드 — useDomainTls hook으로 실제 인증서 데이터 표시 */
+function TlsSection({ host }: { host: string }) {
+  const { data: cert } = useDomainTls(host);
+
+  /** TLS 만료까지 남은 일수 — cert가 바뀔 때만 재계산 */
+  const daysUntilExpiry = useMemo(() => {
+    if (!cert) return null;
+    const expires = new Date(cert.expires_at).getTime();
+    // eslint-disable-next-line react-hooks/purity -- 만료일 계산에 현재 시간 필요
+    return Math.floor((expires - Date.now()) / 86_400_000);
+  }, [cert]);
+
+  /** TLS 상태 판별 — 만료/임박/유효/미발급 */
+  const tlsStatus = (() => {
+    if (daysUntilExpiry === null) return { label: '미발급', color: 'text-muted-foreground' };
+    if (daysUntilExpiry <= 0) return { label: '만료됨', color: 'text-destructive' };
+    if (daysUntilExpiry <= 30) return { label: `만료 ${daysUntilExpiry}일 전`, color: 'text-warning' };
+    return { label: '유효', color: 'text-success' };
+  })();
+
+  /** ISO 8601 문자열 → 한국어 날짜 문자열 (없으면 '—') */
+  const toKoDate = (iso: string | undefined) =>
+    iso ? new Date(iso).toLocaleDateString('ko-KR') : '—';
+
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -168,11 +191,11 @@ function TlsSection() {
       <CardContent>
         <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
           <TlsRow label="상태">
-            <span className="text-success">유효</span>
+            <span className={tlsStatus.color}>{tlsStatus.label}</span>
           </TlsRow>
           <TlsRow label="발급자">자동 발급</TlsRow>
-          <TlsRow label="만료일">정보 없음</TlsRow>
-          <TlsRow label="마지막 갱신">정보 없음</TlsRow>
+          <TlsRow label="만료일">{toKoDate(cert?.expires_at)}</TlsRow>
+          <TlsRow label="마지막 갱신">{toKoDate(cert?.issued_at)}</TlsRow>
         </div>
       </CardContent>
     </Card>

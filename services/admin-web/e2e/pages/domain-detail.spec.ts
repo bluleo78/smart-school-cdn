@@ -389,6 +389,27 @@ test.describe('도메인 상세 — 설정 탭', () => {
     await expect(page.getByTestId('optimizer-save-btn')).toBeEnabled();
   });
 
+  test('TLS 카드가 "정보 없음" 대신 실제 만료일·갱신일을 표시한다 (회귀: #32)', async ({ page }) => {
+    // createCertificates() 팩토리의 issued_at / expires_at 값이 화면에 나타나야 한다
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com');
+
+    await page.getByRole('tab', { name: '설정' }).click();
+    await expect(page.getByTestId('domain-settings-tab')).toBeVisible();
+
+    // "정보 없음" 하드코딩이 사라져야 한다 — 실제 날짜가 표시됨
+    const tlsCard = page.locator('text=TLS / 인증서').locator('../..');
+    await expect(tlsCard).not.toContainText('정보 없음');
+
+    // expires_at: '2027-01-01T00:00:00Z' → 한국어 포맷 확인
+    const expiresKo = new Date('2027-01-01T00:00:00Z').toLocaleDateString('ko-KR');
+    await expect(tlsCard).toContainText(expiresKo);
+
+    // issued_at: '2026-01-01T00:00:00Z' → 한국어 포맷 확인
+    const issuedKo = new Date('2026-01-01T00:00:00Z').toLocaleDateString('ko-KR');
+    await expect(tlsCard).toContainText(issuedKo);
+  });
+
   test('도메인 삭제 시 목록으로 리다이렉트된다', async ({ page }) => {
     await setupDetailMocks(page);
     await mockApi(page, 'DELETE', '/domains/textbook.com', null);
