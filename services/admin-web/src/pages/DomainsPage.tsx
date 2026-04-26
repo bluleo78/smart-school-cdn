@@ -258,6 +258,7 @@ export function DomainsPage() {
               onPurge={(host) => purgeMutation.mutate(host)}
               onDelete={(host) => setDeleteTarget(host)}
               onAddDomain={() => setShowAddDialog(true)}
+              searchQuery={filter.q}
             />
           )}
         </CardContent>

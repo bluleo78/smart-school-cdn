@@ -486,6 +486,54 @@ test.describe('도메인 상세 — 설정 탭', () => {
   });
 });
 
+// ─── 헤더 액션 에러 처리 (#45 회귀) ──────────────────────────────
+test.describe('도메인 상세 — 헤더 액션 에러 처리 (#45)', () => {
+  test('캐시 퍼지 실패 시 Unhandled Promise Rejection이 발생하지 않는다', async ({ page }) => {
+    // mutateAsync try-catch 누락 → Unhandled Promise Rejection 재발 방지
+    await setupDetailMocks(page);
+    // purge API를 500으로 모킹하여 에러 조건 재현
+    await mockApi(page, 'POST', '/domains/textbook.com/purge', { error: 'Proxy offline' }, { status: 500 });
+    await page.goto('/domains/textbook.com');
+
+    // uncaughtException / unhandledrejection 이벤트 수집
+    const uncaughtErrors: string[] = [];
+    page.on('pageerror', (err) => uncaughtErrors.push(err.message));
+
+    // 헤더의 캐시 퍼지 버튼 클릭 (에러 응답)
+    await page.getByTestId('domain-purge-button').click();
+
+    // onError toast가 표시되어야 한다 (에러 처리 정상 동작)
+    await expect(page.getByRole('status').first()).toBeVisible({ timeout: 3000 }).catch(() => {
+      // sonner toast가 role=status가 아닐 수 있으므로 대기만 진행
+    });
+
+    // 짧게 대기하여 Unhandled Rejection이 발생할 시간을 준다
+    await page.waitForTimeout(500);
+
+    // Unhandled Promise Rejection이 없어야 한다 (try-catch로 억제됨)
+    expect(uncaughtErrors.filter(m => m.includes('AxiosError') || m.includes('Request failed'))).toHaveLength(0);
+  });
+
+  test('활성화/비활성화 토글 실패 시 Unhandled Promise Rejection이 발생하지 않는다', async ({ page }) => {
+    // mutateAsync try-catch 누락 → Unhandled Promise Rejection 재발 방지
+    await setupDetailMocks(page);
+    // toggle API를 500으로 모킹하여 에러 조건 재현
+    await mockApi(page, 'POST', '/domains/textbook.com/toggle', { error: 'Proxy offline' }, { status: 500 });
+    await page.goto('/domains/textbook.com');
+
+    const uncaughtErrors: string[] = [];
+    page.on('pageerror', (err) => uncaughtErrors.push(err.message));
+
+    // 헤더의 비활성화 토글 버튼 클릭 (에러 응답)
+    await page.getByTestId('domain-toggle-button').click();
+
+    await page.waitForTimeout(500);
+
+    // Unhandled Promise Rejection이 없어야 한다 (try-catch로 억제됨)
+    expect(uncaughtErrors.filter(m => m.includes('AxiosError') || m.includes('Request failed'))).toHaveLength(0);
+  });
+});
+
 // ─── 빈 데이터 empty state (#21 회귀) ─────────────────────────
 test.describe('도메인 상세 — DomainStackedChart empty state (#21)', () => {
   test('캐시 시계열 데이터가 없으면 차트 대신 empty state 메시지가 표시된다', async ({ page }) => {

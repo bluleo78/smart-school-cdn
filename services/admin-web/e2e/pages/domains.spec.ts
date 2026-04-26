@@ -130,6 +130,32 @@ test.describe('도메인 관리 — 도메인 목록', () => {
     await expect(page.getByTestId('empty-add-domain-btn')).toBeVisible();
   });
 
+  /**
+   * 이슈 #43 회귀 방지 — 검색 결과 없을 때 잘못된 빈 상태 표시
+   * 도메인이 존재하지만 검색어와 일치하지 않을 때, 등록 유도 CTA가 아닌
+   * "검색 결과 없음" 메시지가 표시되어야 한다.
+   */
+  test('검색어와 일치하는 도메인이 없으면 검색 결과 없음 메시지가 표시된다 (#43)', async ({ page }) => {
+    await setupBaseMocks(page);
+    // 도메인이 존재하지만 검색 API가 빈 배열을 반환하는 시나리오를 모킹한다.
+    // 실제로는 서버에서 q 파라미터로 필터링한 결과가 빈 배열이 반환되는 상황이다.
+    await mockApi(page, 'GET', '/domains', createDomains());
+    // 검색어 적용 시 서버 응답을 빈 배열로 모킹 (q=xxxxxxnotexist 쿼리)
+    await mockApi(page, 'GET', '/domains?q=xxxxxxnotexist', []);
+
+    await page.goto('/domains');
+
+    // 검색 필드에 일치하지 않는 검색어 입력
+    await page.getByTestId('domain-search').fill('xxxxxxnotexist');
+
+    // 검색 결과 없음 상태가 표시되어야 한다
+    await expect(page.getByTestId('domains-empty-search')).toBeVisible();
+    // 검색어가 메시지에 포함되어야 한다
+    await expect(page.getByText(/xxxxxxnotexist/)).toBeVisible();
+    // 등록 유도 CTA 버튼은 표시되지 않아야 한다 (#43 핵심)
+    await expect(page.getByTestId('empty-add-domain-btn')).not.toBeVisible();
+  });
+
   test('빈 상태 CTA 버튼 클릭 시 도메인 추가 다이얼로그가 열린다', async ({ page }) => {
     // 빈 상태에서 CTA를 통해 추가 모달이 열리는 경로를 검증한다
     await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());

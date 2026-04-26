@@ -31,14 +31,26 @@ export function DomainDetailHeader({ domain }: Props) {
 
   const isEnabled = domain.enabled === 1;
 
-  /** 캐시 퍼지 처리 */
+  /** 캐시 퍼지 처리
+   * mutateAsync는 onError 콜백 실행 후에도 에러를 re-throw하므로
+   * try-catch로 Unhandled Promise Rejection을 방지한다 */
   async function handlePurge() {
-    await purgeDomain.mutateAsync(domain.host);
+    try {
+      await purgeDomain.mutateAsync(domain.host);
+    } catch {
+      // 에러는 usePurgeDomain의 onError toast가 이미 처리함
+    }
   }
 
-  /** 활성/비활성 토글 처리 */
+  /** 활성/비활성 토글 처리
+   * mutateAsync는 onError 콜백 실행 후에도 에러를 re-throw하므로
+   * try-catch로 Unhandled Promise Rejection을 방지한다 */
   async function handleToggle() {
-    await toggleDomain.mutateAsync(domain.host);
+    try {
+      await toggleDomain.mutateAsync(domain.host);
+    } catch {
+      // 에러는 useToggleDomain의 onError toast가 이미 처리함
+    }
   }
 
   /** 삭제 확인 후 목록으로 이동 */

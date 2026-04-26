@@ -24,6 +24,11 @@ interface DomainTableProps {
   onDelete: (host: string) => void;
   /** 빈 상태 CTA — 도메인 추가 모달을 여는 콜백 */
   onAddDomain: () => void;
+  /**
+   * 현재 적용된 검색어 — 빈 상태 메시지 분기에 사용한다.
+   * 검색어가 있으면 "검색 결과 없음", 없으면 "도메인 미등록" CTA를 표시한다.
+   */
+  searchQuery?: string;
 }
 
 export function DomainTable({
@@ -35,6 +40,7 @@ export function DomainTable({
   onPurge,
   onDelete,
   onAddDomain,
+  searchQuery,
 }: DomainTableProps) {
   // 로딩 상태: 5행 스켈레톤
   if (isLoading) {
@@ -47,8 +53,24 @@ export function DomainTable({
     );
   }
 
-  // 빈 상태 — 아이콘·제목·설명·CTA 4요소로 다음 행동을 안내한다
+  // 빈 상태 — 검색어 유무로 두 가지 상황을 분기한다
+  // 1) 검색어 있음: "검색 결과 없음" 메시지 표시 (CTA 없음 — 실제 도메인은 존재함)
+  // 2) 검색어 없음: 등록된 도메인이 아예 없으므로 추가 유도 CTA 제공
   if (!domains || domains.length === 0) {
+    if (searchQuery) {
+      return (
+        <div
+          className="flex flex-col items-center gap-3 py-16 text-muted-foreground"
+          data-testid="domains-empty-search"
+        >
+          <Globe size={40} className="opacity-25" />
+          <p className="text-sm font-medium text-foreground">
+            <strong>&ldquo;{searchQuery}&rdquo;</strong>에 일치하는 도메인이 없습니다.
+          </p>
+          <p className="text-xs">검색어를 바꿔 다시 시도해보세요.</p>
+        </div>
+      );
+    }
     return (
       <div
         className="flex flex-col items-center gap-3 py-16 text-muted-foreground"
