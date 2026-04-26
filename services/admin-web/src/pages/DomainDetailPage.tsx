@@ -1,8 +1,10 @@
 /** 도메인 상세 페이지
  * - /domains/:host 라우트에서 마운트
- * - 404(조회 실패) 시 목록 페이지로 리다이렉트
+ * - 404(조회 실패) 시 에러 토스트를 표시한 후 목록 페이지로 리다이렉트
  */
-import { useParams, Navigate } from 'react-router';
+import { useEffect } from 'react';
+import { useParams, Navigate, useNavigate } from 'react-router';
+import { toast } from 'sonner';
 import { useDomain } from '../hooks/useDomain';
 import { DomainDetailHeader } from '../components/domains/detail/DomainDetailHeader';
 import { DomainDetailTabs } from '../components/domains/detail/DomainDetailTabs';
@@ -20,9 +22,18 @@ export function DomainDetailPage() {
 /** host 확정 후 데이터 조회 분리 — conditional hook 회피 */
 function DomainDetailPageInner({ host }: { host: string }) {
   const { data: domain, isLoading, isError } = useDomain(host);
+  const navigate = useNavigate();
 
-  // 조회 실패(404 포함) → 목록으로 리다이렉트
-  if (isError) return <Navigate to="/domains" replace />;
+  // 조회 실패(404 포함) → 에러 토스트를 표시한 뒤 목록으로 이동
+  // Navigate 컴포넌트 대신 useEffect를 사용하는 이유:
+  // 렌더 중 side-effect(toast 호출)를 일으키면 React 경고가 발생하므로
+  // effect 단계에서 toast → navigate 순서로 처리한다.
+  useEffect(() => {
+    if (isError) {
+      toast.error('해당 도메인을 찾을 수 없습니다.');
+      navigate('/domains', { replace: true });
+    }
+  }, [isError, navigate]);
 
   if (isLoading || !domain) {
     return (

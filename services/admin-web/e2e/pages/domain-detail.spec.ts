@@ -905,6 +905,29 @@ test.describe('도메인 상세 — DomainStackedChart empty state (#21)', () =>
   });
 });
 
+// ─── 존재하지 않는 도메인 접근 (#66 회귀) ──────────────────────────
+test.describe('도메인 상세 — 존재하지 않는 도메인 접근 (#66)', () => {
+  /**
+   * 이슈 #66 회귀 방지 — 존재하지 않는 도메인 URL 접근 시 토스트 없이 조용히 리다이렉트되던 버그
+   * 수정 후: 에러 토스트("해당 도메인을 찾을 수 없습니다.")를 표시한 뒤 /domains로 이동해야 한다.
+   */
+  test('존재하지 않는 도메인 URL 접근 시 에러 토스트가 표시되고 목록으로 이동한다', async ({ page }) => {
+    await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
+    await mockApi(page, 'GET', '/proxy/requests', []);
+    await mockApi(page, 'GET', '/domains/summary', createDomainSummary());
+    // 존재하지 않는 도메인 — 404 반환
+    await mockApi(page, 'GET', '/domains/nonexistent-xyz', { message: 'Not Found' }, { status: 404 });
+
+    await page.goto('/domains/nonexistent-xyz');
+
+    // 에러 토스트가 표시되어야 한다 (수정 전: 토스트 없이 조용히 리다이렉트됨)
+    await expect(page.getByText('해당 도메인을 찾을 수 없습니다.')).toBeVisible();
+
+    // /domains 목록으로 이동해야 한다
+    await expect(page).toHaveURL(/\/domains$/);
+  });
+});
+
 // ─── 탭 URL 동기화 (#61 회귀) ──────────────────────────────────────
 test.describe('도메인 상세 — 탭 URL searchParam 동기화 (#61)', () => {
   /**
