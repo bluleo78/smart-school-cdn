@@ -10,6 +10,7 @@ import {
   TableRow,
 } from '../ui/table';
 import { Badge } from '../ui/badge';
+import { Button } from '../ui/button';
 import { Skeleton } from '../ui/skeleton';
 import type { Domain } from '../../api/domain-types';
 
@@ -21,6 +22,8 @@ interface DomainTableProps {
   onToggle: (host: string) => void;
   onPurge: (host: string) => void;
   onDelete: (host: string) => void;
+  /** 빈 상태 CTA — 도메인 추가 모달을 여는 콜백 */
+  onAddDomain: () => void;
 }
 
 export function DomainTable({
@@ -31,6 +34,7 @@ export function DomainTable({
   onToggle,
   onPurge,
   onDelete,
+  onAddDomain,
 }: DomainTableProps) {
   // 로딩 상태: 5행 스켈레톤
   if (isLoading) {
@@ -43,7 +47,7 @@ export function DomainTable({
     );
   }
 
-  // 빈 상태
+  // 빈 상태 — 아이콘·제목·설명·CTA 4요소로 다음 행동을 안내한다
   if (!domains || domains.length === 0) {
     return (
       <div
@@ -51,7 +55,12 @@ export function DomainTable({
         data-testid="domains-empty"
       >
         <Globe size={40} className="opacity-25" />
-        <p className="text-sm">등록된 도메인이 없습니다.</p>
+        <p className="text-sm font-medium text-foreground">등록된 도메인이 없습니다</p>
+        <p className="text-xs">CDN을 시작하려면 도메인을 추가하세요.</p>
+        {/* 첫 방문 사용자가 바로 도메인을 추가할 수 있도록 CTA 제공 */}
+        <Button size="sm" onClick={onAddDomain} data-testid="empty-add-domain-btn">
+          + 도메인 추가
+        </Button>
       </div>
     );
   }

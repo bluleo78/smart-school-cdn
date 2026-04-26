@@ -224,6 +224,7 @@ export function DomainsPage() {
               onToggle={(host) => toggleMutation.mutate(host)}
               onPurge={(host) => purgeMutation.mutate(host)}
               onDelete={(host) => setDeleteTarget(host)}
+              onAddDomain={() => setShowAddDialog(true)}
             />
           )}
         </CardContent>

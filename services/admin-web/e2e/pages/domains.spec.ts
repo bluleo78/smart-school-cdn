@@ -88,7 +88,7 @@ test.describe('도메인 관리 — 도메인 목록', () => {
     await expect(page.getByTestId('domain-row-cdn.school.kr')).toBeVisible();
   });
 
-  test('도메인이 없으면 빈 상태 메시지가 표시된다', async ({ page }) => {
+  test('도메인이 없으면 빈 상태 메시지와 CTA 버튼이 표시된다', async ({ page }) => {
     await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
     await mockApi(page, 'GET', '/proxy/requests', []);
     await mockApi(page, 'GET', '/domains/summary', {
@@ -100,8 +100,30 @@ test.describe('도메인 관리 — 도메인 목록', () => {
 
     await page.goto('/domains');
 
+    // 빈 상태 컨테이너가 보여야 한다
     await expect(page.getByTestId('domains-empty')).toBeVisible();
-    await expect(page.getByText('등록된 도메인이 없습니다.')).toBeVisible();
+    await expect(page.getByText('등록된 도메인이 없습니다')).toBeVisible();
+    // CDN 시작 안내 문구가 있어야 한다
+    await expect(page.getByText('CDN을 시작하려면 도메인을 추가하세요.')).toBeVisible();
+    // CTA 버튼이 표시되어야 한다
+    await expect(page.getByTestId('empty-add-domain-btn')).toBeVisible();
+  });
+
+  test('빈 상태 CTA 버튼 클릭 시 도메인 추가 다이얼로그가 열린다', async ({ page }) => {
+    // 빈 상태에서 CTA를 통해 추가 모달이 열리는 경로를 검증한다
+    await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
+    await mockApi(page, 'GET', '/proxy/requests', []);
+    await mockApi(page, 'GET', '/domains/summary', {
+      ...createDomainSummary(),
+      total: 0,
+      enabled: 0,
+    });
+    await mockApi(page, 'GET', '/domains', []);
+
+    await page.goto('/domains');
+
+    await page.getByTestId('empty-add-domain-btn').click();
+    await expect(page.getByTestId('add-domain-dialog')).toBeVisible();
   });
 });
 
