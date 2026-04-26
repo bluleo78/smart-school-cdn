@@ -327,6 +327,53 @@ test.describe('도메인 관리 — 다이얼로그 ESC 닫기', () => {
 });
 
 /**
+ * 이슈 #55 회귀 방지 — 일괄 추가 형식 오류 메시지 덮어쓰기
+ * parseLines()가 형식 오류로 null을 반환할 때, handleSubmit()에서
+ * "추가할 도메인을 입력해주세요."로 덮어쓰지 않고 원래 형식 오류 메시지를 유지한다.
+ */
+test.describe('도메인 관리 — 일괄 추가 (#55)', () => {
+  test('잘못된 형식(origin 없이 host만 입력)이면 형식 오류 메시지가 표시된다', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+
+    await page.goto('/domains');
+
+    // 일괄 추가 다이얼로그 열기
+    await page.getByRole('button', { name: '일괄 추가' }).click();
+    await expect(page.getByTestId('bulk-add-dialog')).toBeVisible();
+
+    // origin 없이 host만 입력 (잘못된 형식)
+    await page.getByTestId('bulk-add-textarea').fill('invalid-domain-only');
+    await page.getByTestId('bulk-add-submit').click();
+
+    // "추가할 도메인을 입력해주세요."가 아닌 형식 오류 메시지가 표시되어야 한다 (#55 핵심)
+    const errorMsg = page.getByTestId('bulk-add-error');
+    await expect(errorMsg).toBeVisible();
+    await expect(errorMsg).toContainText('잘못된 형식');
+    await expect(errorMsg).not.toHaveText('추가할 도메인을 입력해주세요.');
+  });
+
+  test('빈 입력이면 "추가할 도메인을 입력해주세요." 메시지가 표시된다', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+
+    await page.goto('/domains');
+
+    // 일괄 추가 다이얼로그 열기
+    await page.getByRole('button', { name: '일괄 추가' }).click();
+    await expect(page.getByTestId('bulk-add-dialog')).toBeVisible();
+
+    // 아무것도 입력하지 않고 제출
+    await page.getByTestId('bulk-add-submit').click();
+
+    // 빈 입력 안내 메시지가 표시되어야 한다
+    const errorMsg = page.getByTestId('bulk-add-error');
+    await expect(errorMsg).toBeVisible();
+    await expect(errorMsg).toHaveText('추가할 도메인을 입력해주세요.');
+  });
+});
+
+/**
  * 이슈 #29 — 포커스 복귀 및 포커스 트랩 회귀 테스트
  * Radix UI Dialog 교체 후 WCAG 2.4.3 준수 검증:
  * 1. 닫힘 후 트리거 버튼으로 포커스 복귀

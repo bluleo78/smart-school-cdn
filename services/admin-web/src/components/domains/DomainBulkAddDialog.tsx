@@ -36,7 +36,9 @@ export function DomainBulkAddDialog({ open, onOpenChange }: DomainBulkAddDialogP
   async function handleSubmit() {
     setParseError(null);
     const domains = parseLines();
-    if (!domains || domains.length === 0) {
+    // parseLines()가 null을 반환한 경우 이미 내부에서 setParseError 호출됨 — 덮어쓰지 않고 그냥 리턴
+    if (domains === null) return;
+    if (domains.length === 0) {
       setParseError('추가할 도메인을 입력해주세요.');
       return;
     }
