@@ -88,7 +88,7 @@ export function DomainToolbar({
           value={filter.enabled === undefined ? 'all' : String(filter.enabled)}
           onValueChange={handleEnabledChange}
         >
-          <SelectTrigger className="w-28">
+          <SelectTrigger className="w-28" data-testid="domain-enabled-filter">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

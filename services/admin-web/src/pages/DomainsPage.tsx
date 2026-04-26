@@ -2,8 +2,10 @@
  * 도메인 관리 페이지 — 전면 교체
  * - 요약 카드, 경고 배너, 툴바, 테이블, 다이얼로그 서브 컴포넌트 조합
  * - 기존 사이드패널 + 프록시 테스트 제거
+ * - 필터 상태를 useSearchParams로 관리하여 URL에 동기화 (#68)
  */
 import { useState } from 'react';
+import { useSearchParams } from 'react-router';
 import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogTitle } from '../components/ui/dialog';
 import { AlertDialog, AlertDialogContent, AlertDialogTitle } from '../components/ui/alert-dialog';
@@ -173,8 +175,25 @@ function DeleteConfirmDialog({
 // ─── 메인 페이지 ─────────────────────────────────────────────────
 
 export function DomainsPage() {
-  // 필터 상태
-  const [filter, setFilter] = useState<DomainsFilter>({});
+  // 필터 상태를 URL searchParams와 동기화 — 새로고침/공유 시 검색 조건 유지 (#68)
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  /** URL searchParams에서 현재 필터 값을 파생 */
+  const filter: DomainsFilter = {
+    q: searchParams.get('q') ?? undefined,
+    // enabled 파라미터: 'true' | 'false' → boolean, 없으면 undefined
+    enabled: searchParams.has('enabled')
+      ? searchParams.get('enabled') === 'true'
+      : undefined,
+  };
+
+  /** 필터 변경 시 URL searchParams에 반영 (replace: true로 히스토리 오염 방지) */
+  function setFilter(next: DomainsFilter) {
+    const params: Record<string, string> = {};
+    if (next.q) params.q = next.q;
+    if (next.enabled !== undefined) params.enabled = String(next.enabled);
+    setSearchParams(params, { replace: true });
+  }
 
   // 선택된 호스트 (일괄 작업용)
   const [selectedHosts, setSelectedHosts] = useState<Set<string>>(new Set());

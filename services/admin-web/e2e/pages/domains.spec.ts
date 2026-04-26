@@ -374,6 +374,71 @@ test.describe('도메인 관리 — 일괄 추가 (#55)', () => {
 });
 
 /**
+ * 이슈 #68 회귀 방지 — 검색 필터 URL 동기화
+ * DomainsPage가 useSearchParams로 필터를 관리하여 검색어와 상태 필터가
+ * URL querystring(?q=..., ?enabled=...)에 반영되고, 새로고침 시 복원되어야 한다.
+ */
+test.describe('도메인 관리 — 검색 필터 URL 동기화 (#68)', () => {
+  test('검색어 입력 시 URL ?q= 파라미터에 반영된다', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+    await mockApi(page, 'GET', '/domains?q=textbook', createDomains());
+
+    await page.goto('/domains');
+
+    // 검색어 입력 (debounce 300ms 대기)
+    await page.getByTestId('domain-search').fill('textbook');
+    await page.waitForTimeout(400);
+
+    // URL에 ?q=textbook이 반영되어야 한다 (#68 핵심)
+    expect(page.url()).toContain('q=textbook');
+  });
+
+  test('URL ?q= 파라미터가 있으면 페이지 로드 시 검색어가 복원된다', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+    await mockApi(page, 'GET', '/domains?q=textbook', createDomains());
+
+    // 검색어가 포함된 URL로 직접 접근
+    await page.goto('/domains?q=textbook');
+
+    // 검색 입력 필드에 검색어가 복원되어야 한다 (#68 핵심)
+    await expect(page.getByTestId('domain-search')).toHaveValue('textbook');
+  });
+
+  test('활성 필터 변경 시 URL ?enabled= 파라미터에 반영된다', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+    await mockApi(page, 'GET', '/domains?enabled=true', createDomains());
+
+    await page.goto('/domains');
+
+    // 활성 필터 선택 — listbox 내에서 option을 찾아 strict mode 위반 방지
+    await page.getByTestId('domain-enabled-filter').click();
+    await page.getByRole('listbox').getByRole('option', { name: '활성', exact: true }).click();
+    await page.waitForTimeout(100);
+
+    // URL에 ?enabled=true가 반영되어야 한다 (#68 핵심)
+    expect(page.url()).toContain('enabled=true');
+  });
+
+  test('URL ?enabled=true 파라미터가 있으면 페이지 로드 시 필터가 복원된다', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+    await mockApi(page, 'GET', '/domains?enabled=true', createDomains());
+
+    // 필터가 포함된 URL로 직접 접근
+    await page.goto('/domains?enabled=true');
+
+    // API 요청에 enabled=true가 포함되어야 한다 (필터 복원 확인)
+    const domainsReq = page.waitForRequest(/\/api\/domains\?enabled=true/);
+    // 이미 로드된 경우를 위해 refetch 트리거
+    await page.reload();
+    await domainsReq;
+  });
+});
+
+/**
  * 이슈 #29 — 포커스 복귀 및 포커스 트랩 회귀 테스트
  * Radix UI Dialog 교체 후 WCAG 2.4.3 준수 검증:
  * 1. 닫힘 후 트리거 버튼으로 포커스 복귀
