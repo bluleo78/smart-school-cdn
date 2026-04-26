@@ -114,7 +114,7 @@ function StatusStrip() {
         {/* 업타임 */}
         <StripStat label="Uptime" value={formatUptime(status.uptime_secs)} />
         {/* 누적 쿼리 */}
-        <StripStat label="Total" value={status.total.toLocaleString()} />
+        <StripStat label="전체" value={status.total.toLocaleString()} />
         {/* QPS */}
         <StripStat label="QPS (직전 1분)" value={qpsRecent.toFixed(2)} />
       </CardContent>
@@ -164,10 +164,11 @@ function RecordsTab() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Host</TableHead>
-                <TableHead>Target</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Source</TableHead>
+                {/* 한국어 UI 통일 — 이슈 #19 */}
+                <TableHead>호스트</TableHead>
+                <TableHead>대상 IP</TableHead>
+                <TableHead>유형</TableHead>
+                <TableHead>출처</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -212,9 +213,10 @@ function StatsTab() {
     <div className="space-y-6">
       {/* KPI 카드 4장 — DomainSummaryCards 의 text-3xl font-bold 패턴 */}
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-        <StatCard label="Total" value={totals.total} />
-        <StatCard label="Matched" value={totals.matched} accent="text-success" />
-        <StatCard label="Forwarded" value={totals.forwarded} accent="text-muted-foreground" />
+        {/* 한국어 UI 통일 — 이슈 #19 */}
+        <StatCard label="전체" value={totals.total} />
+        <StatCard label="매칭" value={totals.matched} accent="text-success" />
+        <StatCard label="전달" value={totals.forwarded} accent="text-muted-foreground" />
         {/* NXDOMAIN > 0일 때만 destructive 색상 적용 — 0이면 정상 상태이므로 기본 색 사용 */}
         <StatCard label="NXDOMAIN" value={totals.nxdomain} accent={totals.nxdomain > 0 ? 'text-destructive' : undefined} />
       </div>
@@ -308,9 +310,10 @@ function StatsTab() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  {/* 한국어 UI 통일 — 이슈 #19 */}
                   <TableHead className="w-12">#</TableHead>
-                  <TableHead>Domain</TableHead>
-                  <TableHead className="text-right">Count</TableHead>
+                  <TableHead>도메인</TableHead>
+                  <TableHead className="text-right">횟수</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -382,12 +385,13 @@ function QueriesTab() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Time</TableHead>
-                <TableHead>Client</TableHead>
-                <TableHead>Domain</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Result</TableHead>
-                <TableHead className="text-right">Latency</TableHead>
+                {/* 한국어 UI 통일 — 이슈 #19 */}
+                <TableHead>시각</TableHead>
+                <TableHead>클라이언트</TableHead>
+                <TableHead>도메인</TableHead>
+                <TableHead>유형</TableHead>
+                <TableHead>결과</TableHead>
+                <TableHead className="text-right">지연</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
