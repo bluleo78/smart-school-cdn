@@ -273,6 +273,25 @@ test.describe('도메인 상세 — 통계 탭', () => {
     await expect(page.getByTestId('period-custom')).toBeVisible();
   });
 
+  test('커스텀 기간 — from만 입력해도 오늘까지 범위가 적용된다 (회귀: #40)', async ({ page }) => {
+    // from만 입력 시 to 없이 applyCustom이 호출되면 to <= from 조건으로 조용히 무시되던 버그
+    // 수정 후: to가 없으면 오늘 날짜를 기본값으로 사용하여 onChange가 호출되어야 한다
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '최적화' }).click();
+
+    // 커스텀 버튼 클릭 → 날짜 입력 표시 (커스텀 버튼은 비선택 상태)
+    await page.getByTestId('period-custom').click();
+    await expect(page.getByTestId('period-custom-from')).toBeVisible();
+
+    // from만 입력하고 to는 비워둠
+    await page.getByTestId('period-custom-from').fill('2026-04-01');
+
+    // 오늘 날짜가 기본 to로 설정되어 from < to 조건 충족 → period 선택이 커스텀으로 전환됨
+    // aria-pressed="true"는 커스텀 버튼이 선택 상태임을 나타냄
+    await expect(page.getByTestId('period-custom')).toHaveAttribute('aria-pressed', 'true');
+  });
+
   test('커스텀 기간 날짜 입력이 shadcn Input 컴포넌트를 사용한다 — 포커스 링 클래스 존재 (회귀: #8)', async ({ page }) => {
     // raw <input> 대신 <Input> 컴포넌트를 사용해야 focus-visible:ring-* 클래스가 적용된다
     await setupDetailMocks(page);
@@ -423,6 +442,47 @@ test.describe('도메인 상세 — 설정 탭', () => {
     // 삭제 확인 클릭 → /domains로 리다이렉트
     await page.getByTestId('domain-delete-confirm').click();
     await expect(page).toHaveURL(/\/domains$/);
+  });
+
+  test('URL 퍼지 — 다른 도메인 URL 입력 시 에러 토스트가 표시되고 API를 호출하지 않는다 (#36 회귀)', async ({ page }) => {
+    // mock: purge API 인터셉터로 호출 여부를 추적한다
+    await setupDetailMocks(page);
+    let purgeCallCount = 0;
+    await page.route('**/api/cache/purge', (route) => {
+      purgeCallCount++;
+      return route.fulfill({ json: { purged_count: 0 } });
+    });
+    await page.goto('/domains/textbook.com');
+
+    // 설정 탭 전환 → URL 퍼지 입력창에 타 도메인 URL 입력
+    await page.getByRole('tab', { name: '설정' }).click();
+    await page.getByTestId('url-purge-input').fill('https://totally-different-domain.com/secret/path');
+    await page.getByTestId('url-purge-btn').click();
+
+    // 에러 토스트가 표시되어야 한다 — 도메인 불일치 메시지 포함
+    await expect(page.getByText('textbook.com 도메인 소속이어야 합니다')).toBeVisible();
+    // purge API는 호출되지 않아야 한다
+    expect(purgeCallCount).toBe(0);
+  });
+
+  test('URL 퍼지 — 유효하지 않은 URL 입력 시 에러 토스트가 표시된다 (#36 회귀)', async ({ page }) => {
+    await setupDetailMocks(page);
+    let purgeCallCount = 0;
+    await page.route('**/api/cache/purge', (route) => {
+      purgeCallCount++;
+      return route.fulfill({ json: { purged_count: 0 } });
+    });
+    await page.goto('/domains/textbook.com');
+
+    // 설정 탭 전환 → URL 형식이 아닌 값 입력
+    await page.getByRole('tab', { name: '설정' }).click();
+    await page.getByTestId('url-purge-input').fill('not-a-valid-url');
+    await page.getByTestId('url-purge-btn').click();
+
+    // 유효하지 않은 URL 에러 토스트가 표시되어야 한다
+    await expect(page.getByText('유효한 URL을 입력해 주세요')).toBeVisible();
+    // purge API는 호출되지 않아야 한다
+    expect(purgeCallCount).toBe(0);
   });
 });
 

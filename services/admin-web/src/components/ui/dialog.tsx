@@ -89,6 +89,9 @@ export function DialogContent({ className, onCloseAutoFocus: externalOnCloseAuto
 
   return (
     <DialogPrimitive.Content
+      // aria-describedby={undefined}을 명시해 Radix의 "Missing Description" 경고를 억제한다.
+      // 각 다이얼로그 본문이 직접 설명 텍스트를 포함하므로 별도 DialogDescription은 불필요하다.
+      aria-describedby={undefined}
       className={cn('bg-card rounded-xl shadow-lg w-full max-w-md p-6 space-y-4', className)}
       onOpenAutoFocus={() => {
         // Radix FocusScope가 previouslyFocusedElement를 저장하기 전에 native autoFocus로

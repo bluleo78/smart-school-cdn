@@ -84,7 +84,9 @@ export function PeriodSelector({ value, onChange }: Props) {
             className="h-8 w-36 px-2 text-xs"
             defaultValue={value.from ? epochToDateStr(value.from) : ''}
             onChange={(e) => {
-              const toStr = value.to ? epochToDateStr(value.to) : e.target.value;
+              // to가 없으면 오늘 날짜를 기본값으로 사용 — from만 입력해도 오늘까지 범위 적용
+              const today = epochToDateStr(Math.floor(Date.now() / 1000));
+              const toStr = value.to ? epochToDateStr(value.to) : today;
               applyCustom(e.target.value, toStr);
             }}
             data-testid="period-custom-from"
