@@ -84,7 +84,9 @@ function AddDomainDialog({ onClose }: { onClose: () => void }) {
             onChange={(e) => { setHost(e.target.value); setHostError(null); }}
             placeholder="textbook.com 또는 *.textbook.com"
             data-testid="add-domain-host"
-            autoFocus
+            // autoFocus 제거 — Radix DialogContent의 onOpenAutoFocus가 첫 포커스를 처리한다.
+            // native autoFocus는 Radix FocusScope useEffect보다 먼저 실행되어
+            // 트리거 버튼으로의 포커스 복귀(WCAG 2.4.3)를 깨뜨린다 (이슈 #29).
           />
           {/* 도메인 필드 인라인 에러 */}
           {hostError && (

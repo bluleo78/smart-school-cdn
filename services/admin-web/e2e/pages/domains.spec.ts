@@ -278,3 +278,53 @@ test.describe('도메인 관리 — 다이얼로그 ESC 닫기', () => {
     await expect(page.getByTestId('delete-domain-dialog')).not.toBeVisible();
   });
 });
+
+/**
+ * 이슈 #29 — 포커스 복귀 및 포커스 트랩 회귀 테스트
+ * Radix UI Dialog 교체 후 WCAG 2.4.3 준수 검증:
+ * 1. 닫힘 후 트리거 버튼으로 포커스 복귀
+ * 2. 열린 상태에서 Tab이 다이얼로그 안에서만 순환 (포커스 트랩)
+ */
+test.describe('도메인 관리 — 다이얼로그 포커스 관리 (#29)', () => {
+  test('ESC로 닫으면 트리거 버튼("+ 도메인 추가")으로 포커스가 복귀한다', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', []);
+
+    await page.goto('/domains');
+
+    // Radix는 다이얼로그 열릴 때의 activeElement를 기억하여 닫힐 때 복귀시킨다.
+    // page.focus()로 키보드 포커스를 버튼에 올린 뒤 Enter로 열어야 올바른 복귀 대상이 기록된다.
+    await page.getByTestId('toolbar-add-btn').focus();
+    await page.keyboard.press('Enter');
+    await expect(page.getByTestId('add-domain-dialog')).toBeVisible();
+
+    // ESC로 닫기
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('add-domain-dialog')).not.toBeVisible();
+
+    // WCAG 2.4.3: 닫힌 후 포커스가 트리거 버튼으로 복귀해야 한다
+    await expect(page.getByTestId('toolbar-add-btn')).toBeFocused();
+  });
+
+  test('다이얼로그 열린 상태에서 Tab을 여러 번 눌러도 포커스가 다이얼로그 안에 머문다 (포커스 트랩)', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', []);
+
+    await page.goto('/domains');
+
+    await page.getByTestId('toolbar-add-btn').click();
+    await expect(page.getByTestId('add-domain-dialog')).toBeVisible();
+
+    // 다이얼로그 안의 포커스 가능 요소 수보다 많이 Tab을 눌러 순환을 확인
+    for (let i = 0; i < 6; i++) {
+      await page.keyboard.press('Tab');
+    }
+
+    // 포커스가 다이얼로그 콘텐츠 안에 있어야 한다 (다이얼로그 바깥으로 이탈 금지)
+    const focusInDialog = await page.evaluate(() => {
+      const dialog = document.querySelector('[data-testid="add-domain-dialog"]');
+      return dialog ? dialog.contains(document.activeElement) : false;
+    });
+    expect(focusInDialog).toBe(true);
+  });
+});
