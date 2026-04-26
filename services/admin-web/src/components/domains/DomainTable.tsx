@@ -86,7 +86,8 @@ export function DomainTable({
 
   return (
     <Table data-testid="domains-table">
-      <TableHeader>
+      {/* sticky top-0: Card(overflow-auto)가 스크롤 컨테이너이므로 thead를 고정해 컬럼명 유지 */}
+      <TableHeader className="sticky top-0 z-10">
         <TableRow>
           {/* 전체 선택 체크박스 */}
           <TableHead className="w-10">
