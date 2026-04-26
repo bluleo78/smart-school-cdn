@@ -29,7 +29,10 @@ export function LoginPage() {
     setServerError(null);
     try {
       await login(data.username, data.password);
-      const from = searchParams.get('from') ?? '/';
+      const rawFrom = searchParams.get('from') ?? '/';
+      // Open Redirect 방지: 상대 경로만 허용.
+      // http:// / https:// 또는 protocol-relative URL(//)로 시작하면 홈으로 fallback.
+      const from = rawFrom.startsWith('/') && !rawFrom.startsWith('//') ? rawFrom : '/';
       navigate(from, { replace: true });
     } catch (e) {
       const status = (e as { response?: { status?: number } }).response?.status;
