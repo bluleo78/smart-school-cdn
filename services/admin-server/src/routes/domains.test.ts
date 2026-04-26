@@ -212,6 +212,73 @@ describe('POST /api/domains', () => {
   });
 });
 
+describe('PUT /api/domains/:host', () => {
+  it('origin을 정상 값으로 업데이트하면 200 반환한다', async () => {
+    const repo = makeRepo();
+    repo.upsert('httpbin.org', 'https://httpbin.org');
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/domains/httpbin.org',
+      payload: { origin: 'https://new-origin.com' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body).origin).toBe('https://new-origin.com');
+  });
+
+  it('origin이 빈 문자열이면 400 반환한다 (#59)', async () => {
+    // POST /api/domains는 !origin 검사가 있지만 PUT에는 없어 빈 origin이 저장되던 버그 수정
+    const repo = makeRepo();
+    repo.upsert('httpbin.org', 'https://httpbin.org');
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/domains/httpbin.org',
+      payload: { origin: '' },
+    });
+    expect(res.statusCode).toBe(400);
+    // 원래 origin이 그대로 유지되어야 한다
+    expect(repo.findByHost('httpbin.org')?.origin).toBe('https://httpbin.org');
+  });
+
+  it('origin이 공백만 있는 문자열이면 400 반환한다 (#59)', async () => {
+    const repo = makeRepo();
+    repo.upsert('httpbin.org', 'https://httpbin.org');
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/domains/httpbin.org',
+      payload: { origin: '   ' },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('origin 없이 enabled만 보내면 200 반환한다 (origin은 변경 안 됨)', async () => {
+    const repo = makeRepo();
+    repo.upsert('httpbin.org', 'https://httpbin.org');
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/domains/httpbin.org',
+      payload: { enabled: 0 },
+    });
+    expect(res.statusCode).toBe(200);
+    // origin은 그대로 유지된다
+    expect(repo.findByHost('httpbin.org')?.origin).toBe('https://httpbin.org');
+  });
+
+  it('없는 도메인 PUT 시 404 반환한다', async () => {
+    const repo = makeRepo();
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/domains/notexist.com',
+      payload: { origin: 'https://new.com' },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
 describe('DELETE /api/domains/:host', () => {
   it('존재하는 도메인을 삭제하고 204 반환한다', async () => {
     const repo = makeRepo();

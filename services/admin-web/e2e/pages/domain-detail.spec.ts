@@ -564,6 +564,34 @@ test.describe('도메인 상세 — Logs 탭', () => {
 // ─────────────────────────────────────────────
 
 test.describe('도메인 상세 — 설정 탭', () => {
+  test('Origin 빈값 저장 시 에러 토스트가 표시되고 PUT이 호출되지 않는다 (회귀: #59)', async ({ page }) => {
+    // 수정 전: handleSave()가 origin 검증 없이 뮤테이션을 호출해 빈 origin이 저장됨
+    // 수정 후: 클라이언트 검증이 서버 전송을 막고 에러 토스트를 표시해야 한다
+    await setupDetailMocks(page);
+    let putCallCount = 0;
+    await page.route('**/api/domains/textbook.com', (route) => {
+      if (route.request().method() === 'PUT') putCallCount++;
+      return route.fallback();
+    });
+    await page.goto('/domains/textbook.com');
+
+    // 설정 탭으로 전환
+    await page.getByRole('tab', { name: '설정' }).click();
+    await expect(page.getByTestId('domain-settings-tab')).toBeVisible();
+
+    // 편집 모드 진입 → origin 비움 → 저장 시도
+    await page.getByTestId('edit-domain-btn').click();
+    await page.getByTestId('origin-input').fill('');
+    await page.getByTestId('save-domain-btn').click();
+
+    // 에러 토스트가 표시되어야 한다
+    await expect(page.getByText('오리진 URL을 입력해 주세요.')).toBeVisible();
+    // PUT API는 호출되지 않아야 한다
+    expect(putCallCount).toBe(0);
+    // 편집 모드가 유지되어야 한다 (저장 버튼이 여전히 보임)
+    await expect(page.getByTestId('save-domain-btn')).toBeVisible();
+  });
+
   test('Origin 편집이 동작한다', async ({ page }) => {
     await setupDetailMocks(page);
     await mockApi(page, 'PUT', '/domains/textbook.com', {

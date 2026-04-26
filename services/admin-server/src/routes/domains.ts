@@ -281,6 +281,10 @@ export async function domainRoutes(
   }>('/api/domains/:host', async (request, reply) => {
     const host = decodeURIComponent(request.params.host);
     const { origin, enabled, description } = request.body ?? {};
+    // origin이 전달되었는데 빈 문자열이면 400 — POST와 동일한 필수값 보장
+    if (origin !== undefined && origin.trim() === '') {
+      return reply.status(400).send({ error: 'origin은 빈 문자열로 저장할 수 없습니다.' });
+    }
     const updated = domainRepo.update(host, { origin, enabled, description });
     if (!updated) {
       return reply.status(404).send({ error: '도메인을 찾을 수 없습니다.' });

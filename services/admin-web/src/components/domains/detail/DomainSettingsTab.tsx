@@ -12,6 +12,7 @@ import { Label } from '../../ui/label';
 import { Dialog, DialogContent, DialogTitle } from '../../ui/dialog';
 import { DomainCacheSection } from './DomainCacheSection';
 import { DomainOptimizerSection } from './DomainOptimizerSection';
+import { toast } from 'sonner';
 
 interface Props {
   domain: Domain;
@@ -58,8 +59,13 @@ function OriginSection({ domain }: { domain: Domain }) {
     setEditing(false);
   }
 
-  /** 저장 — 뮤테이션 후 편집 모드 해제 */
+  /** 저장 — origin 빈값 클라이언트 검증 후 뮤테이션 호출, 편집 모드 해제 */
   function handleSave() {
+    // 오리진 빈값 검증 — 서버로 보내기 전에 차단하여 데이터 무결성 보장
+    if (!origin.trim()) {
+      toast.error('오리진 URL을 입력해 주세요.');
+      return;
+    }
     updateMutation.mutate(
       { host: domain.host, body: { origin, description } },
       { onSuccess: () => setEditing(false) },
