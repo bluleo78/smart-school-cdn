@@ -17,9 +17,19 @@ export function BarSparkline({ values }: { values: number[] }) {
   );
 }
 
-/** 증감 텍스트 (양수 초록, 음수 빨강) */
+/** 증감 텍스트 (양수 초록, 음수 빨강, 0 중립)
+ *  delta === 0 이면 화살표 없이 "— 0.0" + 중립 색상으로 표시.
+ *  delta >= 0 조건은 0도 양수 취급하여 ↑ 오표시 문제가 있어 분기 추가. */
 export function DeltaBadge({ delta, unit = '' }: { delta: number; unit?: string }) {
-  const positive = delta >= 0;
+  // delta가 정확히 0이면 변화 없음 — 중립 표시
+  if (delta === 0) {
+    return (
+      <span className="text-xs font-medium text-muted-foreground">
+        — 0.0{unit}
+      </span>
+    );
+  }
+  const positive = delta > 0;
   return (
     <span className={`text-xs font-medium ${positive ? 'text-success' : 'text-destructive'}`}>
       {positive ? '↑' : '↓'} {Math.abs(delta).toFixed(1)}{unit}

@@ -97,6 +97,41 @@ test.describe('도메인 관리 — 요약 카드', () => {
   });
 
   /**
+   * 이슈 #87 회귀 방지 — delta=0일 때 DeltaBadge가 "↑ 0.0%" 대신 "— 0.0%" (중립) 표시
+   * delta >= 0 조건에서 0이 양수로 처리되어 화살표가 잘못 표시되던 버그.
+   */
+  test('delta=0일 때 요약 카드에서 ↑ 화살표 없이 중립(—) 표시가 나타난다 (#87 회귀 방지)', async ({
+    page,
+  }) => {
+    await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
+    await mockApi(page, 'GET', '/proxy/requests', []);
+    // delta가 모두 0인 요약 데이터 — 변화 없음 시나리오
+    await mockApi(page, 'GET', '/domains/summary', {
+      ...createDomainSummary(),
+      todayRequestsDelta: 0,
+      cacheHitRateDelta: 0,
+    });
+    await mockApi(page, 'GET', '/domains', createDomains());
+
+    await page.goto('/domains');
+
+    const summaryCards = page.getByTestId('domain-summary-cards');
+    await expect(summaryCards).toBeVisible();
+
+    // delta=0일 때 ↑ 화살표가 표시되면 안 된다 (#87 핵심)
+    const arrowTexts = await summaryCards.evaluate((el) =>
+      Array.from(el.querySelectorAll('span')).filter((s) => s.textContent?.includes('↑ 0.0')).map((s) => s.textContent),
+    );
+    expect(arrowTexts).toHaveLength(0);
+
+    // 중립 표시(—)가 표시되어야 한다
+    const neutralTexts = await summaryCards.evaluate((el) =>
+      Array.from(el.querySelectorAll('span')).filter((s) => s.textContent?.includes('— 0.0')).map((s) => s.textContent),
+    );
+    expect(neutralTexts.length).toBeGreaterThan(0);
+  });
+
+  /**
    * 이슈 #71 회귀 방지 — 768px 뷰포트에서 grid-cols-4 고정으로 스파크라인 overflow
    * 768px 미만 뷰포트에서 요약 카드 컨테이너가 grid-cols-2로 전환되어
    * 카드 너비가 충분히 확보되는지 검증한다.

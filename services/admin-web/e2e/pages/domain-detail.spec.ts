@@ -398,6 +398,54 @@ test.describe('도메인 상세 — Overview 탭', () => {
     await expect(page.getByTestId('proxy-test-headers')).not.toBeVisible();
   });
 
+  /**
+   * 이슈 #87 회귀 방지 — delta=0일 때 DeltaBadge가 ↑ 화살표 대신 중립(—) 표시
+   * requestsDelta=0, cacheHitRateDelta=0, responseTimeDelta=0 시나리오에서
+   * ↑ 화살표가 사라지고 — 기호가 표시되어야 한다.
+   */
+  test('Overview — delta=0 통계 카드에서 ↑ 화살표 없이 중립(—) 표시가 나타난다 (#87 회귀 방지)', async ({
+    page,
+  }) => {
+    // delta가 모두 0인 stats mock으로 오버라이드
+    await setupDetailMocks(page);
+    await mockApi(page, 'GET', '/domains/textbook.com/stats', {
+      host: 'textbook.com',
+      period: '24h',
+      summary: {
+        totalRequests: 0,
+        requestsDelta: 0,
+        cacheHitRate: 0,
+        cacheHitRateDelta: 0,
+        bandwidth: 0,
+        avgResponseTime: 0,
+        responseTimeDelta: 0,
+      },
+      timeseries: {
+        labels: ['00:00'],
+        hits: [0],
+        misses: [0],
+        bandwidth: [0],
+        responseTime: [0],
+      },
+    });
+    await page.goto('/domains/textbook.com');
+
+    // 통계 카드 렌더링 완료 대기
+    await expect(page.getByTestId('domain-stat-cards')).toBeVisible();
+
+    // delta=0일 때 ↑ 화살표가 있으면 안 된다 (#87 핵심)
+    const arrowTexts = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('span')).filter((s) => s.textContent?.includes('↑ 0.0')).map((s) => s.textContent),
+    );
+    expect(arrowTexts).toHaveLength(0);
+
+    // 중립 표시(—)가 표시되어야 한다
+    const neutralTexts = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('span')).filter((s) => s.textContent?.includes('— 0.0')).map((s) => s.textContent),
+    );
+    expect(neutralTexts.length).toBeGreaterThan(0);
+  });
+
   test('Overview — Quick Actions 4개 버튼이 동일 y 오프셋에 정렬된다', async ({ page }) => {
     await setupDetailMocks(page);
     await page.goto('/domains/textbook.com');
