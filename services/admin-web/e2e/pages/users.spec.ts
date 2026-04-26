@@ -106,6 +106,74 @@ test.describe('사용자 관리', () => {
     await expect(otherRow.getByRole('button', { name: '비활성화' })).toBeEnabled();
   });
 
+  // 이슈 #14 회귀 방지 — 비활성화 확인에 shadcn AlertDialog 사용 (네이티브 confirm() 제거)
+  test('비활성화 클릭 시 shadcn AlertDialog 표시 및 취소', async ({ page }) => {
+    await mockApi(page, 'GET', '/users', baseUsers);
+
+    await page.goto('/users');
+
+    // 다른 사용자 행의 비활성화 버튼 클릭
+    const otherRow = page.getByTestId('user-row-2');
+    await otherRow.getByRole('button', { name: '비활성화' }).click();
+
+    // shadcn AlertDialog가 표시되어야 함 (네이티브 confirm 팝업 아님)
+    const dialog = page.getByTestId('disable-user-dialog');
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText('other@example.com')).toBeVisible();
+
+    // 취소 버튼 클릭 — 다이얼로그가 닫혀야 함
+    await dialog.getByRole('button', { name: '취소' }).click();
+    await expect(dialog).not.toBeVisible();
+  });
+
+  // 이슈 #14 회귀 방지 — 비활성화 확인에서 확인 버튼 클릭 시 API 호출 및 목록 갱신
+  test('비활성화 확인 시 API 호출 후 목록 갱신', async ({ page }) => {
+    let disableApiCalled = false;
+    const disabledUsers = baseUsers.map((u) =>
+      u.id === 2 ? { ...u, disabled_at: '2026-04-26T00:00:00.000Z' } : u
+    );
+
+    await page.route('**/api/users', async (route) => {
+      const method = route.request().method();
+      if (method === 'GET') {
+        // disableApiCalled 이후 재조회 시 비활성화된 목록 반환
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(disableApiCalled ? disabledUsers : baseUsers),
+        });
+      } else {
+        return route.fallback();
+      }
+    });
+
+    // DELETE /users/2 — disableUser API 엔드포인트
+    await page.route('**/api/users/2', async (route) => {
+      if (route.request().method() === 'DELETE') {
+        disableApiCalled = true;
+        await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+      } else {
+        return route.fallback();
+      }
+    });
+
+    await page.goto('/users');
+
+    // 비활성화 버튼 클릭
+    const otherRow = page.getByTestId('user-row-2');
+    await otherRow.getByRole('button', { name: '비활성화' }).click();
+
+    // AlertDialog에서 확인 클릭
+    const dialog = page.getByTestId('disable-user-dialog');
+    await expect(dialog).toBeVisible();
+    await dialog.getByTestId('disable-user-confirm').click();
+
+    // 다이얼로그 닫힘 확인
+    await expect(dialog).not.toBeVisible();
+    // API가 호출되었는지 확인
+    expect(disableApiCalled).toBe(true);
+  });
+
   test('로딩 중 스켈레톤 표시', async ({ page }) => {
     // API 응답을 지연시켜 로딩 상태 검증
     await page.route('**/api/users', async (route) => {

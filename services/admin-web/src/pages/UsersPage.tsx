@@ -9,6 +9,8 @@ import { listUsers, createUser, updatePassword, disableUser, type UserItem } fro
 import { useAuth } from '../components/auth/use-auth';
 import { Button } from '../components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '../components/ui/dialog';
+// 비활성화 확인 다이얼로그 — 네이티브 confirm() 대신 shadcn AlertDialog 사용 (디자인 시스템 일관성)
+import { AlertDialog, AlertDialogContent, AlertDialogTitle } from '../components/ui/alert-dialog';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Badge } from '../components/ui/badge';
@@ -68,6 +70,8 @@ export function UsersPage() {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [passwordTarget, setPasswordTarget] = useState<UserItem | null>(null);
+  // 비활성화 확인 다이얼로그 대상 — null이면 닫힘, UserItem이면 해당 사용자에 대한 확인창 표시
+  const [disableTarget, setDisableTarget] = useState<UserItem | null>(null);
   const createForm = useForm<CreateFormData>({ resolver: zodResolver(createSchema) });
   const passwordForm = useForm<PasswordFormData>({ resolver: zodResolver(passwordSchema) });
 
@@ -117,11 +121,12 @@ export function UsersPage() {
                   >
                     비밀번호 재설정
                   </Button>
+                  {/* 비활성화 버튼 — 클릭 시 shadcn AlertDialog로 확인 (네이티브 confirm() 제거) */}
                   <Button
                     variant="destructive"
                     size="xs"
                     disabled={u.id === myId || !!u.disabled_at}
-                    onClick={() => { if (confirm(`${u.username} 을 비활성화하시겠습니까?`)) disableMut.mutate(u.id); }}
+                    onClick={() => setDisableTarget(u)}
                   >
                     비활성화
                   </Button>
@@ -179,6 +184,34 @@ export function UsersPage() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* 비활성화 확인 다이얼로그 — 네이티브 confirm() 대신 shadcn AlertDialog로 UX 일관성 확보 */}
+      <AlertDialog open={!!disableTarget} onClose={() => setDisableTarget(null)}>
+        <AlertDialogContent className="max-w-sm" data-testid="disable-user-dialog">
+          <AlertDialogTitle>사용자 비활성화</AlertDialogTitle>
+          <p className="text-sm text-muted-foreground">
+            <span className="font-medium">{disableTarget?.username}</span>을(를) 비활성화하시겠습니까?
+            비활성화된 사용자는 로그인할 수 없습니다.
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setDisableTarget(null)}>
+              취소
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={disableMut.isPending}
+              data-testid="disable-user-confirm"
+              onClick={() => {
+                if (!disableTarget) return;
+                disableMut.mutate(disableTarget.id);
+                setDisableTarget(null);
+              }}
+            >
+              {disableMut.isPending ? '처리 중…' : '비활성화'}
+            </Button>
+          </div>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
