@@ -164,6 +164,24 @@ export async function cacheRoutes(app: FastifyInstance) {
     if ((type === 'url' || type === 'domain') && !target) {
       return reply.status(400).send({ error: `type이 "${type}"이면 target은 필수입니다.` });
     }
+
+    // URL 퍼지 시 대상 URL의 hostname이 등록된 도메인에 속하는지 검증한다.
+    // 등록되지 않은 외부 도메인에 대한 크로스 도메인 퍼지를 방지한다.
+    if (type === 'url') {
+      let hostname: string;
+      try {
+        hostname = new URL(target!).hostname;
+      } catch {
+        return reply.status(400).send({ error: '유효하지 않은 URL 형식입니다.' });
+      }
+      const registered = app.db
+        .prepare('SELECT 1 FROM domains WHERE host = ? LIMIT 1')
+        .get(hostname);
+      if (!registered) {
+        return reply.status(400).send({ error: `${hostname}은(는) 등록된 도메인이 아닙니다.` });
+      }
+    }
+
     try {
       let res;
       if (type === 'url') {

@@ -25,6 +25,18 @@ const DOMAIN_STATS_SCHEMA = `
   CREATE INDEX idx_domain_stats_ts ON domain_stats(timestamp);
 `;
 
+/** domains 테이블 스키마 — URL 퍼지 도메인 검증에 필요 */
+const DOMAINS_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS domains (
+    host        TEXT PRIMARY KEY,
+    origin      TEXT NOT NULL,
+    enabled     INTEGER NOT NULL DEFAULT 1,
+    description TEXT NOT NULL DEFAULT '',
+    created_at  INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+    updated_at  INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+  );
+`;
+
 /** storageClient 전체 mock — stats/popular/purge* 포함 */
 function makeStorageMock(statsImpl: () => Promise<{ used_bytes: number; total_bytes: number }>) {
   return {
@@ -40,10 +52,22 @@ function makeStorageMock(statsImpl: () => Promise<{ used_bytes: number; total_by
 /**
  * 테스트용 Fastify 앱 생성 — in-memory SQLite + storageClient mock 주입
  * @param opts.storage - storageClient mock (makeStorageMock으로 생성)
+ * @param opts.domains - 등록된 도메인 목록 (URL 퍼지 검증 테스트용, 기본값: 빈 배열)
  */
-function mkApp(opts: { storage: ReturnType<typeof makeStorageMock> }) {
+function mkApp(opts: {
+  storage: ReturnType<typeof makeStorageMock>;
+  domains?: string[];
+}) {
   const db = new Database(':memory:');
   db.exec(DOMAIN_STATS_SCHEMA);
+  db.exec(DOMAINS_SCHEMA);
+  // 도메인 목록이 주어지면 테스트용으로 미리 등록해 둔다
+  if (opts.domains) {
+    const stmt = db.prepare('INSERT INTO domains (host, origin) VALUES (?, ?)');
+    for (const host of opts.domains) {
+      stmt.run(host, `https://${host}`);
+    }
+  }
 
   const app = Fastify({ logger: false });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -227,10 +251,11 @@ describe('DELETE /api/cache/purge', () => {
   });
 
   it('url 타입 + target 있으면 purgeUrl 호출 후 결과를 반환한다', async () => {
+    // example.com을 등록된 도메인으로 시드해야 검증 통과 후 purgeUrl이 호출된다
     const purgeResult = { purged_files: 1, freed_bytes: 512 };
     const mock = makeStorageMock(async () => ({ used_bytes: 0, total_bytes: 0 }));
     mock.purgeUrl.mockResolvedValueOnce(purgeResult);
-    const { app } = mkApp({ storage: mock });
+    const { app } = mkApp({ storage: mock, domains: ['example.com'] });
 
     const res = await app.inject({
       method: 'DELETE', url: '/api/cache/purge',
@@ -240,6 +265,36 @@ describe('DELETE /api/cache/purge', () => {
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual(purgeResult);
     expect(mock.purgeUrl).toHaveBeenCalledWith('https://example.com/video.mp4');
+  });
+
+  it('url 타입 + target hostname이 등록되지 않은 도메인이면 400을 반환한다 (#36 크로스 도메인 퍼지 방지)', async () => {
+    // domains 테이블에 없는 hostname → 400 거부
+    const mock = makeStorageMock(async () => ({ used_bytes: 0, total_bytes: 0 }));
+    const { app } = mkApp({ storage: mock });
+
+    const res = await app.inject({
+      method: 'DELETE', url: '/api/cache/purge',
+      headers: { 'content-type': 'application/json' },
+      payload: { type: 'url', target: 'https://totally-different-domain.com/secret/path' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toContain('등록된 도메인');
+    // purgeUrl은 호출되지 않아야 한다
+    expect(mock.purgeUrl).not.toHaveBeenCalled();
+  });
+
+  it('url 타입 + 유효하지 않은 URL이면 400을 반환한다 (#36)', async () => {
+    const mock = makeStorageMock(async () => ({ used_bytes: 0, total_bytes: 0 }));
+    const { app } = mkApp({ storage: mock });
+
+    const res = await app.inject({
+      method: 'DELETE', url: '/api/cache/purge',
+      headers: { 'content-type': 'application/json' },
+      payload: { type: 'url', target: 'not-a-url' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toContain('유효하지 않은 URL');
+    expect(mock.purgeUrl).not.toHaveBeenCalled();
   });
 
   it('domain 타입 + target 있으면 purgeDomain 호출 후 결과를 반환한다', async () => {

@@ -21,9 +21,24 @@ export function DomainCacheSection({ host }: Props) {
 
   const purgeMutation = usePurgeCache();
 
-  /** URL 퍼지 실행 */
+  /** URL 퍼지 실행 — 입력 URL의 hostname이 현재 도메인과 일치하는지 검증 후 전송한다 */
   async function handleUrlPurge() {
     if (!urlInput.trim()) return;
+
+    // 입력값을 URL로 파싱하여 hostname을 추출한다.
+    // 파싱 실패 또는 hostname 불일치 시 서버 요청 없이 인라인 에러로 처리한다.
+    let parsedHost: string;
+    try {
+      parsedHost = new URL(urlInput.trim()).hostname;
+    } catch {
+      toast.error('유효한 URL을 입력해 주세요.');
+      return;
+    }
+    if (parsedHost !== host) {
+      toast.error(`퍼지 URL은 ${host} 도메인 소속이어야 합니다.`);
+      return;
+    }
+
     try {
       const result = await purgeMutation.mutateAsync({ type: 'url', target: urlInput.trim() });
       toast.success(`퍼지 완료 — ${result.purged_count}건 삭제`);
