@@ -74,8 +74,9 @@ function AddDomainDialog({ onClose }: { onClose: () => void }) {
       <DialogTitle>도메인 추가</DialogTitle>
       <form onSubmit={handleSubmit} className="space-y-3">
         <div className="space-y-1">
-          <label htmlFor="add-host" className="text-xs font-medium text-muted-foreground">
-            도메인
+          {/* 필수 필드 라벨 — text-foreground + * 표시로 시각 위계 명확히 (이슈 #22) */}
+          <label htmlFor="add-host" className="text-sm font-medium text-foreground">
+            도메인 <span className="text-destructive" aria-hidden="true">*</span>
           </label>
           <Input
             id="add-host"
@@ -93,8 +94,9 @@ function AddDomainDialog({ onClose }: { onClose: () => void }) {
           )}
         </div>
         <div className="space-y-1">
-          <label htmlFor="add-origin" className="text-xs font-medium text-muted-foreground">
-            원본 URL
+          {/* 필수 필드 라벨 — text-foreground + * 표시로 시각 위계 명확히 (이슈 #22) */}
+          <label htmlFor="add-origin" className="text-sm font-medium text-foreground">
+            원본 URL <span className="text-destructive" aria-hidden="true">*</span>
           </label>
           <Input
             id="add-origin"
