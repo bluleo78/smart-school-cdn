@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { useNavigate } from 'react-router';
 import { setup as apiSetup } from '../api/auth';
 import { useAuth } from '../components/auth/use-auth';
+import { usePageTitle } from '../hooks/usePageTitle';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
@@ -22,6 +23,8 @@ const schema = z.object({
 type FormData = z.infer<typeof schema>;
 
 export function SetupPage() {
+  // AppLayout 바깥에서 렌더링되므로 usePageTitle 로 직접 탭 타이틀 설정 — WCAG 2.4.2
+  usePageTitle('초기 설정');
   const { refresh } = useAuth();
   const navigate = useNavigate();
   const [serverError, setServerError] = useState<string | null>(null);

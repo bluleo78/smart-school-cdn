@@ -4,6 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useNavigate, useSearchParams } from 'react-router';
 import { useAuth } from '../components/auth/use-auth';
+import { usePageTitle } from '../hooks/usePageTitle';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
@@ -22,6 +23,8 @@ const schema = z.object({
 type FormData = z.infer<typeof schema>;
 
 export function LoginPage() {
+  // AppLayout 바깥에서 렌더링되므로 usePageTitle 로 직접 탭 타이틀 설정 — WCAG 2.4.2
+  usePageTitle('로그인');
   const { login } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
