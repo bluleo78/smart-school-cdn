@@ -42,6 +42,13 @@ const RESULT_VARIANT: Record<DnsQueryResultLabel, 'success' | 'outline' | 'destr
   nxdomain: 'destructive',
 };
 
+/** 결과 라벨 → 한국어 표시 텍스트 매핑 — 이슈 #25 (필터 버튼·Badge 한국어화) */
+const RESULT_LABEL: Record<DnsQueryResultLabel, string> = {
+  matched: '매칭',
+  forwarded: '전달',
+  nxdomain: 'NXDOMAIN',
+};
+
 /** DNS 관리 페이지 루트 — 헤더 + 오프라인 배너 + 상태 스트립 + 3탭 */
 export function DnsPage() {
   const { data: status } = useDnsStatus();
@@ -112,7 +119,7 @@ function StatusStrip() {
           </Badge>
         </div>
         {/* 업타임 */}
-        <StripStat label="Uptime" value={formatUptime(status.uptime_secs)} />
+        <StripStat label="가동 시간" value={formatUptime(status.uptime_secs)} />
         {/* 누적 쿼리 */}
         <StripStat label="전체" value={status.total.toLocaleString()} />
         {/* QPS */}
@@ -218,7 +225,8 @@ function StatsTab() {
         <StatCard label="매칭" value={totals.matched} accent="text-success" />
         <StatCard label="전달" value={totals.forwarded} accent="text-muted-foreground" />
         {/* NXDOMAIN > 0일 때만 destructive 색상 적용 — 0이면 정상 상태이므로 기본 색 사용 */}
-        <StatCard label="NXDOMAIN" value={totals.nxdomain} accent={totals.nxdomain > 0 ? 'text-destructive' : undefined} />
+        {/* 기술 용어 NXDOMAIN은 영문 유지하되 한국어 부연을 병기 — 이슈 #25 */}
+        <StatCard label="없음(NXDOMAIN)" value={totals.nxdomain} accent={totals.nxdomain > 0 ? 'text-destructive' : undefined} testid="statcard-label-NXDOMAIN" />
       </div>
 
       {/* 시계열 차트 — CacheHitRateChart 패턴(CSS 변수 stroke) */}
@@ -373,7 +381,8 @@ function QueriesTab() {
               size="xs"
               data-testid={`filter-${r}`}
             >
-              {r}
+              {/* 이슈 #25: 영문 값 대신 한국어 레이블 표시 */}
+              {RESULT_LABEL[r]}
             </Button>
           ))}
         </div>
@@ -403,7 +412,8 @@ function QueriesTab() {
                   <TableCell className="font-mono text-xs">{e.client_ip}</TableCell>
                   <TableCell className="font-mono truncate max-w-[280px]">{e.qname}</TableCell>
                   <TableCell className="text-muted-foreground">{e.qtype}</TableCell>
-                  <TableCell><Badge variant={RESULT_VARIANT[e.result]}>{e.result}</Badge></TableCell>
+                  {/* 이슈 #25: 결과 값 영문 → 한국어 레이블로 표시 */}
+                  <TableCell><Badge variant={RESULT_VARIANT[e.result]}>{RESULT_LABEL[e.result]}</Badge></TableCell>
                   <TableCell className="text-right tabular-nums">
                     {(e.latency_us / 1000).toFixed(2)} ms
                   </TableCell>
@@ -422,16 +432,19 @@ function StatCard({
   label,
   value,
   accent,
+  testid,
 }: {
   label: string;
   value: number;
   accent?: string;
+  /** E2E 테스트용 안정적 testid — label과 독립적으로 유지 */
+  testid?: string;
 }) {
   return (
     <Card>
       <CardContent className="py-5">
         {/* data-testid로 E2E에서 라벨 색상 검증 가능하게 노출 */}
-        <p data-testid={`statcard-label-${label}`} className={`text-xs font-medium ${accent ?? 'text-muted-foreground'}`}>{label}</p>
+        <p data-testid={testid ?? `statcard-label-${label}`} className={`text-xs font-medium ${accent ?? 'text-muted-foreground'}`}>{label}</p>
         <p className="mt-1 text-3xl font-bold tabular-nums">{value.toLocaleString()}</p>
       </CardContent>
     </Card>
