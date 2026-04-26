@@ -88,7 +88,7 @@ export function DomainUrlOptimizationTable({ host, period = '24h' }: { host: str
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">decision: 전체</SelectItem>
+              <SelectItem value="all">결과: 전체</SelectItem>
               <SelectItem value="optimized">이미지 · 최적화됨</SelectItem>
               <SelectItem value="passthrough_larger">이미지 · 원본 유지(커짐)</SelectItem>
               <SelectItem value="passthrough_error">이미지 · 원본 유지(에러)</SelectItem>
