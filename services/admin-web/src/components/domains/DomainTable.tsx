@@ -153,7 +153,8 @@ export function DomainTable({
 
               {/* 상태 배지 */}
               <TableCell>
-                <Badge variant={isEnabled ? 'success' : 'default'}>
+                {/* 비활성 시 outline — DomainDetailHeader·UsersPage와 variant 통일 */}
+                <Badge variant={isEnabled ? 'success' : 'outline'}>
                   {isEnabled ? '활성' : '비활성'}
                 </Badge>
               </TableCell>
