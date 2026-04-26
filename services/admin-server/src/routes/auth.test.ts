@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import Fastify, { FastifyInstance } from 'fastify';
 import cookie from '@fastify/cookie';
+import rateLimit from '@fastify/rate-limit';
 import Database from 'better-sqlite3';
 import { authRoutes } from './auth.js';
 import { UserRepository, USER_SCHEMA } from '../db/user-repo.js';
@@ -16,6 +17,9 @@ async function buildApp(): Promise<{ app: FastifyInstance; userRepo: UserReposit
 
   const app = Fastify();
   await app.register(cookie);
+  // rate-limit 플러그인 등록 — global: false 로 라우트 개별 설정만 동작.
+  // 테스트 환경에서는 낮은 windowMs 를 사용해 테스트 속도를 유지한다.
+  await app.register(rateLimit, { global: false });
   app.addHook('preHandler', requireAuth);
   await app.register(authRoutes, { userRepo });
   return { app, userRepo };
@@ -137,6 +141,27 @@ describe('authRoutes', () => {
         payload: { username: 'a@b.c', password: 'p1234567' },
       });
       expect(userRepo.findById(u.id)?.last_login_at).not.toBeNull();
+    });
+
+    // rate limit: 동일 IP 에서 10회 실패 후 11번째는 429 반환 (브루트포스 차단)
+    it('10회 실패 후 11번째 요청 → 429 + Retry-After 헤더', async () => {
+      userRepo.create('a@b.c', await hashPassword('p1234567'));
+      // 10회 실패 소진
+      for (let i = 0; i < 10; i++) {
+        await app.inject({
+          method: 'POST', url: '/api/auth/login',
+          payload: { username: 'a@b.c', password: 'wrongpassword' },
+          headers: { 'x-forwarded-for': '10.0.0.1' },
+        });
+      }
+      // 11번째 요청은 rate limit 초과 → 429
+      const r = await app.inject({
+        method: 'POST', url: '/api/auth/login',
+        payload: { username: 'a@b.c', password: 'wrongpassword' },
+        headers: { 'x-forwarded-for': '10.0.0.1' },
+      });
+      expect(r.statusCode).toBe(429);
+      expect(r.headers['retry-after']).toBeDefined();
     });
   });
 

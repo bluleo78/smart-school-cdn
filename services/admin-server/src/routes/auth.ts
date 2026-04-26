@@ -59,8 +59,18 @@ export const authRoutes: FastifyPluginAsync<{ userRepo: UserRepository }> = asyn
     return reply.code(201).send({ user: publicUser(user) });
   });
 
-  // 로그인
-  app.post('/api/auth/login', async (req, reply) => {
+  // 로그인 — IP당 15분에 최대 10회로 rate limit 적용 (브루트포스 방지).
+  // @fastify/rate-limit 의 per-route config 를 통해 이 엔드포인트만 제한하며,
+  // Retry-After 헤더는 플러그인이 자동으로 포함한다.
+  app.post('/api/auth/login', {
+    config: {
+      rateLimit: {
+        max: 10,
+        timeWindow: '15 minutes',
+        keyGenerator: (req) => req.ip,
+      },
+    },
+  }, async (req, reply) => {
     const parsed = credentialSchema.safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid_input' });

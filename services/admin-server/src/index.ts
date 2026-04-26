@@ -1,6 +1,7 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import cookie from '@fastify/cookie';
+import rateLimit from '@fastify/rate-limit';
 import Database from 'better-sqlite3';
 import { HealthMonitor } from './health-monitor.js';
 import { proxyRoutes } from './routes/proxy.js';
@@ -99,6 +100,11 @@ const app = Fastify({ logger: true });
 
 // 쿠키 플러그인은 인증 훅이 req.cookies 를 읽으므로 훅 등록 이전에 register.
 await app.register(cookie);
+
+// rate-limit 플러그인 — global: false 로 등록해 라우트별 개별 설정만 동작하도록 한다.
+// 전역 적용 시 SSE 스트림·내부 서비스간 호출·헬스체크 등이 제한될 수 있어 명시적 opt-in 방식 채택.
+// 주의: 리버스 프록시(nginx) 뒤 배포 시 실제 클라이언트 IP를 얻으려면 trustProxy 설정 필요.
+await app.register(rateLimit, { global: false });
 
 // preHandler 훅 — 등록 순서가 실행 순서. 토큰 검사를 먼저 수행해
 // /internal/* 의 인증 실패가 즉시 401 로 끊기도록 한다.
