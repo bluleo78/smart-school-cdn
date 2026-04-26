@@ -215,7 +215,8 @@ function StatsTab() {
         <StatCard label="Total" value={totals.total} />
         <StatCard label="Matched" value={totals.matched} accent="text-success" />
         <StatCard label="Forwarded" value={totals.forwarded} accent="text-muted-foreground" />
-        <StatCard label="NXDOMAIN" value={totals.nxdomain} accent="text-destructive" />
+        {/* NXDOMAIN > 0일 때만 destructive 색상 적용 — 0이면 정상 상태이므로 기본 색 사용 */}
+        <StatCard label="NXDOMAIN" value={totals.nxdomain} accent={totals.nxdomain > 0 ? 'text-destructive' : undefined} />
       </div>
 
       {/* 시계열 차트 — CacheHitRateChart 패턴(CSS 변수 stroke) */}
@@ -418,7 +419,8 @@ function StatCard({
   return (
     <Card>
       <CardContent className="py-5">
-        <p className={`text-xs font-medium ${accent ?? 'text-muted-foreground'}`}>{label}</p>
+        {/* data-testid로 E2E에서 라벨 색상 검증 가능하게 노출 */}
+        <p data-testid={`statcard-label-${label}`} className={`text-xs font-medium ${accent ?? 'text-muted-foreground'}`}>{label}</p>
         <p className="mt-1 text-3xl font-bold tabular-nums">{value.toLocaleString()}</p>
       </CardContent>
     </Card>

@@ -95,6 +95,41 @@ test.describe('DNS 관리 페이지', () => {
     await expect(page.getByTestId('dns-offline-banner')).toBeVisible({ timeout: 10000 });
   });
 
+  test('통계 탭 — NXDOMAIN 값이 0이면 레이블이 destructive 색상이 아니다 (#12 회귀)', async ({ page }) => {
+    // NXDOMAIN = 0인 상태 → StatCard accent가 undefined로 내려가야 한다
+    // text-destructive 클래스가 없어야 정상 상태로 보임
+    await mockApi(page, 'GET', '/dns/status', createDnsStatusOnline({ nxdomain: 0 }));
+    await mockApi(page, 'GET', '/dns/records', createDnsRecords());
+    await mockDnsQuery(page, '/dns/queries', createDnsQueriesMixed());
+    await mockDnsQuery(page, '/dns/metrics', createDnsMetrics());
+
+    await page.goto('/dns');
+    await page.getByTestId('tab-stats').click();
+
+    // NXDOMAIN 레이블 요소가 text-destructive 클래스를 갖지 않는지 확인
+    const nxdomainLabel = page.getByTestId('statcard-label-NXDOMAIN');
+    await expect(nxdomainLabel).toBeVisible();
+    await expect(nxdomainLabel).not.toHaveClass(/text-destructive/);
+  });
+
+  test('통계 탭 — NXDOMAIN 값이 1 이상이면 레이블이 destructive 색상이다', async ({ page }) => {
+    // NXDOMAIN > 0이면 오류 상황 → text-destructive 클래스가 있어야 한다
+    // totals는 metrics 버킷을 집계하므로 nxdomain 버킷이 있어야 한다
+    await mockApi(page, 'GET', '/dns/status', createDnsStatusOnline());
+    await mockApi(page, 'GET', '/dns/records', createDnsRecords());
+    await mockDnsQuery(page, '/dns/queries', createDnsQueriesMixed());
+    await mockDnsQuery(page, '/dns/metrics', createDnsMetrics([
+      { ts: Date.now(), total: 10, matched: 5, nxdomain: 3, forwarded: 2 },
+    ]));
+
+    await page.goto('/dns');
+    await page.getByTestId('tab-stats').click();
+
+    const nxdomainLabel = page.getByTestId('statcard-label-NXDOMAIN');
+    await expect(nxdomainLabel).toBeVisible();
+    await expect(nxdomainLabel).toHaveClass(/text-destructive/);
+  });
+
   test('최근 쿼리 탭 — matched 필터를 끄면 a.test 행이 사라진다', async ({ page }) => {
     await mockDnsDefaults(page);
     await page.goto('/dns');
