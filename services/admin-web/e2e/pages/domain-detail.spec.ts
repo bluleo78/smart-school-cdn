@@ -204,6 +204,22 @@ test.describe('도메인 상세 — Overview 탭', () => {
     await expect(page.getByText('유효')).toBeVisible();
   });
 
+  /**
+   * 이슈 #72 회귀 방지 — Proxy/DNS 동기화 행이 ok={true} 하드코딩으로 항상 초록 표시되던 버그
+   * 수정 후: 백엔드 미지원 필드이므로 해당 행이 아예 렌더링되지 않아야 한다.
+   */
+  test('동기화 & TLS 카드에 Proxy/DNS 동기화 행이 없다 (회귀: #72)', async ({ page }) => {
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com');
+
+    // "Proxy 동기화" 라벨이 화면에 없어야 한다 (하드코딩 ok={true} 제거)
+    await expect(page.getByText('Proxy 동기화')).toHaveCount(0);
+    // "DNS 동기화" 라벨이 화면에 없어야 한다 (하드코딩 ok={true} 제거)
+    await expect(page.getByText('DNS 동기화')).toHaveCount(0);
+    // TLS 상태 카드 헤딩이 여전히 렌더링되어야 한다
+    await expect(page.getByRole('heading', { name: 'TLS 상태' })).toBeVisible();
+  });
+
   test('Quick Actions 4개 버튼이 렌더링된다', async ({ page }) => {
     await setupDetailMocks(page);
     await page.goto('/domains/textbook.com');

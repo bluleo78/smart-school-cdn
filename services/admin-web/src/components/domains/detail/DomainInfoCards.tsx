@@ -1,4 +1,4 @@
-/// 도메인 기본 정보 + 동기화/TLS 상태 카드 — 2컬럼 레이아웃
+/// 도메인 기본 정보 + TLS 상태 카드 — 2컬럼 레이아웃
 import { useMemo } from 'react';
 import type { Domain } from '../../../api/domain-types';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
@@ -15,13 +15,6 @@ function InfoRow({ label, children }: { label: string; children: React.ReactNode
       <span className="text-xs text-muted-foreground">{label}</span>
       <span className="text-xs font-medium break-all">{children}</span>
     </div>
-  );
-}
-
-/** 상태 점(●) — 색상으로 동기화 상태 표시 */
-function StatusDot({ ok }: { ok: boolean }) {
-  return (
-    <span className={ok ? 'text-success' : 'text-destructive'}>● </span>
   );
 }
 
@@ -64,24 +57,18 @@ export function DomainInfoCards({ domain }: Props) {
         </CardContent>
       </Card>
 
-      {/* 오른쪽: 동기화 & TLS — 실시간 상태 */}
+      {/* 오른쪽: TLS 상태 — Proxy/DNS 동기화 필드는 백엔드 미지원으로 제거(#72) */}
       <Card>
         <CardHeader>
-          <CardTitle>동기화 &amp; TLS</CardTitle>
+          <CardTitle>TLS 상태</CardTitle>
         </CardHeader>
         <CardContent>
-          <InfoRow label="Proxy 동기화">
-            <StatusDot ok={true} />동기화됨
-          </InfoRow>
           <InfoRow label="TLS 상태">
             <span className={tlsStatus.color}>● </span>
             {tlsStatus.label}
           </InfoRow>
           <InfoRow label="TLS 만료일">
             {cert ? new Date(cert.expires_at).toLocaleDateString('ko-KR') : '—'}
-          </InfoRow>
-          <InfoRow label="DNS 동기화">
-            <StatusDot ok={true} />동기화됨
           </InfoRow>
         </CardContent>
       </Card>
