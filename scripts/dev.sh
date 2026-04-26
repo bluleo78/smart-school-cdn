@@ -1,8 +1,22 @@
 #!/bin/bash
 # 개발 서버 기동 스크립트
-# 기존 프로세스 정리 후 Proxy(Rust) + turbo dev(Node.js) 실행
+# Rust 서비스(gRPC + Proxy) → Admin(Node.js) 순서로 로컬 직접 기동
 
-PORTS="4001,4173,8080,8081"
+# .env.local이 있으면 로드 (gitignore — 로컬 포트 오버라이드 등 개발자별 설정)
+if [ -f "$(dirname "$0")/../.env.local" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "$(dirname "$0")/../.env.local"
+  set +a
+fi
+
+# dev proxy 포트: 운영(8080/443/8081)과 충돌하지 않도록 env로 오버라이드 가능
+PROXY_HTTP_PORT="${PROXY_HTTP_PORT:-8080}"
+PROXY_HTTPS_PORT="${PROXY_HTTPS_PORT:-443}"
+PROXY_ADMIN_PORT="${PROXY_ADMIN_PORT:-8081}"
+export PROXY_HTTP_PORT PROXY_HTTPS_PORT PROXY_ADMIN_PORT
+
+PORTS="4001,4173,${PROXY_HTTP_PORT},${PROXY_ADMIN_PORT}"
 LOG_DIR="logs"
 
 mkdir -p "$LOG_DIR"
@@ -12,20 +26,26 @@ mkdir -p "$LOG_DIR"
 export JWT_SECRET="${JWT_SECRET:-dev-secret-dev-secret-dev-secret-dev}"
 export INTERNAL_API_TOKEN="${INTERNAL_API_TOKEN:-dev-internal-token-dev-internal-token-dev}"
 
+# gRPC URL — 로컬 직접 실행이므로 Docker 호스트명 대신 localhost 사용
+export STORAGE_GRPC_URL="${STORAGE_GRPC_URL:-http://localhost:50051}"
+export TLS_GRPC_URL="${TLS_GRPC_URL:-http://localhost:50052}"
+export DNS_GRPC_URL="${DNS_GRPC_URL:-http://localhost:50053}"
+export OPTIMIZER_GRPC_URL="${OPTIMIZER_GRPC_URL:-http://localhost:50054}"
+export ADMIN_SNAPSHOT_URL="${ADMIN_SNAPSHOT_URL:-http://localhost:4001}"
+export PROXY_ADMIN_URL="${PROXY_ADMIN_URL:-http://localhost:${PROXY_ADMIN_PORT}}"
+
 # 기존 프로세스 정리
 echo "🔄 포트 ${PORTS} 프로세스 정리..."
 lsof -ti:${PORTS} | xargs kill -9 2>/dev/null
 
-# Docker Compose 기동 (--infra 옵션)
-if [ "$1" = "--infra" ]; then
-  echo "🐳 Docker Compose 기동..."
-  docker compose up -d
-fi
-
-# Proxy Service (Rust) 백그라운드 실행
-echo "🦀 Proxy Service 시작..."
+# Rust 서비스 전체 로컬 기동
 source "$HOME/.cargo/env" 2>/dev/null
-cargo run -p proxy 2>&1 | tee "${LOG_DIR}/proxy.log" &
+echo "🦀 Rust 서비스 시작..."
+cargo run -p storage-service  2>&1 | tee "${LOG_DIR}/storage-service.log"  &
+cargo run -p tls-service      2>&1 | tee "${LOG_DIR}/tls-service.log"      &
+cargo run -p dns-service      2>&1 | tee "${LOG_DIR}/dns-service.log"      &
+cargo run -p optimizer-service 2>&1 | tee "${LOG_DIR}/optimizer-service.log" &
+cargo run -p proxy            2>&1 | tee "${LOG_DIR}/proxy.log"            &
 
 # turbo dev 실행 (Admin Server + Admin Web)
 echo "🚀 Admin 서비스 시작..."

@@ -6,7 +6,6 @@
   "description": "학교 내부 네트워크용 온프레미스 CDN 서비스",
   "scripts": {
     "dev": "bash scripts/dev.sh",
-    "dev:infra": "bash scripts/dev.sh --infra",
     "build": "turbo build",
     "test": "turbo test",
     "test:e2e": "turbo test:e2e --filter=admin-web",

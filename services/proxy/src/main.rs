@@ -1,5 +1,5 @@
 /// Smart School CDN Proxy Service
-/// HTTP 리버스 프록시(8080) + HTTPS 443 + 관리 API(8081)
+/// HTTP 리버스 프록시(PROXY_HTTP_PORT, 기본 8080) + HTTPS(PROXY_HTTPS_PORT, 기본 443) + 관리 API(PROXY_ADMIN_PORT, 기본 8081)
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::{Mutex, RwLock};
 use tracing_subscriber::EnvFilter;
@@ -166,19 +166,27 @@ async fn main() {
         .with_cert_resolver(Arc::new(SniCertResolver { cert_cache }));
     let rustls_config = RustlsConfig::from_config(Arc::new(server_config));
 
-    tracing::info!("Proxy Service 시작 — HTTP :8080, HTTPS :443, Admin :8081");
+    let http_port = std::env::var("PROXY_HTTP_PORT").unwrap_or_else(|_| "8080".to_string());
+    let https_port = std::env::var("PROXY_HTTPS_PORT").unwrap_or_else(|_| "443".to_string());
+    let admin_port = std::env::var("PROXY_ADMIN_PORT").unwrap_or_else(|_| "8081".to_string());
+
+    tracing::info!("Proxy Service 시작 — HTTP :{http_port}, HTTPS :{https_port}, Admin :{admin_port}");
 
     let https_router = proxy_router.clone();
+    let http_bind = format!("0.0.0.0:{http_port}");
+    let https_bind = format!("0.0.0.0:{https_port}");
+    let admin_bind = format!("0.0.0.0:{admin_port}");
+
     let proxy_server = tokio::spawn(async move {
-        let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await.unwrap();
+        let listener = tokio::net::TcpListener::bind(&http_bind).await.unwrap();
         axum::serve(listener, proxy_router).await.unwrap();
     });
     let https_server = tokio::spawn(async move {
-        axum_server::bind_rustls("0.0.0.0:443".parse().unwrap(), rustls_config)
+        axum_server::bind_rustls(https_bind.parse().unwrap(), rustls_config)
             .serve(https_router.into_make_service()).await.unwrap();
     });
     let admin_server = tokio::spawn(async move {
-        let listener = tokio::net::TcpListener::bind("0.0.0.0:8081").await.unwrap();
+        let listener = tokio::net::TcpListener::bind(&admin_bind).await.unwrap();
         axum::serve(listener, admin_router).await.unwrap();
     });
 

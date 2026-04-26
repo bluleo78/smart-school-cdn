@@ -3,7 +3,23 @@
   "tasks": {
     "dev": {
       "cache": false,
-      "persistent": true
+      "persistent": true,
+      "passThroughEnv": [
+        "JWT_SECRET",
+        "INTERNAL_API_TOKEN",
+        "PROXY_HTTP_PORT",
+        "PROXY_HTTPS_PORT",
+        "PROXY_ADMIN_PORT",
+        "PROXY_ADMIN_URL",
+        "STORAGE_GRPC_URL",
+        "TLS_GRPC_URL",
+        "DNS_GRPC_URL",
+        "OPTIMIZER_GRPC_URL",
+        "ADMIN_SNAPSHOT_URL",
+        "COOKIE_SECURE",
+        "DB_PATH",
+        "PORT"
+      ]
     },
     "build": {
       "dependsOn": ["^build"],
