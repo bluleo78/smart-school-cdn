@@ -75,8 +75,8 @@ export function RequestLogTable() {
               <TableRow>
                 <TableHead>시간</TableHead>
                 <TableHead>메서드</TableHead>
-                <TableHead>Host</TableHead>
-                <TableHead>URL</TableHead>
+                <TableHead>호스트</TableHead>
+                <TableHead>경로</TableHead>
                 <TableHead>상태</TableHead>
                 <TableHead>응답시간</TableHead>
               </TableRow>

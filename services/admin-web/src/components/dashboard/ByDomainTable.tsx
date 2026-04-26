@@ -57,7 +57,7 @@ export function ByDomainTable() {
         <Table data-testid="by-domain-table">
           <TableHeader>
             <TableRow>
-              <TableHead>Host</TableHead>
+              <TableHead>호스트</TableHead>
               <TableHead className="text-right">요청</TableHead>
               <TableHead className="text-right">L1 히트율</TableHead>
               <TableHead className="text-right">엣지 히트율</TableHead>

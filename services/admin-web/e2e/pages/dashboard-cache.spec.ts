@@ -101,6 +101,46 @@ test.describe('대시보드 — 전체 캐시 퍼지', () => {
   });
 });
 
+// ─── 헤더 한국어 통일 (#49 회귀) ─────────────────────────────
+test.describe('대시보드 — 헤더 한국어 통일 (#49)', () => {
+  test('도메인별 캐시 지표 테이블 헤더가 한국어로 표시된다 — "Host" 잔존 없음', async ({ page }) => {
+    await setupDashboardMocks(page);
+    await page.goto('/');
+
+    // by-domain 테이블에 도메인 데이터가 렌더될 때까지 대기
+    const table = page.getByTestId('by-domain-table');
+    await expect(table).toBeVisible();
+
+    // "호스트" 헤더 존재 확인 (한국어 통일)
+    await expect(table.getByRole('columnheader', { name: '호스트' })).toBeVisible();
+
+    // 영문 "Host" 헤더가 없어야 한다 (회귀 방지)
+    await expect(table.getByRole('columnheader', { name: 'Host' })).not.toBeVisible();
+  });
+
+  test('최근 요청 테이블 헤더가 한국어로 표시된다 — "Host"/"URL" 잔존 없음', async ({ page }) => {
+    // 요청 로그 데이터가 있어야 헤더가 렌더됨 — setupDashboardMocks 이후 재정의로 우선순위 확보
+    const { createRequestLogs } = await import('../factories/proxy.factory');
+    await setupDashboardMocks(page);
+    await mockApi(page, 'GET', '/proxy/requests', createRequestLogs());
+    await page.goto('/');
+
+    // "최근 요청" 카드가 로그 데이터와 함께 렌더될 때까지 대기
+    await expect(page.getByText('httpbin.org')).toBeVisible();
+
+    // 최근 요청 카드 영역을 heading으로 스코프해 다른 테이블의 "호스트" 헤더와 충돌 방지
+    const requestCard = page.locator('text=최근 요청').locator('..').locator('..');
+
+    // "호스트", "경로" 헤더 존재 확인 (한국어 통일)
+    await expect(requestCard.getByRole('columnheader', { name: '호스트' })).toBeVisible();
+    await expect(requestCard.getByRole('columnheader', { name: '경로' })).toBeVisible();
+
+    // 영문 헤더가 없어야 한다 (회귀 방지)
+    await expect(requestCard.getByRole('columnheader', { name: 'Host' })).not.toBeVisible();
+    await expect(requestCard.getByRole('columnheader', { name: 'URL' })).not.toBeVisible();
+  });
+});
+
 // ─── 빈 데이터 empty state (#21 회귀) ─────────────────────────
 test.describe('대시보드 — 캐시 스택 차트 empty state (#21)', () => {
   test('시계열 데이터가 없으면 차트 대신 empty state 메시지가 표시된다', async ({ page }) => {
