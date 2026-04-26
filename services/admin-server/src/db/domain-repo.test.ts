@@ -86,6 +86,39 @@ describe('DomainRepository', () => {
     it('필터 없으면 전체를 반환한다', () => {
       expect(repo.findAll()).toHaveLength(3);
     });
+
+    it('sort=host&order=asc — host 오름차순으로 정렬된다', () => {
+      // 이슈 #83: order 파라미터 지원 검증
+      const results = repo.findAll({ sort: 'host', order: 'asc' });
+      // host 알파벳 오름차순: cdn.example.com, disabled.test, school.local
+      expect(results[0].host).toBe('cdn.example.com');
+      expect(results[1].host).toBe('disabled.test');
+      expect(results[2].host).toBe('school.local');
+    });
+
+    it('sort=host&order=desc — host 내림차순으로 정렬된다', () => {
+      const results = repo.findAll({ sort: 'host', order: 'desc' });
+      // host 알파벳 내림차순: school.local, disabled.test, cdn.example.com
+      expect(results[0].host).toBe('school.local');
+      expect(results[1].host).toBe('disabled.test');
+      expect(results[2].host).toBe('cdn.example.com');
+    });
+
+    it('order 미지정 시 기본 내림차순으로 동작한다', () => {
+      // order 미지정 → 기본 DESC — 기존 동작 회귀 방지
+      const allDefault = repo.findAll();
+      const allDesc = repo.findAll({ order: 'desc' });
+      // 결과 순서가 동일해야 한다 (created_at DESC)
+      expect(allDefault.map((d) => d.host)).toEqual(allDesc.map((d) => d.host));
+    });
+
+    it('허용되지 않은 order 값은 기본 DESC로 대체된다', () => {
+      // SQL injection 방지 — 허용되지 않은 값은 무시
+      const results = repo.findAll({ sort: 'host', order: 'INVALID' });
+      // order=DESC 동작이어야 한다
+      const resultsDesc = repo.findAll({ sort: 'host', order: 'desc' });
+      expect(results.map((d) => d.host)).toEqual(resultsDesc.map((d) => d.host));
+    });
   });
 
   describe('update', () => {

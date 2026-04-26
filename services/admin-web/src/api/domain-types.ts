@@ -94,5 +94,8 @@ export interface BulkAddResult {
 export interface DomainsFilter {
   q?: string;
   enabled?: boolean;
+  /** 정렬 기준 컬럼 — API SORT_WHITELIST: host | created_at | updated_at */
   sort?: string;
+  /** 정렬 방향 — 'asc' | 'desc' */
+  order?: 'asc' | 'desc';
 }

@@ -185,6 +185,9 @@ export function DomainsPage() {
     enabled: searchParams.has('enabled')
       ? searchParams.get('enabled') === 'true'
       : undefined,
+    // sort/order: 없으면 undefined (API 기본값 created_at DESC로 동작)
+    sort: searchParams.get('sort') ?? undefined,
+    order: (searchParams.get('order') as 'asc' | 'desc' | null) ?? undefined,
   };
 
   /** 필터 변경 시 URL searchParams에 반영 (replace: true로 히스토리 오염 방지) */
@@ -192,7 +195,18 @@ export function DomainsPage() {
     const params: Record<string, string> = {};
     if (next.q) params.q = next.q;
     if (next.enabled !== undefined) params.enabled = String(next.enabled);
+    // 기본값(sort=created_at, order=desc)은 URL에 포함하지 않아 URL을 깔끔하게 유지
+    if (next.sort) params.sort = next.sort;
+    if (next.order) params.order = next.order;
     setSearchParams(params, { replace: true });
+  }
+
+  /**
+   * 정렬 헤더 클릭 핸들러 — DomainTable에서 컬럼/방향이 결정된 뒤 filter에 반영한다.
+   * 기존 q/enabled 필터는 그대로 유지하며 sort/order만 교체한다.
+   */
+  function handleSortChange(key: string, dir: 'asc' | 'desc') {
+    setFilter({ ...filter, sort: key, order: dir });
   }
 
   // 선택된 호스트 (일괄 작업용)
@@ -280,6 +294,9 @@ export function DomainsPage() {
               onDelete={(host) => setDeleteTarget(host)}
               onAddDomain={() => setShowAddDialog(true)}
               searchQuery={filter.q}
+              sortKey={filter.sort}
+              sortDir={filter.order}
+              onSortChange={handleSortChange}
             />
           )}
         </CardContent>

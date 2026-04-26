@@ -532,6 +532,98 @@ test.describe('도메인 관리 — 토글/퍼지 중복 클릭 방지 (#70)', (
 });
 
 /**
+ * 이슈 #83 회귀 방지 — 도메인 목록 테이블 컬럼 정렬 UI 미구현
+ * "도메인" 컬럼 헤더 클릭 시 sort/order URL 파라미터가 반영되고,
+ * 두 번째 클릭에서 방향이 토글되어야 한다. aria-sort 속성도 검증한다.
+ */
+test.describe('도메인 관리 — 컬럼 정렬 (#83)', () => {
+  test('도메인 컬럼 헤더 클릭 시 URL에 sort=host&order=asc가 반영된다', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+    await mockApi(page, 'GET', '/domains?sort=host&order=asc', createDomains());
+
+    await page.goto('/domains');
+    await expect(page.getByTestId('domains-table')).toBeVisible();
+
+    // 정렬 전 URL에 sort/order 파라미터가 없어야 한다
+    expect(page.url()).not.toContain('sort=');
+
+    // 도메인 컬럼 헤더 클릭
+    await page.getByTestId('domain-col-host').click();
+
+    // URL에 sort=host&order=asc가 반영되어야 한다 (#83 핵심)
+    expect(page.url()).toContain('sort=host');
+    expect(page.url()).toContain('order=asc');
+  });
+
+  test('같은 컬럼 헤더를 두 번 클릭하면 order가 asc→desc로 토글된다', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+    await mockApi(page, 'GET', '/domains?sort=host&order=asc', createDomains());
+    await mockApi(page, 'GET', '/domains?sort=host&order=desc', createDomains());
+
+    await page.goto('/domains');
+    await expect(page.getByTestId('domains-table')).toBeVisible();
+
+    const hostHeader = page.getByTestId('domain-col-host');
+
+    // 첫 번째 클릭 → asc
+    await hostHeader.click();
+    expect(page.url()).toContain('order=asc');
+
+    // 두 번째 클릭 → desc
+    await hostHeader.click();
+    expect(page.url()).toContain('order=desc');
+  });
+
+  test('sort=host&order=asc URL로 직접 접근 시 도메인 헤더에 ↑ 표시와 aria-sort="ascending"이 적용된다', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+    await mockApi(page, 'GET', '/domains?sort=host&order=asc', createDomains());
+
+    // sort 파라미터가 포함된 URL로 직접 접근
+    await page.goto('/domains?sort=host&order=asc');
+    await expect(page.getByTestId('domains-table')).toBeVisible();
+
+    const hostHeader = page.getByTestId('domain-col-host');
+
+    // ↑ 화살표가 헤더에 표시되어야 한다 (#83 핵심)
+    await expect(hostHeader).toContainText('↑');
+
+    // aria-sort 속성이 "ascending"으로 설정되어야 한다 (접근성)
+    await expect(hostHeader).toHaveAttribute('aria-sort', 'ascending');
+  });
+
+  test('sort=host&order=desc URL로 직접 접근 시 도메인 헤더에 ↓ 표시와 aria-sort="descending"이 적용된다', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+    await mockApi(page, 'GET', '/domains?sort=host&order=desc', createDomains());
+
+    await page.goto('/domains?sort=host&order=desc');
+    await expect(page.getByTestId('domains-table')).toBeVisible();
+
+    const hostHeader = page.getByTestId('domain-col-host');
+
+    // ↓ 화살표가 헤더에 표시되어야 한다
+    await expect(hostHeader).toContainText('↓');
+
+    // aria-sort 속성이 "descending"으로 설정되어야 한다 (접근성)
+    await expect(hostHeader).toHaveAttribute('aria-sort', 'descending');
+  });
+
+  test('정렬 미적용 시 도메인 헤더에 aria-sort="none"이 적용된다', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+
+    await page.goto('/domains');
+    await expect(page.getByTestId('domains-table')).toBeVisible();
+
+    // 정렬하지 않은 상태에서 aria-sort="none"이어야 한다
+    await expect(page.getByTestId('domain-col-host')).toHaveAttribute('aria-sort', 'none');
+  });
+});
+
+/**
  * 이슈 #29 — 포커스 복귀 및 포커스 트랩 회귀 테스트
  * Radix UI Dialog 교체 후 WCAG 2.4.3 준수 검증:
  * 1. 닫힘 후 트리거 버튼으로 포커스 복귀

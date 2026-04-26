@@ -33,6 +33,15 @@ interface DomainTableProps {
   isTogglePending?: boolean;
   /** 퍼지 뮤테이션 진행 중 여부 — 중복 클릭 방지를 위해 버튼을 disabled 처리한다 */
   isPurgePending?: boolean;
+  /**
+   * 현재 정렬 기준 컬럼 — 정렬 헤더 강조·aria-sort 표시에 사용한다.
+   * 현재 정렬 가능 컬럼: 'host' (도메인명 오름/내림차순)
+   */
+  sortKey?: string;
+  /** 현재 정렬 방향 */
+  sortDir?: 'asc' | 'desc';
+  /** 헤더 클릭 시 정렬 컬럼·방향 변경 콜백 — 같은 컬럼을 다시 클릭하면 방향이 토글된다 */
+  onSortChange?: (key: string, dir: 'asc' | 'desc') => void;
 }
 
 export function DomainTable({
@@ -47,7 +56,22 @@ export function DomainTable({
   searchQuery,
   isTogglePending = false,
   isPurgePending = false,
+  sortKey,
+  sortDir,
+  onSortChange,
 }: DomainTableProps) {
+  /**
+   * 컬럼 헤더 클릭 핸들러 — 같은 컬럼이면 방향 토글, 다른 컬럼이면 asc 시작
+   * onSortChange가 없으면 (정렬 불가 컬럼) 아무 동작도 하지 않는다
+   */
+  function handleSort(key: string) {
+    if (!onSortChange) return;
+    if (sortKey === key) {
+      onSortChange(key, sortDir === 'asc' ? 'desc' : 'asc');
+    } else {
+      onSortChange(key, 'asc');
+    }
+  }
   // 로딩 상태: 5행 스켈레톤
   if (isLoading) {
     return (
@@ -131,7 +155,24 @@ export function DomainTable({
               aria-label="전체 선택"
             />
           </TableHead>
-          <TableHead>도메인</TableHead>
+          {/* 도메인 컬럼 — host 기준 정렬 지원. 클릭 시 asc/desc 토글, aria-sort로 현재 방향 표현 */}
+          <TableHead
+            className={onSortChange ? 'cursor-pointer select-none hover:text-foreground' : ''}
+            onClick={() => handleSort('host')}
+            aria-sort={
+              sortKey === 'host'
+                ? sortDir === 'asc'
+                  ? 'ascending'
+                  : 'descending'
+                : 'none'
+            }
+            data-testid="domain-col-host"
+          >
+            도메인{' '}
+            {sortKey === 'host' && (
+              <span aria-hidden="true">{sortDir === 'asc' ? '↑' : '↓'}</span>
+            )}
+          </TableHead>
           {/* 이슈 #24: "Origin" 영문 → "오리진"으로 한국어 통일 (도메인 상세의 "오리진" 표기와 일관성) */}
           <TableHead>오리진</TableHead>
           <TableHead>상태</TableHead>

@@ -36,12 +36,17 @@ export interface FindAllOptions {
   q?: string;
   /** 활성화 여부 필터 */
   enabled?: boolean;
-  /** 정렬 기준 컬럼 (기본값: created_at DESC) */
+  /** 정렬 기준 컬럼 (기본값: created_at) */
   sort?: string;
+  /** 정렬 방향 — 'asc' | 'desc' (기본값: desc) */
+  order?: string;
 }
 
 /** sort 화이트리스트 — SQL injection 방지 */
 const SORT_WHITELIST = new Set(['host', 'created_at', 'updated_at']);
+
+/** order 화이트리스트 — 허용된 방향만 허용하여 SQL injection 방지 */
+const ORDER_WHITELIST = new Set(['asc', 'desc']);
 
 /**
  * 도메인 매핑 리포지토리
@@ -99,9 +104,12 @@ export class DomainRepository {
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-    // sort 화이트리스트 검증 — 허용되지 않은 값은 기본값으로 대체
+    // sort/order 화이트리스트 검증 — 허용되지 않은 값은 기본값으로 대체하여 SQL injection 방지
     const sortCol = options?.sort && SORT_WHITELIST.has(options.sort) ? options.sort : 'created_at';
-    const orderBy = `ORDER BY ${sortCol} DESC`;
+    const sortDir = options?.order && ORDER_WHITELIST.has(options.order.toLowerCase())
+      ? options.order.toUpperCase()
+      : 'DESC';
+    const orderBy = `ORDER BY ${sortCol} ${sortDir}`;
 
     return this.db
       .prepare(

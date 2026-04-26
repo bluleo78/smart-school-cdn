@@ -125,15 +125,16 @@ export async function domainRoutes(
   // DomainRepository.database getter를 통해 DB 인스턴스에 안전하게 접근
   const statsRepo = new DomainStatsRepository(domainRepo.database);
 
-  /** 전체 도메인 목록 조회 — q/enabled/sort 쿼리 파라미터 지원 */
-  app.get<{ Querystring: { q?: string; enabled?: string; sort?: string } }>(
+  /** 전체 도메인 목록 조회 — q/enabled/sort/order 쿼리 파라미터 지원 */
+  app.get<{ Querystring: { q?: string; enabled?: string; sort?: string; order?: string } }>(
     '/api/domains',
     async (request) => {
-      const { q, enabled, sort } = request.query;
+      const { q, enabled, sort, order } = request.query;
       return domainRepo.findAll({
         q,
         enabled: enabled !== undefined ? enabled === 'true' || enabled === '1' : undefined,
         sort,
+        order,
       });
     },
   );
