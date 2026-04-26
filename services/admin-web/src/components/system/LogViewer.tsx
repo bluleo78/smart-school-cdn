@@ -40,11 +40,28 @@ function levelLabel(level: LogLine['level']) {
   return <span className={`font-mono text-[10px] w-7 shrink-0 ${style}`}>{label}</span>;
 }
 
-/** 타임스탬프를 HH:MM:SS 형식으로 포맷 */
+/**
+ * 타임스탬프를 포맷한다.
+ * - 오늘 날짜: HH:MM:SS 시간만 표시
+ * - 다른 날짜: MM/DD HH:MM:SS 날짜+시간 표시
+ * 여러 날에 걸친 로그 혼재 시 날짜 경계를 명확히 구분하기 위해 날짜를 포함한다.
+ */
 function formatTime(ts: string): string {
   try {
     const d = new Date(ts);
-    return d.toLocaleTimeString('ko-KR', { hour12: false });
+    const today = new Date();
+    const isToday =
+      d.getFullYear() === today.getFullYear() &&
+      d.getMonth() === today.getMonth() &&
+      d.getDate() === today.getDate();
+    if (isToday) {
+      return d.toLocaleTimeString('ko-KR', { hour12: false });
+    }
+    return (
+      d.toLocaleDateString('ko-KR', { month: '2-digit', day: '2-digit' }) +
+      ' ' +
+      d.toLocaleTimeString('ko-KR', { hour12: false })
+    );
   } catch {
     return ts.slice(11, 19);
   }

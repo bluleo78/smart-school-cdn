@@ -201,6 +201,7 @@ test.describe('서비스 상태 그리드', () => {
 ///   레벨 셀렉트               ✅
 ///   지우기 버튼               ✅
 ///   자동 스크롤 aria-pressed  ✅ (#62)
+///   타임스탬프 날짜 표시      ✅ (#75)
 test.describe('LogViewer', () => {
   /** SSE mock 설정 헬퍼 — 1줄 로그를 포함한 스트림 반환 */
   async function mockSse(page: import('@playwright/test').Page, withLine = false) {
@@ -318,5 +319,40 @@ test.describe('LogViewer', () => {
     const ansiPattern = new RegExp(`${ESC}\\[`);
     expect(scrollAreaText).not.toMatch(ansiPattern);
     expect(scrollAreaText).toContain('admin snapshot 실패');
+  });
+
+  test('과거 날짜 타임스탬프는 날짜+시간을 표시한다 — 회귀 방지 #75', async ({ page }) => {
+    // 어제 날짜(과거) 타임스탬프를 포함한 로그를 SSE로 전달 — 날짜 경계 구분 기능 회귀 방지
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    yesterday.setHours(21, 16, 51, 0);
+    const yesterdayTs = yesterday.toISOString();
+
+    // goto 전에 route 등록 — useLogStream이 마운트되자마자 intercepted
+    await page.route('**/api/logs/**', async (route) => {
+      const body =
+        `data: ${JSON.stringify({ timestamp: yesterdayTs, level: 'INFO', message: '어제 로그', service: 'proxy' })}\n\n`;
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        headers: { 'Cache-Control': 'no-cache' },
+        body,
+      });
+    });
+    await page.goto('/system');
+
+    // 어제 로그 줄이 렌더링될 때까지 대기
+    await page.waitForFunction(() =>
+      document.querySelector('[data-testid="log-scroll-area"]')?.textContent?.includes('어제 로그'),
+    );
+
+    // ko-KR toLocaleDateString month:'2-digit' day:'2-digit' → "04. 26." 형식
+    // 어제 날짜(월/일)가 타임스탬프 텍스트에 포함되어야 한다
+    const scrollAreaText = await page.getByTestId('log-scroll-area').textContent() ?? '';
+    const yesterdayMonth = String(yesterday.getMonth() + 1).padStart(2, '0');
+    const yesterdayDay = String(yesterday.getDate()).padStart(2, '0');
+    expect(scrollAreaText).toContain(yesterdayMonth);
+    expect(scrollAreaText).toContain(yesterdayDay);
+    expect(scrollAreaText).toContain('어제 로그');
   });
 });
