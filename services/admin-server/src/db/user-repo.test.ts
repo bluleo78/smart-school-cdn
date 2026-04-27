@@ -46,6 +46,22 @@ describe('UserRepository', () => {
     expect(repo.findByUsername('a@b.c')?.disabled_at).not.toBeNull();
   });
 
+  // 이슈 #106 회귀 방지 — enable() 메서드 없어서 재활성화 불가
+  it('enable 하면 disabled_at 이 NULL 로 초기화된다', () => {
+    const u = repo.create('a@b.c', 'h');
+    repo.disable(u.id);
+    expect(repo.findByUsername('a@b.c')?.disabled_at).not.toBeNull();
+    repo.enable(u.id);
+    expect(repo.findByUsername('a@b.c')?.disabled_at).toBeNull();
+  });
+
+  // 이슈 #106 — 이미 활성 상태에서 enable() 호출 시 오류 없이 통과 (멱등성)
+  it('이미 활성 사용자에게 enable() 호출해도 오류 없이 활성 유지', () => {
+    const u = repo.create('a@b.c', 'h');
+    expect(() => repo.enable(u.id)).not.toThrow();
+    expect(repo.findByUsername('a@b.c')?.disabled_at).toBeNull();
+  });
+
   it('updateLastLogin 은 last_login_at 을 갱신한다', () => {
     const u = repo.create('a@b.c', 'h');
     repo.updateLastLogin(u.id);

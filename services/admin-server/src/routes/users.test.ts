@@ -73,6 +73,40 @@ describe('usersRoutes', () => {
     expect(await verifyPassword(u.password_hash, 'newpass123')).toBe(true);
   });
 
+  // 이슈 #106 회귀 방지 — PUT /api/users/:id/enable 엔드포인트 누락
+  it('PUT /api/users/:id/enable — 비활성 사용자 재활성화', async () => {
+    const other = ctx.userRepo.create('other@x.y', await hashPassword('p'));
+    ctx.userRepo.disable(other.id);
+    expect(ctx.userRepo.findById(other.id)?.disabled_at).not.toBeNull();
+
+    const r = await ctx.app.inject({
+      method: 'PUT', url: `/api/users/${other.id}/enable`,
+      cookies: ctx.cookies,
+    });
+    expect(r.statusCode).toBe(200);
+    expect(ctx.userRepo.findById(other.id)?.disabled_at).toBeNull();
+  });
+
+  // 이슈 #106 — 이미 활성 사용자에게 enable 호출 시 멱등성 보장
+  it('PUT /api/users/:id/enable — 이미 활성 사용자에게 호출해도 200', async () => {
+    const other = ctx.userRepo.create('other@x.y', await hashPassword('p'));
+    const r = await ctx.app.inject({
+      method: 'PUT', url: `/api/users/${other.id}/enable`,
+      cookies: ctx.cookies,
+    });
+    expect(r.statusCode).toBe(200);
+    expect(ctx.userRepo.findById(other.id)?.disabled_at).toBeNull();
+  });
+
+  // 이슈 #106 — 존재하지 않는 사용자에게 enable 호출 시 404
+  it('PUT /api/users/:id/enable — 존재하지 않는 사용자 404', async () => {
+    const r = await ctx.app.inject({
+      method: 'PUT', url: '/api/users/9999/enable',
+      cookies: ctx.cookies,
+    });
+    expect(r.statusCode).toBe(404);
+  });
+
   it('DELETE /api/users/:id — 다른 계정 비활성', async () => {
     const other = ctx.userRepo.create('other@x.y', await hashPassword('p'));
     const r = await ctx.app.inject({

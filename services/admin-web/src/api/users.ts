@@ -25,3 +25,8 @@ export async function updatePassword(id: number, password: string): Promise<void
 export async function disableUser(id: number): Promise<void> {
   await api.delete(`/users/${id}`);
 }
+
+/** 비활성화된 사용자를 재활성화한다 */
+export async function enableUser(id: number): Promise<void> {
+  await api.put(`/users/${id}/enable`, {});
+}

@@ -7,6 +7,26 @@ import { test, expect } from '../fixtures/test';
 import { mockApi } from '../fixtures/api-mock';
 import { TEST_USER } from '../fixtures/auth-mock';
 
+/** 비활성 사용자가 포함된 목록 — 본인(TEST_USER) + 비활성 사용자 1명 */
+const usersWithDisabled = [
+  {
+    id: TEST_USER.id,
+    username: TEST_USER.username,
+    created_at: '2026-04-01T00:00:00.000Z',
+    updated_at: '2026-04-01T00:00:00.000Z',
+    disabled_at: null,
+    last_login_at: TEST_USER.last_login_at,
+  },
+  {
+    id: 2,
+    username: 'disabled@example.com',
+    created_at: '2026-04-10T00:00:00.000Z',
+    updated_at: '2026-04-26T00:00:00.000Z',
+    disabled_at: '2026-04-26T00:00:00.000Z',
+    last_login_at: null,
+  },
+];
+
 /** 기본 사용자 목록 — 본인(TEST_USER) + 다른 활성 사용자 1명 */
 const baseUsers = [
   {
@@ -303,6 +323,87 @@ test.describe('사용자 관리', () => {
     // autocomplete="username" 속성이 있어야 함
     const autocomplete = await hiddenUsername.getAttribute('autocomplete');
     expect(autocomplete).toBe('username');
+  });
+
+  // 이슈 #106 회귀 방지 — 비활성 사용자 행에 재활성화 버튼 없음
+  test('비활성 사용자 행에 재활성화 버튼 표시 (비활성화 버튼 없음)', async ({ page }) => {
+    await mockApi(page, 'GET', '/users', usersWithDisabled);
+
+    await page.goto('/users');
+
+    // 비활성 사용자 행에 재활성화 버튼이 있어야 함
+    const disabledRow = page.getByTestId('user-row-2');
+    await expect(disabledRow.getByRole('button', { name: '재활성화' })).toBeVisible();
+
+    // 비활성 사용자 행에 비활성화 버튼은 없어야 함
+    await expect(disabledRow.getByRole('button', { name: '비활성화' })).not.toBeVisible();
+  });
+
+  // 이슈 #106 회귀 방지 — 재활성화 클릭 시 확인 다이얼로그 + 취소
+  test('재활성화 클릭 시 shadcn AlertDialog 표시 및 취소', async ({ page }) => {
+    await mockApi(page, 'GET', '/users', usersWithDisabled);
+
+    await page.goto('/users');
+
+    // 비활성 사용자 행의 재활성화 버튼 클릭
+    const disabledRow = page.getByTestId('user-row-2');
+    await disabledRow.getByRole('button', { name: '재활성화' }).click();
+
+    // shadcn AlertDialog가 표시되어야 함
+    const dialog = page.getByTestId('enable-user-dialog');
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText('disabled@example.com')).toBeVisible();
+
+    // 취소 버튼 클릭 — 다이얼로그가 닫혀야 함
+    await dialog.getByRole('button', { name: '취소' }).click();
+    await expect(dialog).not.toBeVisible();
+  });
+
+  // 이슈 #106 회귀 방지 — 재활성화 확인 시 API 호출 및 목록 갱신
+  test('재활성화 확인 시 API 호출 후 목록 갱신', async ({ page }) => {
+    let enableApiCalled = false;
+    const enabledUsers = usersWithDisabled.map((u) =>
+      u.id === 2 ? { ...u, disabled_at: null } : u
+    );
+
+    await page.route('**/api/users', async (route) => {
+      if (route.request().method() === 'GET') {
+        // enableApiCalled 이후 재조회 시 재활성화된 목록 반환
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(enableApiCalled ? enabledUsers : usersWithDisabled),
+        });
+      } else {
+        return route.fallback();
+      }
+    });
+
+    // PUT /users/2/enable — enableUser API 엔드포인트
+    await page.route('**/api/users/2/enable', async (route) => {
+      if (route.request().method() === 'PUT') {
+        enableApiCalled = true;
+        await route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' });
+      } else {
+        return route.fallback();
+      }
+    });
+
+    await page.goto('/users');
+
+    // 재활성화 버튼 클릭
+    const disabledRow = page.getByTestId('user-row-2');
+    await disabledRow.getByRole('button', { name: '재활성화' }).click();
+
+    // AlertDialog에서 확인 클릭
+    const dialog = page.getByTestId('enable-user-dialog');
+    await expect(dialog).toBeVisible();
+    await dialog.getByTestId('enable-user-confirm').click();
+
+    // 다이얼로그 닫힘 확인
+    await expect(dialog).not.toBeVisible();
+    // API가 호출되었는지 확인
+    expect(enableApiCalled).toBe(true);
   });
 
   test('API 에러 시 에러 메시지 표시', async ({ page }) => {

@@ -1,11 +1,11 @@
-/** 사용자 관리 페이지 — 목록/추가/비밀번호 재설정/비활성화 */
+/** 사용자 관리 페이지 — 목록/추가/비밀번호 재설정/비활성화/재활성화 */
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { listUsers, createUser, updatePassword, disableUser, type UserItem } from '../api/users';
+import { listUsers, createUser, updatePassword, disableUser, enableUser, type UserItem } from '../api/users';
 import { formatDate, formatDateTime } from '../lib/format';
 import { useAuth } from '../components/auth/use-auth';
 import { Button } from '../components/ui/button';
@@ -83,10 +83,22 @@ export function UsersPage() {
     onError: () => toast.error('사용자 비활성화에 실패했습니다.'),
   });
 
+  // 비활성화된 사용자를 재활성화하는 뮤테이션 — enable API 호출 후 목록 갱신
+  const enableMut = useMutation({
+    mutationFn: (id: number) => enableUser(id),
+    onSuccess: () => {
+      toast.success('사용자가 재활성화되었습니다');
+      void qc.invalidateQueries({ queryKey: ['users'] });
+    },
+    onError: () => toast.error('사용자 재활성화에 실패했습니다.'),
+  });
+
   const [createOpen, setCreateOpen] = useState(false);
   const [passwordTarget, setPasswordTarget] = useState<UserItem | null>(null);
   // 비활성화 확인 다이얼로그 대상 — null이면 닫힘, UserItem이면 해당 사용자에 대한 확인창 표시
   const [disableTarget, setDisableTarget] = useState<UserItem | null>(null);
+  // 재활성화 확인 다이얼로그 대상 — null이면 닫힘, UserItem이면 해당 사용자에 대한 확인창 표시
+  const [enableTarget, setEnableTarget] = useState<UserItem | null>(null);
   const createForm = useForm<CreateFormData>({ resolver: zodResolver(createSchema) });
   const passwordForm = useForm<PasswordFormData>({ resolver: zodResolver(passwordSchema) });
 
@@ -145,15 +157,26 @@ export function UsersPage() {
                   >
                     비밀번호 재설정
                   </Button>
-                  {/* 비활성화 버튼 — 클릭 시 shadcn AlertDialog로 확인 (네이티브 confirm() 제거) */}
-                  <Button
-                    variant="destructive"
-                    size="xs"
-                    disabled={u.id === myId || !!u.disabled_at}
-                    onClick={() => setDisableTarget(u)}
-                  >
-                    비활성화
-                  </Button>
+                  {/* 비활성 사용자에게는 재활성화 버튼 표시 — 활성 사용자에게는 비활성화 버튼 표시 */}
+                  {u.disabled_at ? (
+                    <Button
+                      variant="outline"
+                      size="xs"
+                      onClick={() => setEnableTarget(u)}
+                    >
+                      재활성화
+                    </Button>
+                  ) : (
+                    /* 비활성화 버튼 — 클릭 시 shadcn AlertDialog로 확인 (네이티브 confirm() 제거) */
+                    <Button
+                      variant="destructive"
+                      size="xs"
+                      disabled={u.id === myId}
+                      onClick={() => setDisableTarget(u)}
+                    >
+                      비활성화
+                    </Button>
+                  )}
                 </TableCell>
               </TableRow>
             ))}
@@ -223,6 +246,33 @@ export function UsersPage() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* 재활성화 확인 다이얼로그 — 비활성 사용자를 다시 활성화하기 전 의도 확인 */}
+      <AlertDialog open={!!enableTarget} onClose={() => setEnableTarget(null)}>
+        <AlertDialogContent className="max-w-sm" data-testid="enable-user-dialog">
+          <AlertDialogTitle>사용자 재활성화</AlertDialogTitle>
+          <p className="text-sm text-muted-foreground">
+            <span className="font-medium">{enableTarget?.username}</span>을(를) 재활성화하시겠습니까?
+            재활성화된 사용자는 다시 로그인할 수 있습니다.
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setEnableTarget(null)}>
+              취소
+            </Button>
+            <Button
+              disabled={enableMut.isPending}
+              data-testid="enable-user-confirm"
+              onClick={() => {
+                if (!enableTarget) return;
+                enableMut.mutate(enableTarget.id);
+                setEnableTarget(null);
+              }}
+            >
+              {enableMut.isPending ? '처리 중…' : '재활성화'}
+            </Button>
+          </div>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* 비활성화 확인 다이얼로그 — 네이티브 confirm() 대신 shadcn AlertDialog로 UX 일관성 확보 */}
       <AlertDialog open={!!disableTarget} onClose={() => setDisableTarget(null)}>

@@ -68,4 +68,10 @@ export class UserRepository {
     const now = new Date().toISOString();
     this.db.prepare('UPDATE users SET disabled_at = ?, updated_at = ? WHERE id = ?').run(now, now, id);
   }
+
+  /** 비활성화된 사용자를 재활성화한다 — disabled_at 을 NULL 로 초기화 */
+  enable(id: number): void {
+    const now = new Date().toISOString();
+    this.db.prepare('UPDATE users SET disabled_at = NULL, updated_at = ? WHERE id = ?').run(now, id);
+  }
 }

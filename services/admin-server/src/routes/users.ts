@@ -32,10 +32,11 @@ function publicUser(u: {
 
 /**
  * 사용자 CRUD 라우트 — 모두 requireAuth 훅의 보호를 받는다.
- * - GET    /api/users          — 전체 목록 (password_hash 제외)
- * - POST   /api/users          — 신규 생성
- * - PUT    /api/users/:id/password — 비밀번호 변경
- * - DELETE /api/users/:id      — 비활성(soft delete), 자기 자신은 거부
+ * - GET    /api/users               — 전체 목록 (password_hash 제외)
+ * - POST   /api/users               — 신규 생성
+ * - PUT    /api/users/:id/password  — 비밀번호 변경
+ * - PUT    /api/users/:id/enable    — 비활성 사용자 재활성화
+ * - DELETE /api/users/:id           — 비활성(soft delete), 자기 자신은 거부
  */
 export const usersRoutes: FastifyPluginAsync<{ userRepo: UserRepository }> = async (app, opts) => {
   const { userRepo } = opts;
@@ -68,6 +69,21 @@ export const usersRoutes: FastifyPluginAsync<{ userRepo: UserRepository }> = asy
     }
     const hash = await hashPassword(parsed.data.password);
     userRepo.updatePassword(id, hash);
+    return { ok: true };
+  });
+
+  // 비활성화된 사용자를 재활성화 — disabled_at 을 NULL 로 초기화
+  app.put<{ Params: { id: string } }>('/api/users/:id/enable', async (req, reply) => {
+    const id = Number(req.params.id);
+    const user = userRepo.findById(id);
+    if (!user) {
+      return reply.code(404).send({ error: 'user_not_found' });
+    }
+    if (!user.disabled_at) {
+      // 이미 활성 상태인 사용자에게 재활성화를 시도하면 멱등성 보장을 위해 200 반환
+      return { ok: true };
+    }
+    userRepo.enable(id);
     return { ok: true };
   });
 
