@@ -81,6 +81,33 @@ test.describe('도메인 관리 — 로딩 및 에러 상태', () => {
 });
 
 test.describe('도메인 관리 — 요약 카드', () => {
+  /**
+   * 이슈 #104 회귀 방지 — DomainSummaryCards API 실패 시 에러 표시 없이 0으로 fallback
+   * /domains/summary가 500을 반환하면 카드 대신 에러 메시지가 표시되어야 한다.
+   *
+   * 모킹 이유: 실제 백엔드가 없거나 오프라인인 상황에서 에러 상태를 확정적으로 재현하기 위함.
+   * mock이 재현하는 조건: GET /domains/summary 응답이 500 에러인 상황.
+   * 이 mock이 실제 버그 조건과 동일한 이유: useDomainSummary가 반환하는 isError 값은
+   * TanStack Query가 응답 상태를 기반으로 설정하므로, 500 응답이 isError=true를 트리거한다.
+   */
+  test('요약 통계 API 실패 시 에러 메시지가 표시된다 (#104 회귀 방지)', async ({ page }) => {
+    await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
+    await mockApi(page, 'GET', '/proxy/requests', []);
+    // /domains/summary를 500으로 모킹 — isError=true 유발
+    await mockApi(page, 'GET', '/domains/summary', { error: 'Internal Server Error' }, { status: 500 });
+    await mockApi(page, 'GET', '/domains', []);
+    await mockApi(page, 'GET', '/tls/certificates', []);
+
+    await page.goto('/domains');
+
+    // 에러 메시지가 표시되어야 한다 (#104 핵심 — 0으로 fallback 대신)
+    await expect(page.getByTestId('domain-summary-error')).toBeVisible();
+    await expect(page.getByText('요약 정보를 불러오지 못했습니다.')).toBeVisible();
+
+    // 요약 카드(0 표시)가 보이면 안 된다
+    await expect(page.getByTestId('domain-summary-cards')).not.toBeVisible();
+  });
+
   test('오늘 대역폭 카드에 절감량 bytes 값이 표시된다 (#30 회귀 방지)', async ({ page }) => {
     // 1.5 MB 절감 시나리오 — formatBytes 변환 후 숫자 표시 검증
     await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());

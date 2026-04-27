@@ -6,7 +6,17 @@ import { formatBytes } from '../../lib/format';
 import { BarSparkline, DeltaBadge } from './StatSparkline';
 
 export function DomainSummaryCards() {
-  const { data, isLoading } = useDomainSummary();
+  // error: API 요청 실패 여부 — isError가 true이면 0 fallback 대신 에러 메시지 표시 (#104)
+  const { data, isLoading, isError } = useDomainSummary();
+
+  // API 실패 시 0으로 오해하지 않도록 에러 상태를 명시적으로 표시한다
+  if (isError) {
+    return (
+      <p className="text-sm text-destructive" data-testid="domain-summary-error">
+        요약 정보를 불러오지 못했습니다.
+      </p>
+    );
+  }
 
   if (isLoading) {
     // md(768px) 미만에서 2열로 전환하여 카드 너비 확보 — BarSparkline overflow 방지 (#71)
