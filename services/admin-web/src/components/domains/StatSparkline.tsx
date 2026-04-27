@@ -4,8 +4,9 @@
 /** 바 스파크라인 — 높이 36px, 바 너비 5px */
 export function BarSparkline({ values }: { values: number[] }) {
   const max = Math.max(...values, 1);
+  // 순수 장식 요소 — 카드 텍스트가 실제 수치를 제공하므로 AT에서 숨긴다
   return (
-    <div className="flex items-end gap-0.5 h-9">
+    <div className="flex items-end gap-0.5 h-9" aria-hidden="true">
       {values.map((v, i) => (
         <div
           key={i}
