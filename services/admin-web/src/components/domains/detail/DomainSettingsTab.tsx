@@ -5,6 +5,7 @@ import type { Domain } from '../../../api/domain-types';
 import { useUpdateDomain } from '../../../hooks/useUpdateDomain';
 import { useDeleteDomain } from '../../../hooks/useDeleteDomain';
 import { useDomainTls } from '../../../hooks/useDomainTls';
+import { useTlsRenew } from '../../../hooks/useTlsRenew';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
@@ -170,9 +171,12 @@ function OriginSection({ domain }: { domain: Domain }) {
 
 /** TLS / 인증서 카드 — useDomainTls hook으로 실제 인증서 데이터 표시
  * 상태 표시는 TlsStatusBadge로 통일 (#73)
+ * 수동 갱신 버튼은 useTlsRenew 훅으로 활성화 — DomainQuickActions와 동일 기능 (#102)
  */
 function TlsSection({ host }: { host: string }) {
   const { data: cert } = useDomainTls(host);
+  /** TLS 수동 갱신 뮤테이션 — 갱신 중 버튼 비활성화로 중복 요청 방지 */
+  const tlsRenewMutation = useTlsRenew();
 
   /** ISO 8601 문자열 → 한국어 날짜 문자열 (없으면 '—') */
   const toKoDate = (iso: string | undefined) =>
@@ -182,9 +186,15 @@ function TlsSection({ host }: { host: string }) {
     <Card>
       <CardHeader className="flex flex-row items-center justify-between pb-2">
         <CardTitle className="text-sm">TLS / 인증서</CardTitle>
-        {/* 1차 릴리스에서는 수동 갱신 비활성화 */}
-        <Button variant="outline" disabled size="xs">
-          수동 갱신
+        {/* 수동 갱신 — useTlsRenew 훅으로 활성화, 갱신 진행 중에만 disabled (#102) */}
+        <Button
+          variant="outline"
+          size="xs"
+          disabled={tlsRenewMutation.isPending}
+          onClick={() => tlsRenewMutation.mutate(host)}
+          data-testid="tls-renew-settings"
+        >
+          {tlsRenewMutation.isPending ? '갱신 중…' : '수동 갱신'}
         </Button>
       </CardHeader>
       <CardContent>

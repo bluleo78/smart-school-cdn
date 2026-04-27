@@ -1375,3 +1375,38 @@ test.describe('도메인 상세 — 탭 URL searchParam 동기화 (#61)', () => 
     expect(gridClass).not.toContain('grid-cols-2 ');
   });
 });
+
+// ─── 설정 탭 TLS 수동 갱신 (#102 회귀) ───────────────────────────────
+test.describe('도메인 상세 — 설정 탭 TLS 수동 갱신 (#102)', () => {
+  /**
+   * 회귀 방지: DomainSettingsTab의 "수동 갱신" 버튼이 하드코딩 disabled에서
+   * useTlsRenew 훅으로 교체됨.
+   * - 수정 전: <Button disabled> (항상 비활성)
+   * - 수정 후: useTlsRenew 훅 → isPending 아닐 때 활성, 갱신 중 비활성
+   */
+  test('설정 탭의 수동 갱신 버튼이 기본 상태에서 활성화되어 있다', async ({ page }) => {
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com?tab=settings');
+
+    await expect(page.getByTestId('domain-settings-tab')).toBeVisible();
+    // 수동 갱신 버튼이 비활성화되지 않아야 한다 (핵심 회귀 조건)
+    const renewBtn = page.getByTestId('tls-renew-settings');
+    await expect(renewBtn).toBeVisible();
+    await expect(renewBtn).toBeEnabled();
+  });
+
+  test('수동 갱신 버튼 클릭 시 POST /api/tls/renew/<host> 가 호출된다', async ({ page }) => {
+    await setupDetailMocks(page);
+    // 갱신 엔드포인트 mock — 성공 응답
+    await mockApi(page, 'POST', '/tls/renew/textbook.com', { success: true, host: 'textbook.com' });
+    await page.goto('/domains/textbook.com?tab=settings');
+
+    await expect(page.getByTestId('domain-settings-tab')).toBeVisible();
+
+    // 버튼 클릭 → 뮤테이션 요청
+    await page.getByTestId('tls-renew-settings').click();
+
+    // 성공 토스트가 표시되어야 한다
+    await expect(page.getByText('TLS 인증서가 갱신되었습니다.')).toBeVisible();
+  });
+});
