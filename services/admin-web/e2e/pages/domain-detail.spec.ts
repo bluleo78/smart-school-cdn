@@ -510,6 +510,35 @@ test.describe('도메인 상세 — Overview 탭', () => {
     expect(gridClass).not.toMatch(/(^| )grid-cols-4( |$)/);
   });
 
+  /**
+   * 이슈 #117 회귀 방지 — updated_at=0 시 수정일이 '1970. 1. 1.'로 표시되던 버그
+   * 수정 전: toKoDate(0) → Unix epoch '1970. 1. 1.' 표시
+   * 수정 후: updated_at=0이면 '—' 표시
+   */
+  test('updated_at=0인 도메인의 수정일이 \'1970. 1. 1.\' 대신 \'—\'로 표시된다 (회귀: #117)', async ({ page }) => {
+    // updated_at=0인 도메인으로 mock 오버라이드
+    await setupDetailMocks(page);
+    await mockApi(page, 'GET', '/domains/textbook.com', {
+      host: 'textbook.com',
+      origin: 'https://textbook.com',
+      enabled: 1,
+      description: '교과서 CDN',
+      created_at: 1700000000,
+      updated_at: 0, // 미수정 상태
+    });
+    await page.goto('/domains/textbook.com');
+
+    // 수정일 행을 찾아 '—' 표시 확인
+    const rows = page.locator('.grid.grid-cols-\\[120px_1fr\\]');
+    // 수정일 라벨을 포함하는 행
+    const modifiedRow = rows.filter({ hasText: '수정일' });
+    await expect(modifiedRow).toBeVisible();
+    // '1970. 1. 1.' epoch 값이 노출되어선 안 된다
+    await expect(modifiedRow).not.toContainText('1970');
+    // 미수정 상태임을 나타내는 대시가 표시되어야 한다
+    await expect(modifiedRow).toContainText('—');
+  });
+
 });
 
 // ─────────────────────────────────────────────

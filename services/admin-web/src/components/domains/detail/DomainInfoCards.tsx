@@ -38,7 +38,8 @@ export function DomainInfoCards({ domain }: Props) {
           <InfoRow label="오리진">{domain.origin}</InfoRow>
           <InfoRow label="설명">{domain.description || '—'}</InfoRow>
           <InfoRow label="생성일">{toKoDate(domain.created_at)}</InfoRow>
-          <InfoRow label="수정일">{toKoDate(domain.updated_at)}</InfoRow>
+          {/* updated_at=0은 미수정 상태 — epoch(1970) 대신 '—' 표시 */}
+          <InfoRow label="수정일">{domain.updated_at ? toKoDate(domain.updated_at) : '—'}</InfoRow>
         </CardContent>
       </Card>
 
