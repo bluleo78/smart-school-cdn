@@ -666,6 +666,29 @@ test.describe('도메인 상세 — 통계 탭', () => {
     await expect(errorEl).toHaveAttribute('aria-live', 'assertive');
   });
 
+  test('커스텀 버튼 클릭 시 이전 프리셋 pressed 상태가 즉시 해제된다 (회귀: #118)', async ({ page }) => {
+    // 수정 전: setCustomOpen(true)만 호출하고 onChange를 호출하지 않아
+    //           이전 프리셋(24h 등)이 aria-pressed="true"로 잔존하는 버그
+    // 수정 후: 커스텀 클릭 시 onChange({ period: 'custom' })가 즉시 호출되어
+    //          이전 프리셋은 pressed 해제, 커스텀 버튼은 pressed 활성화되어야 한다
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '최적화' }).click();
+
+    // 초기 상태: 24h가 눌린 상태(default)
+    await expect(page.getByTestId('period-24h')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByTestId('period-custom')).toHaveAttribute('aria-pressed', 'false');
+
+    // 커스텀 버튼 클릭 → 날짜 입력이 나타나고, 이전 프리셋은 즉시 해제되어야 한다
+    await page.getByTestId('period-custom').click();
+    await expect(page.getByTestId('period-custom-from')).toBeVisible();
+
+    // 이전 프리셋(24h)은 즉시 해제되어야 한다 — 시각적 두 버튼 동시 활성 현상 수정 확인
+    await expect(page.getByTestId('period-24h')).toHaveAttribute('aria-pressed', 'false');
+    // 커스텀 버튼이 activated(pressed) 상태여야 한다
+    await expect(page.getByTestId('period-custom')).toHaveAttribute('aria-pressed', 'true');
+  });
+
   test('Stats 탭 수동 새로고침 버튼이 존재', async ({ page }) => {
     await setupDetailMocks(page);
     await page.goto('/domains/textbook.com');

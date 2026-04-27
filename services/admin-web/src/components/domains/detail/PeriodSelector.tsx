@@ -81,7 +81,12 @@ export function PeriodSelector({ value, onChange }: Props) {
       ))}
       <Button
         variant={value.period === 'custom' ? 'default' : 'outline'}
-        onClick={() => setCustomOpen(true)}
+        onClick={() => {
+          setCustomOpen(true);
+          // 커스텀 클릭 시 즉시 period를 'custom'으로 변경 — 이전 프리셋이 pressed 상태로 잔존하는 버그 수정 (#118)
+          // 날짜가 미입력이어도 커스텀 모드임을 시각적으로 즉시 표시해야 함
+          if (value.period !== 'custom') onChange({ period: 'custom' });
+        }}
         size="sm"
         data-testid="period-custom"
         aria-pressed={value.period === 'custom'}
