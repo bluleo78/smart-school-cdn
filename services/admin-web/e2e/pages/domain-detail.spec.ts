@@ -1179,6 +1179,74 @@ test.describe('도메인 상세 — 설정 탭', () => {
     // 변경 전 원래 값(https://textbook.com)이 표시되어야 한다 (취소로 복원됨)
     await expect(page.getByText('https://textbook.com')).toBeVisible();
   });
+
+  /**
+   * 이슈 #112 회귀 방지 — 도메인 전체 퍼지 시 purgeCache 직접 호출로 loading 상태·캐시 무효화 누락
+   * 수정 후:
+   * - 퍼지 진행 중 확인 다이얼로그의 퍼지 버튼이 disabled 처리되어야 한다
+   * - purgeMutation.mutateAsync 경유로 /api/cache/purge가 올바른 payload로 호출되어야 한다
+   */
+  test('DomainCacheSection — 도메인 전체 퍼지 성공 시 /api/cache/purge가 domain 타입으로 호출되고 토스트가 표시된다 (회귀: #112)', async ({ page }) => {
+    // 수정 전: purgeCache 직접 호출로 onSuccess 콜백(캐시 무효화) 미실행 + 버튼 loading 상태 누락
+    // 수정 후: purgeMutation.mutateAsync를 경유해야 하므로 올바른 payload + 성공 토스트가 나타나야 한다
+    await setupDetailMocks(page);
+
+    // purge API 호출 payload를 캡처한다
+    let capturedBody: Record<string, unknown> | null = null;
+    await page.route('**/api/cache/purge', async (route) => {
+      capturedBody = JSON.parse(route.request().postData() ?? '{}');
+      return route.fulfill({ json: { purged_count: 7 } });
+    });
+
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '설정' }).click();
+
+    // 도메인 전체 퍼지 버튼 클릭 → 확인 다이얼로그 표시
+    await page.getByTestId('domain-purge-btn').click();
+    await expect(page.getByTestId('domain-purge-dialog')).toBeVisible();
+
+    // 확인 다이얼로그의 퍼지 버튼 클릭 → 퍼지 실행
+    await page.getByTestId('domain-purge-confirm-btn').click();
+
+    // 성공 토스트가 표시되어야 한다 (purged_count 반영)
+    await expect(page.getByText('7건 삭제')).toBeVisible({ timeout: 3000 });
+
+    // purgeMutation 경유로 올바른 type/target payload가 전송되었어야 한다
+    expect(capturedBody).toMatchObject({ type: 'domain', target: 'textbook.com' });
+  });
+
+  test('DomainCacheSection — 도메인 전체 퍼지 진행 중 확인 버튼이 disabled 처리된다 (회귀: #112)', async ({ page }) => {
+    // 수정 전: purgeCache 직접 호출로 isPending 상태가 버튼에 반영되지 않아 중복 클릭 가능
+    // 수정 후: purgeMutation.isPending이 true인 동안 domain-purge-confirm-btn이 disabled여야 한다
+    //          (다이얼로그가 pending 완료 후 닫히도록 handleDomainPurge 수정됨)
+    await setupDetailMocks(page);
+
+    // purge API를 지연 응답으로 설정하여 isPending 상태를 유지한다
+    let resolveRoute: (() => void) | null = null;
+    await page.route('**/api/cache/purge', async (route) => {
+      // 외부에서 해제할 때까지 응답을 보류한다
+      await new Promise<void>((res) => { resolveRoute = res; });
+      return route.fulfill({ json: { purged_count: 3 } });
+    });
+
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '설정' }).click();
+
+    // 도메인 전체 퍼지 다이얼로그 열기
+    await page.getByTestId('domain-purge-btn').click();
+    await expect(page.getByTestId('domain-purge-dialog')).toBeVisible();
+
+    // 퍼지 실행 — 응답 지연 중 다이얼로그는 open 유지, 버튼 disabled 검증
+    await page.getByTestId('domain-purge-confirm-btn').click();
+
+    // isPending 동안 다이얼로그가 열려 있고 버튼이 disabled 상태여야 한다
+    await expect(page.getByTestId('domain-purge-dialog')).toBeVisible({ timeout: 1000 });
+    await expect(page.getByTestId('domain-purge-confirm-btn')).toBeDisabled({ timeout: 1000 });
+
+    // 응답 해제 → 완료 → 다이얼로그 닫힘
+    resolveRoute?.();
+    await expect(page.getByTestId('domain-purge-dialog')).not.toBeVisible({ timeout: 3000 });
+  });
 });
 
 // ─── 헤더 액션 에러 처리 (#45 회귀) ──────────────────────────────

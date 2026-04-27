@@ -1,7 +1,6 @@
 /// 도메인 설정 탭 — 캐시 퍼지 섹션 (URL 퍼지 / 도메인 전체 퍼지)
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { purgeCache } from '../../../api/cache';
 import { usePurgeCache } from '../../../hooks/usePurgeCache';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { Button } from '../../ui/button';
@@ -48,13 +47,15 @@ export function DomainCacheSection({ host }: Props) {
     }
   }
 
-  /** 도메인 전체 퍼지 실행 */
+  /** 도메인 전체 퍼지 실행 — purgeMutation.mutateAsync 사용으로 loading 상태 관리 및 캐시 무효화(stats/popular) 보장.
+   *  다이얼로그는 요청 완료(성공/실패) 후에 닫아 pending 중 재클릭을 isPending disabled로 차단한다. */
   async function handleDomainPurge() {
-    setPurgeDialogOpen(false);
     try {
-      const result = await purgeCache({ type: 'domain', target: host });
+      const result = await purgeMutation.mutateAsync({ type: 'domain', target: host });
+      setPurgeDialogOpen(false);
       toast.success(`도메인 캐시 퍼지 완료 — ${result.purged_count}건 삭제`);
     } catch {
+      setPurgeDialogOpen(false);
       toast.error('캐시 퍼지에 실패했습니다.');
     }
   }
@@ -123,6 +124,7 @@ export function DomainCacheSection({ host }: Props) {
             <Button
               variant="destructive"
               onClick={handleDomainPurge}
+              disabled={purgeMutation.isPending}
               size="sm"
               data-testid="domain-purge-confirm-btn"
             >
