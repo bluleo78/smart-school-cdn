@@ -183,6 +183,51 @@ test.describe('DNS 관리 페이지', () => {
   });
 });
 
+// ─── 탭 URL searchParam 동기화 (#114 회귀) ────────────────────
+test.describe('DNS — 탭 URL searchParam 동기화 (#114)', () => {
+  test('통계 탭 클릭 시 URL에 ?tab=stats 가 반영된다', async ({ page }) => {
+    await mockDnsDefaults(page);
+    await page.goto('/dns');
+
+    // 초기 URL에는 ?tab= 파라미터가 없다
+    await expect(page).toHaveURL(/\/dns$/);
+
+    // 통계 탭 클릭 → URL에 ?tab=stats 가 추가되어야 한다
+    await page.getByTestId('tab-stats').click();
+    await expect(page).toHaveURL(/[?&]tab=stats/);
+  });
+
+  test('URL에 ?tab=queries 로 직접 접근하면 최근 쿼리 탭이 선택된다', async ({ page }) => {
+    await mockDnsDefaults(page);
+    await page.goto('/dns?tab=queries');
+
+    // Radix UI Tabs: 선택된 탭은 aria-selected="true", 나머지는 aria-selected="false"
+    await expect(page.getByTestId('tab-queries')).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByTestId('tab-records')).toHaveAttribute('aria-selected', 'false');
+  });
+
+  test('통계 탭 진입 후 새로고침하면 통계 탭이 유지된다', async ({ page }) => {
+    await mockDnsDefaults(page);
+    await page.goto('/dns');
+
+    await page.getByTestId('tab-stats').click();
+    await expect(page).toHaveURL(/[?&]tab=stats/);
+
+    // 새로고침 후에도 통계 탭이 선택 상태를 유지해야 한다
+    await mockDnsDefaults(page);
+    await page.reload();
+    await expect(page.getByTestId('tab-stats')).toHaveAttribute('aria-selected', 'true');
+  });
+
+  test('잘못된 ?tab=invalid 파라미터는 레코드 탭으로 폴백된다', async ({ page }) => {
+    await mockDnsDefaults(page);
+    await page.goto('/dns?tab=invalid');
+
+    // 유효하지 않은 값은 기본 레코드 탭으로 폴백
+    await expect(page.getByTestId('tab-records')).toHaveAttribute('aria-selected', 'true');
+  });
+});
+
 // ─── 빈 데이터 empty state (#21 회귀) ─────────────────────────
 test.describe('DNS — 쿼리 추이 차트 empty state (#21)', () => {
   test('메트릭 데이터가 없으면 차트 대신 empty state 메시지가 표시된다', async ({ page }) => {

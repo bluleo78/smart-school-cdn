@@ -2,6 +2,7 @@
  *  페이지 헤더 + 상태 스트립 + 3개 탭(레코드/통계/최근 쿼리).
  *  SystemPage / DashboardPage / DomainsPage 와 동일한 shadcn/ui · 시맨틱 토큰 패턴을 따른다. */
 import { useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router';
 import { AlertTriangle, BarChart2 } from 'lucide-react';
 import {
   LineChart,
@@ -49,11 +50,31 @@ const RESULT_LABEL: Record<DnsQueryResultLabel, string> = {
   nxdomain: 'NXDOMAIN',
 };
 
+/** 허용된 탭 값 목록 — 잘못된 파라미터가 들어올 경우 records로 폴백 (#114) */
+const VALID_TABS = ['records', 'stats', 'queries'] as const;
+type TabValue = (typeof VALID_TABS)[number];
+
+/** URL searchParam ?tab= 값이 유효한지 검증하는 타입 가드 */
+function isValidTab(value: string | null): value is TabValue {
+  return VALID_TABS.includes(value as TabValue);
+}
+
 /** DNS 관리 페이지 루트 — 헤더 + 오프라인 배너 + 상태 스트립 + 3탭 */
 export function DnsPage() {
   const { data: status } = useDnsStatus();
   // status 가 undefined(초기 로드 중)일 땐 배너 표시 금지 — 깜빡임 방지
   const offline = status?.online === false;
+
+  // URL searchParam ?tab=... 으로 탭 상태를 영속화한다 (#114).
+  // 뒤로가기·북마크·공유 링크로 특정 탭에 직접 접근할 수 있게 한다.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get('tab');
+  const activeTab: TabValue = isValidTab(tabParam) ? tabParam : 'records';
+
+  /** 탭 전환 시 ?tab=<value> 를 URL에 반영한다 */
+  function handleTabChange(value: string) {
+    setSearchParams({ tab: value }, { replace: false });
+  }
 
   return (
     <div className="space-y-6" data-testid="dns-page">
@@ -81,7 +102,7 @@ export function DnsPage() {
 
       <StatusStrip />
 
-      <Tabs defaultValue="records">
+      <Tabs value={activeTab} onValueChange={handleTabChange}>
         <TabsList>
           <TabsTrigger value="records" data-testid="tab-records">레코드</TabsTrigger>
           <TabsTrigger value="stats" data-testid="tab-stats">통계</TabsTrigger>
