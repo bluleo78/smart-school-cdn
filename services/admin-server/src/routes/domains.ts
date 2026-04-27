@@ -174,6 +174,24 @@ export async function domainRoutes(
       ? perHost.reduce((sum, r) => sum + r.hit_rate_delta, 0) / perHost.length
       : 0;
 
+    // TLS 만료 임박(30일 이내) 도메인을 alerts에 포함 — tls-service 장애 시에도 summary는 정상 반환
+    const TLS_ALERT_WINDOW_MS = 30 * 86_400_000;
+    const now = Date.now();
+    let tlsAlerts: Array<{ type: 'tls_expiring'; host: string; expiresAt: string }> = [];
+    try {
+      const { certs } = await app.tlsClient.listCertificates();
+      tlsAlerts = certs
+        .filter((cert) => {
+          const expiresMs = new Date(cert.expires_at).getTime();
+          // 만료된 인증서는 제외하고, 아직 유효하지만 30일 이내 만료 예정인 것만 포함
+          return expiresMs > now && (expiresMs - now) < TLS_ALERT_WINDOW_MS;
+        })
+        .map((cert) => ({ type: 'tls_expiring' as const, host: cert.domain, expiresAt: cert.expires_at }));
+    } catch (err) {
+      // tls-service 연결 실패는 경고만 남기고 alerts는 빈 배열로 graceful degradation
+      app.log.warn({ err }, '[summary] tls-service listCertificates 실패 — alerts 빈 배열로 대체');
+    }
+
     return {
       total,
       enabled,
@@ -186,7 +204,7 @@ export async function domainRoutes(
       hourlyRequests,
       hourlyCacheHitRate: Array<number>(maxBuckets).fill(0),
       hourlyBandwidth: Array<number>(maxBuckets).fill(0),
-      alerts: [],
+      alerts: tlsAlerts,
     };
   });
 

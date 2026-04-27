@@ -31,8 +31,11 @@ vi.mock('axios', () => ({
   default: { post: vi.fn().mockResolvedValue({ status: 200 }) },
 }));
 
-/** tls-service / dns-service gRPC 팬아웃 mock */
-const mockTlsClient = { syncDomains: vi.fn().mockResolvedValue({ success: true }) };
+/** tls-service / dns-service gRPC 팬아웃 mock — listCertificates는 기본적으로 빈 목록 반환 */
+const mockTlsClient = {
+  syncDomains: vi.fn().mockResolvedValue({ success: true }),
+  listCertificates: vi.fn().mockResolvedValue({ certs: [] }),
+};
 const mockDnsClient = { syncDomains: vi.fn().mockResolvedValue({ success: true }) };
 
 function buildApp(domainRepo: DomainRepository) {
@@ -405,6 +408,53 @@ describe('GET /api/domains/summary — L1/L2/bypass 비율', () => {
     expect(s!.today_l1_hit_rate).toBe(0);
     expect(s!.today_edge_hit_rate).toBe(0);
     expect(s!.today_bypass_rate).toBe(0);
+  });
+});
+
+describe('GET /api/domains/summary — TLS 만료 임박 alerts', () => {
+  it('30일 이내 만료 예정 인증서가 있으면 tls_expiring alert를 반환한다', async () => {
+    const repo = makeRepo();
+    repo.upsert('httpbin.org', 'https://httpbin.org');
+    // 29일 후 만료 — 30일 임계값 내
+    const soonMs = Date.now() + 29 * 86_400_000;
+    const expiresAt = new Date(soonMs).toISOString();
+    mockTlsClient.listCertificates.mockResolvedValueOnce({
+      certs: [{ domain: 'httpbin.org', issued_at: '2025-01-01T00:00:00Z', expires_at: expiresAt, status: 'active' }],
+    });
+    const app = buildApp(repo);
+    const res = await app.inject({ method: 'GET', url: '/api/domains/summary' });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.alerts).toHaveLength(1);
+    expect(body.alerts[0].type).toBe('tls_expiring');
+    expect(body.alerts[0].host).toBe('httpbin.org');
+    expect(body.alerts[0].expiresAt).toBe(expiresAt);
+  });
+
+  it('30일 초과 만료 인증서와 이미 만료된 인증서는 alerts에 포함하지 않는다', async () => {
+    const repo = makeRepo();
+    repo.upsert('a.test', 'https://a.test');
+    const farFuture = new Date(Date.now() + 60 * 86_400_000).toISOString(); // 60일 후
+    const alreadyExpired = new Date(Date.now() - 86_400_000).toISOString(); // 어제
+    mockTlsClient.listCertificates.mockResolvedValueOnce({
+      certs: [
+        { domain: 'a.test',  issued_at: '2025-01-01T00:00:00Z', expires_at: farFuture,     status: 'active' },
+        { domain: 'b.test',  issued_at: '2025-01-01T00:00:00Z', expires_at: alreadyExpired, status: 'expired' },
+      ],
+    });
+    const app = buildApp(repo);
+    const res = await app.inject({ method: 'GET', url: '/api/domains/summary' });
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body).alerts).toHaveLength(0);
+  });
+
+  it('tls-service listCertificates 실패 시에도 summary는 200이고 alerts는 빈 배열이다', async () => {
+    const repo = makeRepo();
+    mockTlsClient.listCertificates.mockRejectedValueOnce(new Error('UNAVAILABLE'));
+    const app = buildApp(repo);
+    const res = await app.inject({ method: 'GET', url: '/api/domains/summary' });
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body).alerts).toEqual([]);
   });
 });
 
