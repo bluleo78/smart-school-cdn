@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { Dialog, DialogContent, DialogTitle } from '../ui/dialog';
 import { Button } from '../ui/button';
+import { Textarea } from '../ui/textarea';
 import { useBulkAddDomains } from '../../hooks/useBulkAddDomains';
 
 interface DomainBulkAddDialogProps {
@@ -60,12 +61,13 @@ export function DomainBulkAddDialog({ open, onOpenChange }: DomainBulkAddDialogP
         <p className="text-xs text-muted-foreground mb-2">
           한 줄에 하나씩 <code className="text-xs bg-muted px-1 py-0.5 rounded">host origin</code> 형식으로 입력하세요.
         </p>
-        <textarea
+        {/* shadcn Textarea 컴포넌트 사용 — 포커스 링 두께/스타일을 Input과 통일 (#107) */}
+        <Textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
           rows={8}
-          className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-ring resize-y"
-          placeholder="textbook.com https://textbook.com&#10;cdn.school.kr https://origin.school.kr"
+          className="font-mono resize-y"
+          placeholder={"textbook.com https://textbook.com\ncdn.school.kr https://origin.school.kr"}
           data-testid="bulk-add-textarea"
         />
         {parseError && (

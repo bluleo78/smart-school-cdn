@@ -956,3 +956,57 @@ test.describe('도메인 관리 — DomainAlertBanner 다중 알림 링크 (#101
     await expect(banner.getByTestId('domain-alert-link-cdn.school.kr')).toBeVisible();
   });
 });
+
+/**
+ * 이슈 #107 회귀 방지 — DomainBulkAddDialog shadcn Textarea 컴포넌트 사용
+ * raw <textarea>가 아닌 shadcn Textarea 컴포넌트를 사용해야 하며,
+ * focus-visible:ring-2 클래스(Input과 동일한 포커스 링 굵기)가 적용되어야 한다.
+ */
+test.describe('도메인 관리 — 일괄 추가 Textarea 컴포넌트 (#107)', () => {
+  test('일괄 추가 다이얼로그 Textarea에 shadcn 포커스 링 클래스가 적용된다', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+
+    await page.goto('/domains');
+
+    // 일괄 추가 다이얼로그 열기
+    await page.getByRole('button', { name: '일괄 추가' }).click();
+    await expect(page.getByTestId('bulk-add-dialog')).toBeVisible();
+
+    // shadcn Textarea — focus-visible:ring-2 클래스 존재 확인 (#107 핵심)
+    const textarea = page.getByTestId('bulk-add-textarea');
+    await expect(textarea).toBeVisible();
+
+    const className = await textarea.evaluate((el) => el.className);
+    // raw <textarea>의 수동 복제 클래스 'focus:ring-1' 이 없어야 한다
+    expect(className).not.toContain('focus:ring-1');
+    // shadcn 표준 포커스 링 패턴이 적용되어야 한다
+    expect(className).toContain('focus-visible:ring-2');
+  });
+
+  test('일괄 추가 Textarea에 텍스트 입력 후 제출하면 API가 호출된다', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+
+    // POST /domains/bulk 모킹
+    let bulkAddCalled = false;
+    await page.route('**/api/domains/bulk', (route) => {
+      bulkAddCalled = true;
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([]) });
+    });
+
+    await page.goto('/domains');
+
+    // 일괄 추가 다이얼로그 열기
+    await page.getByRole('button', { name: '일괄 추가' }).click();
+    await expect(page.getByTestId('bulk-add-dialog')).toBeVisible();
+
+    // Textarea에 유효한 입력 후 제출
+    await page.getByTestId('bulk-add-textarea').fill('textbook.com https://textbook.com');
+    await page.getByTestId('bulk-add-submit').click();
+
+    // API가 호출되었는지 확인 — 입력→처리→출력 파이프라인 검증 (#107)
+    await page.waitForTimeout(200);
+    expect(bulkAddCalled).toBe(true);
+  });
+});
