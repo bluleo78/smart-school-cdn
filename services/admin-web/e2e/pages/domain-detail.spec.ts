@@ -858,6 +858,19 @@ test.describe('도메인 상세 — Logs 탭', () => {
     await expect(select).toContainText('30초');
   });
 
+  test('자동 갱신 드롭다운 SelectTrigger에 aria-label="자동 갱신 간격" 존재 (회귀: #113)', async ({ page }) => {
+    // 버그: SelectTrigger에 aria-label 없어 스크린리더가 "콤보박스 30초"로만 읽어 역할 구분 불가
+    // 수정 후: aria-label="자동 갱신 간격"이 존재해 스크린리더가 맥락을 파악할 수 있어야 한다
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '트래픽' }).click();
+
+    // SelectTrigger(button 역할)에 aria-label이 존재하는지 검증
+    const trigger = page.getByRole('combobox', { name: '자동 갱신 간격' });
+    await expect(trigger).toBeVisible();
+    await expect(trigger).toHaveAttribute('aria-label', '자동 갱신 간격');
+  });
+
   test('"에러만" 토글 — 4xx 에러가 목록에 표시된다 (회귀: #46)', async ({ page }) => {
     // 버그: errorsOnly=true 시 status=5xx만 전송 → 4xx 에러(404 등)가 누락됨
     // 수정: status=error(4xx+5xx 통합)로 전송하여 4xx 에러도 포함되어야 한다

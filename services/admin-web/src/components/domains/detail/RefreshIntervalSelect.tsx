@@ -23,7 +23,8 @@ export function RefreshIntervalSelect({ value, onChange }: Props) {
       {value > 0 && <span className="h-2 w-2 rounded-full bg-success" aria-hidden />}
       <span className="text-xs text-muted-foreground">갱신</span>
       <Select value={String(value)} onValueChange={(s) => onChange(Number(s) as RefreshIntervalMs)}>
-        <SelectTrigger className="h-8 w-24 text-xs">
+        {/* 스크린리더가 드롭다운 역할을 "자동 갱신 간격"으로 식별하도록 aria-label 추가 (#113) */}
+        <SelectTrigger className="h-8 w-24 text-xs" aria-label="자동 갱신 간격">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
