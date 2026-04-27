@@ -229,6 +229,56 @@ test.describe('도메인 관리 — 도메인 목록', () => {
     await expect(page.getByTestId('empty-add-domain-btn')).not.toBeVisible();
   });
 
+  /**
+   * 이슈 #95 회귀 방지 — 상태 필터(비활성) 적용 시 잘못된 빈 상태 표시
+   * 비활성 필터 적용 후 결과가 0건일 때, "등록된 도메인이 없습니다" CTA가 아닌
+   * "비활성 상태인 도메인이 없습니다." 메시지가 표시되어야 한다.
+   */
+  test('비활성 필터 적용 후 결과가 없으면 필터 전용 빈 상태 메시지가 표시된다 (#95)', async ({ page }) => {
+    await setupBaseMocks(page);
+    // 전체 도메인은 존재하지만 비활성 필터 결과는 빈 배열로 모킹한다.
+    // mock이 필요한 이유: 실제 서버에 비활성 도메인이 없을 수 있어 재현 조건을 확정하기 위함.
+    // mock이 재현하는 조건: enabled=false 필터 적용 시 서버가 빈 배열 반환하는 상황.
+    // 이 mock이 실제 버그 조건과 동일한 이유: DomainsPage는 enabled 파라미터를 서버로 전달하고
+    // DomainTable은 응답 배열이 비어있을 때 enabledFilter prop에 따라 분기하기 때문이다.
+    await mockApi(page, 'GET', '/domains', createDomains());
+    await mockApi(page, 'GET', '/domains?enabled=false', []);
+
+    await page.goto('/domains');
+
+    // 비활성 필터 선택
+    await page.getByTestId('domain-enabled-filter').click();
+    await page.getByRole('listbox').getByRole('option', { name: '비활성', exact: true }).click();
+
+    // 필터 전용 빈 상태가 표시되어야 한다 (#95 핵심)
+    await expect(page.getByTestId('domains-empty-filter')).toBeVisible();
+    await expect(page.getByText('비활성 상태인 도메인이 없습니다.')).toBeVisible();
+    await expect(page.getByText('필터를 변경하거나 해제해 보세요.')).toBeVisible();
+    // 도메인 추가 CTA 버튼은 표시되지 않아야 한다 (#95 핵심)
+    await expect(page.getByTestId('empty-add-domain-btn')).not.toBeVisible();
+  });
+
+  /**
+   * 이슈 #95 회귀 방지 — 활성 필터도 동일하게 처리되어야 한다
+   */
+  test('활성 필터 적용 후 결과가 없으면 필터 전용 빈 상태 메시지가 표시된다 (#95)', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+    await mockApi(page, 'GET', '/domains?enabled=true', []);
+
+    await page.goto('/domains');
+
+    // 활성 필터 선택
+    await page.getByTestId('domain-enabled-filter').click();
+    await page.getByRole('listbox').getByRole('option', { name: '활성', exact: true }).click();
+
+    // 필터 전용 빈 상태가 표시되어야 한다
+    await expect(page.getByTestId('domains-empty-filter')).toBeVisible();
+    await expect(page.getByText('활성 상태인 도메인이 없습니다.')).toBeVisible();
+    // 도메인 추가 CTA 버튼은 표시되지 않아야 한다 (#95 핵심)
+    await expect(page.getByTestId('empty-add-domain-btn')).not.toBeVisible();
+  });
+
   test('빈 상태 CTA 버튼 클릭 시 도메인 추가 다이얼로그가 열린다', async ({ page }) => {
     // 빈 상태에서 CTA를 통해 추가 모달이 열리는 경로를 검증한다
     await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());

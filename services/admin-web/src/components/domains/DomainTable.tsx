@@ -29,6 +29,12 @@ interface DomainTableProps {
    * 검색어가 있으면 "검색 결과 없음", 없으면 "도메인 미등록" CTA를 표시한다.
    */
   searchQuery?: string;
+  /**
+   * 현재 적용된 활성 상태 필터 — 빈 상태 메시지 분기에 사용한다.
+   * true(활성)/false(비활성) 필터가 적용된 경우 "조건에 맞는 도메인 없음"을 표시한다.
+   * undefined이면 필터 미적용 상태로 간주한다.
+   */
+  enabledFilter?: boolean;
   /** 토글 뮤테이션 진행 중 여부 — 중복 클릭 방지를 위해 버튼을 disabled 처리한다 */
   isTogglePending?: boolean;
   /** 퍼지 뮤테이션 진행 중 여부 — 중복 클릭 방지를 위해 버튼을 disabled 처리한다 */
@@ -54,6 +60,7 @@ export function DomainTable({
   onDelete,
   onAddDomain,
   searchQuery,
+  enabledFilter,
   isTogglePending = false,
   isPurgePending = false,
   sortKey,
@@ -83,9 +90,12 @@ export function DomainTable({
     );
   }
 
-  // 빈 상태 — 검색어 유무로 두 가지 상황을 분기한다
+  // 빈 상태 — 검색어·상태 필터 유무로 세 가지 상황을 분기한다
   // 1) 검색어 있음: "검색 결과 없음" 메시지 표시 (CTA 없음 — 실제 도메인은 존재함)
-  // 2) 검색어 없음: 등록된 도메인이 아예 없으므로 추가 유도 CTA 제공
+  // 2) 상태 필터(활성/비활성) 적용됨: "조건에 맞는 도메인 없음" 메시지 표시 (CTA 없음)
+  //    → 실제 도메인은 존재하지만 필터 조건에 해당하는 것이 없는 상황이므로
+  //      "등록된 도메인이 없습니다" CTA를 표시하면 오해를 준다 (이슈 #95)
+  // 3) 필터 없음: 등록된 도메인이 아예 없으므로 추가 유도 CTA 제공
   if (!domains || domains.length === 0) {
     if (searchQuery) {
       return (
@@ -98,6 +108,22 @@ export function DomainTable({
             <strong>&ldquo;{searchQuery}&rdquo;</strong>에 일치하는 도메인이 없습니다.
           </p>
           <p className="text-xs">검색어를 바꿔 다시 시도해보세요.</p>
+        </div>
+      );
+    }
+    if (enabledFilter !== undefined) {
+      // 상태 필터가 적용된 경우 — 필터 조건에 맞는 도메인이 없음을 안내한다
+      const filterLabel = enabledFilter ? '활성' : '비활성';
+      return (
+        <div
+          className="flex flex-col items-center gap-3 py-16 text-muted-foreground"
+          data-testid="domains-empty-filter"
+        >
+          <Globe size={40} className="opacity-25" />
+          <p className="text-sm font-medium text-foreground">
+            {filterLabel} 상태인 도메인이 없습니다.
+          </p>
+          <p className="text-xs">필터를 변경하거나 해제해 보세요.</p>
         </div>
       );
     }

@@ -294,6 +294,7 @@ export function DomainsPage() {
               onDelete={(host) => setDeleteTarget(host)}
               onAddDomain={() => setShowAddDialog(true)}
               searchQuery={filter.q}
+              enabledFilter={filter.enabled}
               sortKey={filter.sort}
               sortDir={filter.order}
               onSortChange={handleSortChange}
