@@ -1,6 +1,8 @@
 /// 도메인별 캐시 지표 표 — 재설계 §7.3 신규 요구사항.
 /// 각 row 클릭 시 `/domains/:host` 상세 페이지로 이동해 드릴다운을 지원한다.
+/// 키보드 접근성: tabIndex/role/onKeyDown 추가로 Tab 포커스 및 Enter/Space 활성화 지원 (#108)
 import { useNavigate } from 'react-router';
+import type { KeyboardEvent } from 'react';
 import { useCacheStats } from '../../hooks/useCacheStats';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Skeleton } from '../ui/skeleton';
@@ -68,8 +70,19 @@ export function ByDomainTable() {
             {data.by_domain.map((d) => (
               <TableRow
                 key={d.host}
-                className="cursor-pointer hover:bg-muted/50"
+                className="cursor-pointer hover:bg-muted/50 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1"
                 onClick={() => navigate(`/domains/${encodeURIComponent(d.host)}`)}
+                // 키보드 접근성: 포커스 가능하게 하고 Enter/Space 키로 클릭과 동일한 탐색 수행 (WCAG 2.1.1)
+                tabIndex={0}
+                role="link"
+                aria-label={`${d.host} 도메인 상세 보기`}
+                onKeyDown={(e: KeyboardEvent<HTMLTableRowElement>) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    // Space 키의 기본 동작(페이지 스크롤)을 막고 탐색 실행
+                    e.preventDefault();
+                    navigate(`/domains/${encodeURIComponent(d.host)}`);
+                  }
+                }}
                 data-testid={`by-domain-row-${d.host}`}
               >
                 <TableCell className="font-mono">{d.host}</TableCell>
