@@ -958,6 +958,73 @@ test.describe('도메인 관리 — DomainAlertBanner 다중 알림 링크 (#101
 });
 
 /**
+ * 이슈 #119 회귀 방지 — 필터 변경 시 선택 상태 미초기화로 숨겨진 도메인 일괄 삭제 가능
+ * 도메인을 선택한 뒤 검색/필터를 변경하면 선택이 초기화되어
+ * 현재 뷰에 표시되지 않는 도메인이 일괄 삭제 대상에 포함되지 않아야 한다.
+ *
+ * 모킹 이유: 검색어 변경 시 API 응답을 확정적으로 제어하기 위함.
+ * mock이 재현하는 조건: textbook.com을 선택한 상태에서 q=cdn으로 필터 변경 시
+ *   일괄 삭제 툴바에 선택 카운트가 0이 되어야 한다.
+ * 이 mock이 실제 버그 조건과 동일한 이유: DomainsPage의 selectedHosts는 useState로 관리되므로
+ *   필터 변경 시 초기화 로직이 없으면 숨겨진 도메인이 선택 상태로 남는다.
+ */
+test.describe('도메인 관리 — 필터 변경 시 선택 초기화 (#119)', () => {
+  test('검색어를 변경하면 이전에 선택한 도메인의 선택 상태가 초기화된다', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+    // 검색어 'cdn' 적용 시 cdn.school.kr만 반환하는 시나리오
+    await mockApi(page, 'GET', '/domains?q=cdn', [
+      {
+        host: 'cdn.school.kr',
+        origin: 'https://cdn.school.kr',
+        enabled: 1,
+        description: '',
+        created_at: 1700000100,
+        updated_at: 1700000100,
+      },
+    ]);
+
+    await page.goto('/domains');
+    await expect(page.getByTestId('domains-table')).toBeVisible();
+
+    // textbook.com 체크박스 선택 → 일괄 삭제 버튼 활성화
+    await page.getByTestId('domain-select-textbook.com').check();
+    const bulkDeleteBtn = page.getByTestId('toolbar-bulk-delete-btn');
+    await expect(bulkDeleteBtn).not.toBeDisabled();
+    await expect(bulkDeleteBtn).toContainText('(1)');
+
+    // 검색어 입력으로 필터 변경 → textbook.com이 뷰에서 사라짐
+    await page.getByTestId('domain-search').fill('cdn');
+    await page.waitForTimeout(400);
+
+    // 필터 변경 후 선택이 초기화되어 일괄 삭제 버튼이 다시 disabled가 되어야 한다 (#119 핵심)
+    await expect(bulkDeleteBtn).toBeDisabled();
+    await expect(bulkDeleteBtn).not.toContainText('(1)');
+  });
+
+  test('활성/비활성 필터를 변경하면 선택 상태가 초기화된다', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+    await mockApi(page, 'GET', '/domains?enabled=false', []);
+
+    await page.goto('/domains');
+    await expect(page.getByTestId('domains-table')).toBeVisible();
+
+    // textbook.com 체크박스 선택 → 일괄 삭제 버튼 활성화
+    await page.getByTestId('domain-select-textbook.com').check();
+    const bulkDeleteBtn = page.getByTestId('toolbar-bulk-delete-btn');
+    await expect(bulkDeleteBtn).not.toBeDisabled();
+
+    // 비활성 필터 선택 → 필터 변경으로 선택 초기화
+    await page.getByTestId('domain-enabled-filter').click();
+    await page.getByRole('listbox').getByRole('option', { name: '비활성', exact: true }).click();
+
+    // 필터 변경 후 선택이 초기화되어 일괄 삭제 버튼이 disabled가 되어야 한다 (#119 핵심)
+    await expect(bulkDeleteBtn).toBeDisabled();
+  });
+});
+
+/**
  * 이슈 #107 회귀 방지 — DomainBulkAddDialog shadcn Textarea 컴포넌트 사용
  * raw <textarea>가 아닌 shadcn Textarea 컴포넌트를 사용해야 하며,
  * focus-visible:ring-2 클래스(Input과 동일한 포커스 링 굵기)가 적용되어야 한다.

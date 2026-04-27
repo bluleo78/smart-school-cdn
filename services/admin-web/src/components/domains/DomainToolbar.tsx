@@ -70,6 +70,7 @@ export function DomainToolbar({
           variant="outline"
           onClick={onBulkDeleteClick}
           disabled={selectedCount === 0}
+          data-testid="toolbar-bulk-delete-btn"
         >
           일괄 삭제{selectedCount > 0 && ` (${selectedCount})`}
         </Button>

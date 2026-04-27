@@ -191,8 +191,13 @@ export function DomainsPage() {
     order: (searchParams.get('order') as 'asc' | 'desc' | null) ?? undefined,
   };
 
-  /** 필터 변경 시 URL searchParams에 반영 (replace: true로 히스토리 오염 방지) */
+  /**
+   * 필터 변경 시 URL searchParams에 반영 (replace: true로 히스토리 오염 방지).
+   * 필터가 바뀌면 현재 뷰에 없는 도메인이 선택 상태로 남지 않도록 선택을 초기화한다.
+   */
   function setFilter(next: DomainsFilter) {
+    // 필터 변경 시 선택 초기화 — 숨겨진 도메인의 일괄 삭제를 방지한다
+    setSelectedHosts(new Set());
     const params: Record<string, string> = {};
     if (next.q) params.q = next.q;
     if (next.enabled !== undefined) params.enabled = String(next.enabled);
