@@ -819,3 +819,113 @@ test.describe('도메인 관리 — 다이얼로그 포커스 관리 (#29)', () 
     expect(focusInDialog).toBe(true);
   });
 });
+
+/**
+ * 이슈 #101 회귀 방지 — DomainAlertBanner 다중 TLS 만료 임박 시 첫 번째 도메인만 링크
+ * 알림이 복수일 때 각 도메인에 개별 링크가 제공되어야 한다.
+ *
+ * 모킹 이유: 실제 백엔드의 TLS 알림 건수는 환경마다 다르므로 재현 조건을 확정하기 위함.
+ * mock이 재현하는 조건: /domains/summary가 특정 호스트를 포함한 tls_expiring 알림을 반환하는 상황.
+ * 이 mock이 실제 버그 조건과 동일한 이유: DomainAlertBanner는 useDomainSummary().data.alerts를
+ * 직접 읽어 링크를 렌더링하므로, mock 응답이 실제 렌더링 경로를 그대로 따른다.
+ */
+test.describe('도메인 관리 — DomainAlertBanner 다중 알림 링크 (#101)', () => {
+  test('TLS 만료 임박 알림이 1건이면 해당 도메인으로 직접 링크한다', async ({ page }) => {
+    await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
+    await mockApi(page, 'GET', '/proxy/requests', []);
+    await mockApi(page, 'GET', '/domains/summary', {
+      ...createDomainSummary(),
+      alerts: [{ type: 'tls_expiring', host: 'textbook.com' }],
+    });
+    await mockApi(page, 'GET', '/domains', createDomains());
+    await mockApi(page, 'GET', '/tls/certificates', []);
+
+    await page.goto('/domains');
+
+    const banner = page.getByTestId('domain-alert-banner');
+    await expect(banner).toBeVisible();
+
+    // 1건이면 해당 도메인 링크 하나만 있어야 한다 (#101 핵심)
+    const link = banner.getByTestId('domain-alert-link-textbook.com');
+    await expect(link).toBeVisible();
+    await expect(link).toHaveAttribute('href', '/domains/textbook.com');
+  });
+
+  test('TLS 만료 임박 알림이 3건이면 각 도메인에 개별 링크가 표시된다 (#101 핵심)', async ({ page }) => {
+    await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
+    await mockApi(page, 'GET', '/proxy/requests', []);
+    await mockApi(page, 'GET', '/domains/summary', {
+      ...createDomainSummary(),
+      alerts: [
+        { type: 'tls_expiring', host: 'first-domain.example' },
+        { type: 'tls_expiring', host: 'test-explorer.invalid' },
+        { type: 'tls_expiring', host: 'httpbin.org' },
+      ],
+    });
+    await mockApi(page, 'GET', '/domains', createDomains());
+    await mockApi(page, 'GET', '/tls/certificates', []);
+
+    await page.goto('/domains');
+
+    const banner = page.getByTestId('domain-alert-banner');
+    await expect(banner).toBeVisible();
+    await expect(banner).toContainText('TLS 만료 임박 3건');
+
+    // 3건 각각에 개별 링크가 있어야 한다 (#101 핵심 — 첫 번째 도메인 링크만 있으면 실패)
+    await expect(banner.getByTestId('domain-alert-link-first-domain.example')).toBeVisible();
+    await expect(banner.getByTestId('domain-alert-link-test-explorer.invalid')).toBeVisible();
+    await expect(banner.getByTestId('domain-alert-link-httpbin.org')).toBeVisible();
+
+    // 각 링크가 해당 도메인 상세 페이지로 이동해야 한다
+    await expect(banner.getByTestId('domain-alert-link-test-explorer.invalid')).toHaveAttribute(
+      'href',
+      '/domains/test-explorer.invalid',
+    );
+  });
+
+  test('sync_failed 알림 1건도 해당 도메인으로 직접 링크한다', async ({ page }) => {
+    // sync_failed 타입도 동일 컴포넌트 경로를 거치므로 회귀 보호 필요 (#101)
+    await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
+    await mockApi(page, 'GET', '/proxy/requests', []);
+    await mockApi(page, 'GET', '/domains/summary', {
+      ...createDomainSummary(),
+      alerts: [{ type: 'sync_failed', host: 'cdn.school.kr' }],
+    });
+    await mockApi(page, 'GET', '/domains', createDomains());
+    await mockApi(page, 'GET', '/tls/certificates', []);
+
+    await page.goto('/domains');
+
+    const banner = page.getByTestId('domain-alert-banner');
+    await expect(banner).toBeVisible();
+    await expect(banner).toContainText('동기화 실패 1건');
+
+    // sync_failed 도메인에도 개별 링크가 있어야 한다
+    await expect(banner.getByTestId('domain-alert-link-cdn.school.kr')).toBeVisible();
+  });
+
+  test('TLS 만료 + sync_failed 혼합 알림 시 각 타입별로 개별 링크가 표시된다', async ({ page }) => {
+    await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
+    await mockApi(page, 'GET', '/proxy/requests', []);
+    await mockApi(page, 'GET', '/domains/summary', {
+      ...createDomainSummary(),
+      alerts: [
+        { type: 'tls_expiring', host: 'textbook.com' },
+        { type: 'sync_failed', host: 'cdn.school.kr' },
+      ],
+    });
+    await mockApi(page, 'GET', '/domains', createDomains());
+    await mockApi(page, 'GET', '/tls/certificates', []);
+
+    await page.goto('/domains');
+
+    const banner = page.getByTestId('domain-alert-banner');
+    await expect(banner).toBeVisible();
+    await expect(banner).toContainText('TLS 만료 임박 1건');
+    await expect(banner).toContainText('동기화 실패 1건');
+
+    // 혼합 타입에서도 각 도메인에 개별 링크가 있어야 한다 (#101 핵심 — 첫 번째만 링크되던 버그)
+    await expect(banner.getByTestId('domain-alert-link-textbook.com')).toBeVisible();
+    await expect(banner.getByTestId('domain-alert-link-cdn.school.kr')).toBeVisible();
+  });
+});
