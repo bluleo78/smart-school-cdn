@@ -201,6 +201,32 @@ test.describe('대시보드 — BYPASS 사유 세부 한국어 통일 (#93)', ()
   });
 });
 
+// ─── 타임스탬프 날짜+시간 표시 (#105 회귀) ───────────────────────
+test.describe('대시보드 — 최근 요청 타임스탬프 날짜+시간 표시 (#105)', () => {
+  test('최근 요청 테이블 "시간" 컬럼이 날짜+시간(YYYY. M. D.)을 포함해 표시된다', async ({ page }) => {
+    // 버그: formatTime이 toLocaleTimeString만 써서 HH:MM:SS만 노출됨
+    // 수정 후: formatDateTime 유틸로 교체 → ko-KR 날짜+시간 포맷(YYYY. M. D. HH:MM:SS)
+    const { createRequestLogs } = await import('../factories/proxy.factory');
+    await setupDashboardMocks(page);
+    // 날짜가 명확한 고정 타임스탬프 사용 — 2026. 4. 11. 형태로 렌더되어야 한다
+    await mockApi(page, 'GET', '/proxy/requests', createRequestLogs());
+    await page.goto('/');
+
+    // "최근 요청" 카드가 로그 데이터와 함께 렌더될 때까지 대기
+    await expect(page.getByText('httpbin.org')).toBeVisible();
+
+    // "시간" 컬럼 셀에 날짜 부분(연·월·일)이 포함되어야 한다 — 시간만 표시 금지
+    // ko-KR toLocaleString은 "2026. 4. 11. 21:00:00" 형태 (KST = UTC+9)
+    const requestCard = page.locator('text=최근 요청').locator('..').locator('..');
+    const timeCell = requestCard.locator('tbody tr').first().locator('td').first();
+    const cellText = await timeCell.textContent();
+    // 날짜 부분이 있는지 확인: "2026" 또는 "." 두 개 이상 포함(ko-KR 날짜 형식)
+    expect(cellText).toMatch(/\d{4}/); // 연도 4자리 포함 여부
+    // 시간만 표시하는 패턴(HH:MM:SS 형태만 있고 날짜 없음)이 아닌지 확인
+    expect(cellText).not.toMatch(/^\d{2}:\d{2}:\d{2}$/);
+  });
+});
+
 // ─── 빈 데이터 empty state (#21 회귀) ─────────────────────────
 test.describe('대시보드 — 캐시 스택 차트 empty state (#21)', () => {
   test('시계열 데이터가 없으면 차트 대신 empty state 메시지가 표시된다', async ({ page }) => {

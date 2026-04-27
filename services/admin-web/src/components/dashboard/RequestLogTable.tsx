@@ -2,6 +2,7 @@
 /// 5초 간격으로 API를 폴링하여 최신 로그를 표시한다.
 import { Activity } from 'lucide-react';
 import { useProxyRequests } from '../../hooks/useProxyRequests';
+import { formatDateTime } from '../../lib/format';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import { Skeleton } from '../ui/skeleton';
@@ -15,11 +16,6 @@ function statusColor(code: number): string {
   return 'bg-destructive-subtle text-destructive';
 }
 
-/** ISO 타임스탬프를 "HH:MM:SS" 형식으로 변환 */
-function formatTime(timestamp: string): string {
-  const date = new Date(timestamp);
-  return date.toLocaleTimeString('ko-KR', { hour12: false });
-}
 
 export function RequestLogTable() {
   const { data: logs, isLoading, error } = useProxyRequests();
@@ -84,7 +80,7 @@ export function RequestLogTable() {
             <TableBody>
               {logs.map((log) => (
                 <TableRow key={`${log.timestamp}-${log.host}-${log.url}`}>
-                  <TableCell className="text-muted-foreground">{formatTime(log.timestamp)}</TableCell>
+                  <TableCell className="text-muted-foreground">{formatDateTime(log.timestamp)}</TableCell>
                   <TableCell className="font-mono">{log.method}</TableCell>
                   <TableCell>{log.host}</TableCell>
                   <TableCell className="font-mono max-w-xs truncate">{log.url}</TableCell>
