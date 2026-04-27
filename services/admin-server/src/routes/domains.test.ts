@@ -488,6 +488,28 @@ describe('GET /api/domains/:host/top-urls', () => {
     const res = await app.inject({ method: 'GET', url: '/api/domains/a.test/top-urls?period=custom&from=1&to=1' });
     expect(res.statusCode).toBe(400);
   });
+
+  // 회귀 테스트: 와일드카드 도메인(*.example.com)은 프론트엔드에서 encodeURIComponent로
+  // 인코딩되어 전달되므로 핸들러가 decodeURIComponent로 디코딩해야 DB 조회가 정상 동작함.
+  // 수정 전에는 '%2A.textbook.com'으로 DB를 검색해 항상 0건 반환하는 버그 있었음 (#115).
+  it('GET /api/domains/:host/top-urls — 와일드카드 도메인 인코딩(%2A) 디코딩 후 정상 조회', async () => {
+    const repo = makeRepo();
+    repo.upsert('*.textbook.com', 'https://textbook.com');
+    const app = buildApp(repo);
+    const now = Math.floor(Date.now() / 1000);
+    repo.database.prepare(
+      `INSERT INTO access_logs (timestamp, host, method, path, status_code, cache_status, size)
+       VALUES (?, '*.textbook.com', 'GET', '/book.pdf', 200, 'HIT', 500)`
+    ).run(now - 300);
+
+    // encodeURIComponent('*.textbook.com') === '%2A.textbook.com'
+    const encoded = encodeURIComponent('*.textbook.com');
+    const res = await app.inject({ method: 'GET', url: `/api/domains/${encoded}/top-urls?period=1h` });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { urls: Array<{ path: string; count: number }> };
+    expect(body.urls).toHaveLength(1);
+    expect(body.urls[0]).toEqual({ path: '/book.pdf', count: 1 });
+  });
 });
 
 describe('GET /api/domains/:host/logs — period/from/to/q 필터', () => {

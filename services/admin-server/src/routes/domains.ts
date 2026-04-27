@@ -585,7 +585,9 @@ export async function domainRoutes(
   }>(
     '/api/domains/:host/top-urls',
     async (request, reply) => {
-      const { host } = request.params;
+      // 와일드카드 도메인(*.example.com)은 프론트엔드에서 encodeURIComponent로 인코딩되어 전달되므로
+      // 다른 핸들러와 동일하게 디코딩해야 DB 조회가 정상 동작함
+      const host = decodeURIComponent(request.params.host);
       const q = request.query;
       // limit 방어: 1~20, 기본 5
       const limit = Math.min(Math.max(Number(q.limit ?? 5) || 5, 1), 20);
