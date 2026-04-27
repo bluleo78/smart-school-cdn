@@ -895,6 +895,41 @@ test.describe('도메인 상세 — 설정 탭', () => {
     await expect(page.getByTestId('save-domain-btn')).toBeVisible();
   });
 
+  /**
+   * 이슈 #103 회귀 방지 — OriginSection 편집 시 스킴 없는 URL이 저장되던 버그
+   * 수정 후: http:// / https:// 없는 origin 입력 시 에러 토스트가 표시되고 PUT이 호출되지 않아야 한다.
+   *
+   * 모킹 이유: PUT API 호출 횟수를 정확히 추적하기 위해 route 인터셉터를 사용한다.
+   * mock이 재현하는 조건: 클라이언트 검증이 origin 스킴을 검사하지 않아 scheme-less URL이 서버로 전송되는 상황.
+   * 이 mock이 실제 버그 조건과 동일한 이유: OriginSection은 handleSave()에서 직접 뮤테이션을 호출하므로
+   * PUT 호출 횟수가 0이어야 클라이언트 검증이 서버 전송을 막았음을 보장한다.
+   */
+  test('Origin 스킴 없는 URL 저장 시 에러 토스트가 표시되고 PUT이 호출되지 않는다 (#103)', async ({ page }) => {
+    await setupDetailMocks(page);
+    let putCallCount = 0;
+    await page.route('**/api/domains/textbook.com', (route) => {
+      if (route.request().method() === 'PUT') putCallCount++;
+      return route.fallback();
+    });
+    await page.goto('/domains/textbook.com');
+
+    // 설정 탭으로 전환
+    await page.getByRole('tab', { name: '설정' }).click();
+    await expect(page.getByTestId('domain-settings-tab')).toBeVisible();
+
+    // 편집 모드 진입 → 스킴 없는 URL 입력 → 저장 시도
+    await page.getByTestId('edit-domain-btn').click();
+    await page.getByTestId('origin-input').fill('httpbin.org/path');
+    await page.getByTestId('save-domain-btn').click();
+
+    // 스킴 오류 토스트가 표시되어야 한다 (#103 핵심)
+    await expect(page.getByText('오리진 URL은 http:// 또는 https://로 시작해야 합니다.')).toBeVisible();
+    // PUT API는 호출되지 않아야 한다
+    expect(putCallCount).toBe(0);
+    // 편집 모드가 유지되어야 한다 (저장 버튼이 여전히 보임)
+    await expect(page.getByTestId('save-domain-btn')).toBeVisible();
+  });
+
   test('Origin 편집이 동작한다', async ({ page }) => {
     await setupDetailMocks(page);
     await mockApi(page, 'PUT', '/domains/textbook.com', {

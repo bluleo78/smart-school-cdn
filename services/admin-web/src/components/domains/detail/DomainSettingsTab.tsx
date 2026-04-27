@@ -61,11 +61,17 @@ function OriginSection({ domain }: { domain: Domain }) {
     setEditing(false);
   }
 
-  /** 저장 — origin 빈값 클라이언트 검증 후 뮤테이션 호출, 편집 모드 해제 */
+  /** 저장 — origin 빈값·스킴 클라이언트 검증 후 뮤테이션 호출, 편집 모드 해제 */
   function handleSave() {
     // 오리진 빈값 검증 — 서버로 보내기 전에 차단하여 데이터 무결성 보장
     if (!origin.trim()) {
       toast.error('오리진 URL을 입력해 주세요.');
+      return;
+    }
+    // 오리진 스킴 검증 — http:// 또는 https://로 시작해야 Proxy가 올바르게 업스트림에 연결 가능
+    // AddDomainDialog와 동일한 이중 방어 적용 (#103)
+    if (!origin.startsWith('http://') && !origin.startsWith('https://')) {
+      toast.error('오리진 URL은 http:// 또는 https://로 시작해야 합니다.');
       return;
     }
     updateMutation.mutate(

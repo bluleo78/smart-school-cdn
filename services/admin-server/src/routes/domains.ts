@@ -304,6 +304,11 @@ export async function domainRoutes(
     if (origin !== undefined && origin.trim() === '') {
       return reply.status(400).send({ error: 'origin은 빈 문자열로 저장할 수 없습니다.' });
     }
+    // origin이 전달되었는데 http:// 또는 https://로 시작하지 않으면 400
+    // 클라이언트·서버 이중 방어 — Proxy가 올바르게 업스트림에 연결하려면 스킴 필수 (#103)
+    if (origin !== undefined && !origin.startsWith('http://') && !origin.startsWith('https://')) {
+      return reply.status(400).send({ error: 'origin은 http:// 또는 https://로 시작해야 합니다.' });
+    }
     const updated = domainRepo.update(host, { origin, enabled, description });
     if (!updated) {
       return reply.status(404).send({ error: '도메인을 찾을 수 없습니다.' });
