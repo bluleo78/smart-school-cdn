@@ -173,7 +173,12 @@ export function LogViewer() {
           >
             {filteredLines.length === 0 ? (
               <p className="text-muted-foreground text-center py-8" data-testid="log-empty">
-                {isConnected ? '로그를 수신 중입니다...' : '연결 대기 중...'}
+                {/* 필터 결과 없음과 실제 수신 대기 상태를 구분 — lines가 있으면 필터 탓, 없으면 연결 상태 탓 */}
+                {lines.length > 0
+                  ? '선택한 조건에 해당하는 로그가 없습니다.'
+                  : isConnected
+                    ? '로그를 수신 중입니다...'
+                    : '연결 대기 중...'}
               </p>
             ) : (
               filteredLines.map((line, i) => (

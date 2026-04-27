@@ -355,4 +355,40 @@ test.describe('LogViewer', () => {
     expect(scrollAreaText).toContain(yesterdayDay);
     expect(scrollAreaText).toContain('어제 로그');
   });
+
+  test('레벨 필터로 결과가 0줄일 때 "선택한 조건에 해당하는 로그가 없습니다." 가 표시된다 — 회귀 방지 #92', async ({ page }) => {
+    // logs가 있어도 필터 결과 없으면 연결 상태 문구(로그를 수신 중입니다...) 대신
+    // 필터 안내 문구(선택한 조건에 해당하는 로그가 없습니다.)가 표시되어야 한다
+    await page.route('**/api/logs/**', async (route) => {
+      // INFO 레벨 로그 1줄 제공 — DEBUG 필터 적용 시 filteredLines=0, lines.length=1
+      const body = `data: ${JSON.stringify({
+        timestamp: new Date().toISOString(),
+        level: 'INFO',
+        message: 'proxy 기동 완료',
+        service: 'proxy',
+      })}\n\n`;
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        headers: { 'Cache-Control': 'no-cache' },
+        body,
+      });
+    });
+    await page.goto('/system');
+
+    // INFO 로그 줄이 렌더링될 때까지 대기 — lines.length > 0 상태 확보
+    await page.waitForFunction(() =>
+      document.querySelector('[data-testid="log-scroll-area"]')?.textContent?.includes('proxy 기동 완료'),
+    );
+
+    // 레벨 필터를 DEBUG로 변경 — INFO 로그만 있으므로 filteredLines=0
+    await page.getByTestId('log-level-select').click();
+    await page.getByRole('option', { name: 'DEBUG' }).click();
+
+    // 필터 결과 없음 안내 문구가 표시되어야 한다 (연결 상태 문구 금지)
+    await expect(page.getByTestId('log-empty')).toBeVisible();
+    await expect(page.getByTestId('log-empty')).toHaveText('선택한 조건에 해당하는 로그가 없습니다.');
+    await expect(page.getByTestId('log-empty')).not.toHaveText('로그를 수신 중입니다...');
+    await expect(page.getByTestId('log-empty')).not.toHaveText('연결 대기 중...');
+  });
 });
