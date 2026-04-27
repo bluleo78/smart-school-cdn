@@ -40,19 +40,23 @@ export function CacheStatsCard() {
         {/* BYPASS 4분류 카운터 */}
         <div className="grid grid-cols-2 gap-2 text-sm" data-testid="bypass-breakdown">
           <div className="flex justify-between">
-            <span className="text-muted-foreground">METHOD</span>
+            {/* METHOD → 메서드 불일치: 캐시 불가 HTTP 메서드(POST 등) */}
+            <span className="text-muted-foreground">메서드 불일치</span>
             <span className="font-mono tabular-nums">{data.bypass.method.toLocaleString()}</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-muted-foreground">NOCACHE</span>
+            {/* NOCACHE → 캐시 불가: Cache-Control: no-cache/no-store 등 헤더 지시 */}
+            <span className="text-muted-foreground">캐시 불가</span>
             <span className="font-mono tabular-nums">{data.bypass.nocache.toLocaleString()}</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-muted-foreground">SIZE</span>
+            {/* SIZE → 크기 초과: 최대 캐시 객체 크기 초과 */}
+            <span className="text-muted-foreground">크기 초과</span>
             <span className="font-mono tabular-nums">{data.bypass.size.toLocaleString()}</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-muted-foreground">OTHER</span>
+            {/* OTHER → 기타: 위 분류에 해당하지 않는 나머지 사유 */}
+            <span className="text-muted-foreground">기타</span>
             <span className="font-mono tabular-nums">{data.bypass.other.toLocaleString()}</span>
           </div>
         </div>

@@ -175,6 +175,32 @@ test.describe('대시보드 — CacheHitRateChart Tooltip 포맷 (#86)', () => {
   });
 });
 
+// ─── BYPASS 사유 한국어 통일 (#93 회귀) ──────────────────────
+test.describe('대시보드 — BYPASS 사유 세부 한국어 통일 (#93)', () => {
+  test('BYPASS 사유 레이블이 한국어로 표시된다 — 영문 잔존 없음', async ({ page }) => {
+    // 버그: CacheStatsCard의 BYPASS 4분류 레이블이 영문(METHOD/NOCACHE/SIZE/OTHER)으로 하드코딩됨
+    // 수정 후: 메서드 불일치/캐시 불가/크기 초과/기타로 표시되어야 함
+    await setupDashboardMocks(page);
+    await page.goto('/');
+
+    const card = page.getByTestId('cache-stats-card');
+    await expect(card).toBeVisible();
+
+    // 한국어 레이블이 모두 표시되어야 한다
+    await expect(card.getByText('메서드 불일치')).toBeVisible();
+    await expect(card.getByText('캐시 불가')).toBeVisible();
+    await expect(card.getByText('크기 초과')).toBeVisible();
+    await expect(card.getByText('기타')).toBeVisible();
+
+    // 영문 레이블이 없어야 한다 (회귀 방지)
+    const breakdown = page.getByTestId('bypass-breakdown');
+    await expect(breakdown.getByText('METHOD', { exact: true })).not.toBeVisible();
+    await expect(breakdown.getByText('NOCACHE', { exact: true })).not.toBeVisible();
+    await expect(breakdown.getByText('SIZE', { exact: true })).not.toBeVisible();
+    await expect(breakdown.getByText('OTHER', { exact: true })).not.toBeVisible();
+  });
+});
+
 // ─── 빈 데이터 empty state (#21 회귀) ─────────────────────────
 test.describe('대시보드 — 캐시 스택 차트 empty state (#21)', () => {
   test('시계열 데이터가 없으면 차트 대신 empty state 메시지가 표시된다', async ({ page }) => {
