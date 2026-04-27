@@ -111,7 +111,10 @@ export function DomainDetailHeader({ domain }: Props) {
           variant="outline"
           onClick={handleToggle}
           disabled={toggleDomain.isPending}
-          className="border-warning/50 text-warning hover:bg-warning/10"
+          className={isEnabled
+            ? "border-warning/50 text-warning hover:bg-warning/10"    // 활성 도메인 → 비활성화 버튼: warning 색
+            : "border-success/50 text-success hover:bg-success/10"     // 비활성 도메인 → 활성화 버튼: success 색
+          }
           data-testid="domain-toggle-button"
         >
           <Power size={14} />
