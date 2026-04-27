@@ -462,6 +462,54 @@ test.describe('도메인 상세 — Overview 탭', () => {
     expect(Math.max(...ys) - Math.min(...ys)).toBeLessThanOrEqual(2);
   });
 
+  /**
+   * 이슈 #90 회귀 방지 — DomainInfoCards 반응형 그리드 누락
+   * 수정 전: grid-cols-2 고정 → 모바일 375px에서 텍스트가 단어 단위로 줄바꿈됨
+   * 수정 후: grid-cols-1 md:grid-cols-2 — 모바일 1열, 데스크톱 2열
+   */
+  test('DomainInfoCards 그리드가 mobile-first 반응형 클래스를 사용한다 (회귀: #90)', async ({ page }) => {
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com');
+
+    // 기본 정보 카드와 TLS 상태 카드를 감싸는 그리드 컨테이너
+    // grid-cols-1이 기본(모바일) 클래스여야 한다
+    const gridLocator = page.locator('.grid.grid-cols-1.gap-4').first();
+    await expect(gridLocator).toBeVisible();
+
+    const gridClass = await gridLocator.getAttribute('class');
+    // 기본 클래스: grid-cols-1 (모바일 단일 열)
+    expect(gridClass).toContain('grid-cols-1');
+    // 반응형 breakpoint: md:grid-cols-2 (데스크톱 2열)
+    expect(gridClass).toContain('md:grid-cols-2');
+    // 수정 전 버그 클래스(반응형 없는 고정 2열)가 없어야 한다
+    // 공백으로 구분된 독립 토큰 "grid-cols-2" (breakpoint 접두사 없음) 체크
+    expect(gridClass).not.toMatch(/(^| )grid-cols-2( |$)/);
+  });
+
+  /**
+   * 이슈 #90 회귀 방지 — DomainQuickActions 반응형 그리드 누락
+   * 수정 전: grid-cols-4 고정 → 모바일 375px에서 각 버튼이 매우 좁아짐
+   * 수정 후: grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 — mobile-first 3단계 반응형
+   */
+  test('DomainQuickActions 그리드가 mobile-first 반응형 클래스를 사용한다 (회귀: #90)', async ({ page }) => {
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com');
+
+    const quickActions = page.getByTestId('domain-quick-actions');
+    await expect(quickActions).toBeVisible();
+
+    const gridClass = await quickActions.getAttribute('class');
+    // 기본 클래스: grid-cols-1 (모바일 단일 열)
+    expect(gridClass).toContain('grid-cols-1');
+    // sm breakpoint: sm:grid-cols-2 (중간 화면 2열)
+    expect(gridClass).toContain('sm:grid-cols-2');
+    // lg breakpoint: lg:grid-cols-4 (데스크톱 4열)
+    expect(gridClass).toContain('lg:grid-cols-4');
+    // 수정 전 버그 클래스(반응형 없는 고정 4열)가 없어야 한다
+    // 공백으로 구분된 독립 토큰 "grid-cols-4" (breakpoint 접두사 없음) 체크
+    expect(gridClass).not.toMatch(/(^| )grid-cols-4( |$)/);
+  });
+
 });
 
 // ─────────────────────────────────────────────

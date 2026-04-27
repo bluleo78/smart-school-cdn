@@ -1,4 +1,4 @@
-/// 도메인 기본 정보 + TLS 상태 카드 — 2컬럼 레이아웃
+/// 도메인 기본 정보 + TLS 상태 카드 — 반응형 그리드 (모바일 1열 → md 이상 2열)
 import type { Domain } from '../../../api/domain-types';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { useDomainTls } from '../../../hooks/useDomainTls';
@@ -26,7 +26,8 @@ export function DomainInfoCards({ domain }: Props) {
     new Date(ts * 1000).toLocaleDateString('ko-KR');
 
   return (
-    <div className="grid grid-cols-2 gap-4">
+    // mobile-first: 375px 단일 열 → md(768px) 이상 2열 (#90)
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       {/* 왼쪽: 기본 정보 */}
       <Card>
         <CardHeader>

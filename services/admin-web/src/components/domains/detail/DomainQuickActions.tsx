@@ -258,7 +258,8 @@ export function DomainQuickActions({ domain }: Props) {
 
   return (
     <>
-      <div className="grid grid-cols-4 gap-4" data-testid="domain-quick-actions">
+      {/* mobile-first: 375px 단일 열 → sm(640px) 이상 2열 → lg(1024px) 이상 4열 */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" data-testid="domain-quick-actions">
         {/* 프록시 테스트 */}
         <ActionCard
           icon={<Plug />}
