@@ -367,6 +367,41 @@ test.describe('LogViewer', () => {
     await expect(page.getByTestId('log-level-select')).toHaveAttribute('aria-label', '로그 레벨 필터');
   });
 
+  test('로그 스크롤 영역이 스크롤될 때 scrollTop이 증가한다 — 회귀 방지 #111', async ({ page }) => {
+    // refs #111: ScrollArea 내부 overflow-y-auto div 중첩 시 실제 스크롤이 log-scroll-area에서 발생해
+    // 스크롤 상태를 올바르게 추적하지 못하는 버그 회귀 방지.
+    // 충분한 로그 줄을 주입해 스크롤 영역이 실제로 스크롤되는지 검증한다.
+    const manyLines = Array.from({ length: 60 }, (_, i) =>
+      `data: ${JSON.stringify({
+        timestamp: new Date().toISOString(),
+        level: 'INFO',
+        message: `로그 라인 ${i} — 스크롤 회귀 테스트`,
+        service: 'proxy',
+      })}\n\n`,
+    ).join('');
+
+    await page.route('**/api/logs/**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        headers: { 'Cache-Control': 'no-cache' },
+        body: manyLines,
+      });
+    });
+    await page.goto('/system');
+
+    // 마지막 로그 줄이 렌더링될 때까지 대기
+    await page.waitForFunction(() =>
+      document.querySelector('[data-testid="log-scroll-area"]')?.textContent?.includes('로그 라인 59'),
+    );
+
+    // 자동 스크롤에 의해 scrollTop이 0보다 커야 한다 (스크롤 영역 자체가 스크롤됨)
+    const scrollTop = await page.getByTestId('log-scroll-area').evaluate(
+      (el) => (el as HTMLElement).scrollTop,
+    );
+    expect(scrollTop).toBeGreaterThan(0);
+  });
+
   test('레벨 필터로 결과가 0줄일 때 "선택한 조건에 해당하는 로그가 없습니다." 가 표시된다 — 회귀 방지 #92', async ({ page }) => {
     // logs가 있어도 필터 결과 없으면 연결 상태 문구(로그를 수신 중입니다...) 대신
     // 필터 안내 문구(선택한 조건에 해당하는 로그가 없습니다.)가 표시되어야 한다

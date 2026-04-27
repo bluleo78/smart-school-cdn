@@ -3,7 +3,6 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { Wifi, WifiOff } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
-import { ScrollArea } from '../ui/scroll-area';
 import {
   Select,
   SelectContent,
@@ -166,33 +165,34 @@ export function LogViewer() {
           </p>
         )}
 
-        <ScrollArea className="h-[400px] rounded-md border bg-muted/30">
-          <div
-            ref={scrollRef}
-            className="h-[400px] overflow-y-auto p-3 font-mono text-xs leading-relaxed"
-            onScroll={handleScroll}
-            data-testid="log-scroll-area"
-          >
-            {filteredLines.length === 0 ? (
-              <p className="text-muted-foreground text-center py-8" data-testid="log-empty">
-                {/* 필터 결과 없음과 실제 수신 대기 상태를 구분 — lines가 있으면 필터 탓, 없으면 연결 상태 탓 */}
-                {lines.length > 0
-                  ? '선택한 조건에 해당하는 로그가 없습니다.'
-                  : isConnected
-                    ? '로그를 수신 중입니다...'
-                    : '연결 대기 중...'}
-              </p>
-            ) : (
-              filteredLines.map((line, i) => (
-                <div key={`${line.timestamp}-${i}`} className="flex gap-2 py-0.5 hover:bg-muted/50">
-                  <span className="text-muted-foreground shrink-0">{formatTime(line.timestamp)}</span>
-                  {levelLabel(line.level)}
-                  <span className="break-all">{line.message}</span>
-                </div>
-              ))
-            )}
-          </div>
-        </ScrollArea>
+        {/* refs #111: ScrollArea 내부에 overflow-y-auto div를 중첩하면 Radix ScrollArea viewport의
+            scrollHeight가 내부 div 높이로 제한되어 커스텀 스크롤바가 스크롤을 추적하지 못하는 문제.
+            ScrollArea를 제거하고 단일 scrollable div로 통일한다. */}
+        <div
+          ref={scrollRef}
+          className="h-[400px] overflow-y-auto rounded-md border bg-muted/30 p-3 font-mono text-xs leading-relaxed"
+          onScroll={handleScroll}
+          data-testid="log-scroll-area"
+        >
+          {filteredLines.length === 0 ? (
+            <p className="text-muted-foreground text-center py-8" data-testid="log-empty">
+              {/* 필터 결과 없음과 실제 수신 대기 상태를 구분 — lines가 있으면 필터 탓, 없으면 연결 상태 탓 */}
+              {lines.length > 0
+                ? '선택한 조건에 해당하는 로그가 없습니다.'
+                : isConnected
+                  ? '로그를 수신 중입니다...'
+                  : '연결 대기 중...'}
+            </p>
+          ) : (
+            filteredLines.map((line, i) => (
+              <div key={`${line.timestamp}-${i}`} className="flex gap-2 py-0.5 hover:bg-muted/50">
+                <span className="text-muted-foreground shrink-0">{formatTime(line.timestamp)}</span>
+                {levelLabel(line.level)}
+                <span className="break-all">{line.message}</span>
+              </div>
+            ))
+          )}
+        </div>
 
         <div className="flex items-center justify-between mt-2 text-xs text-muted-foreground">
           <span>{filteredLines.length}줄 표시 (총 {lines.length}줄)</span>
