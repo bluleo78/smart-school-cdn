@@ -596,6 +596,47 @@ test.describe('도메인 상세 — 통계 탭', () => {
     expect(toClass).toContain('focus-visible:ring-2');
   });
 
+  test('커스텀 기간 날짜 입력 접근성 이름 — aria-label 시작일/종료일 존재 (회귀: #109)', async ({ page }) => {
+    // 수정 전: aria-label 없이 두 날짜 입력이 generic 레이블로만 읽혀 스크린리더 구분 불가
+    // 수정 후: 시작일/종료일 aria-label이 각 입력에 부착되어 스크린리더가 구분 가능해야 한다
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '최적화' }).click();
+
+    // 커스텀 버튼 클릭 → 날짜 입력 2개가 표시된다
+    await page.getByTestId('period-custom').click();
+    await expect(page.getByTestId('period-custom-from')).toBeVisible();
+    await expect(page.getByTestId('period-custom-to')).toBeVisible();
+
+    // aria-label 접근성 이름이 각 입력에 존재해야 한다
+    await expect(page.getByTestId('period-custom-from')).toHaveAttribute('aria-label', '시작일');
+    await expect(page.getByTestId('period-custom-to')).toHaveAttribute('aria-label', '종료일');
+  });
+
+  test('커스텀 기간 에러 메시지 — role=alert + aria-live=assertive 존재 (회귀: #109)', async ({ page }) => {
+    // 수정 전: 오류 단락에 role="alert"가 없어 스크린리더가 오류 발생 시 알림을 받지 못함
+    // 수정 후: 역방향 날짜 입력 시 에러 단락에 role="alert"와 aria-live="assertive"가 있어야 한다
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '최적화' }).click();
+
+    // 커스텀 버튼 클릭 → 날짜 입력 표시
+    await page.getByTestId('period-custom').click();
+    await expect(page.getByTestId('period-custom-from')).toBeVisible();
+
+    // 종료일을 먼저 입력 후 시작일을 종료일 이후로 설정하여 역방향 에러 유발
+    await page.getByTestId('period-custom-to').fill('2026-04-01');
+    await page.getByTestId('period-custom-from').fill('2026-12-31');
+
+    // 에러 메시지 단락이 표시되어야 한다
+    const errorEl = page.getByTestId('period-custom-error');
+    await expect(errorEl).toBeVisible();
+
+    // role="alert" + aria-live="assertive" 가 있어야 스크린리더가 즉시 알림을 받는다
+    await expect(errorEl).toHaveAttribute('role', 'alert');
+    await expect(errorEl).toHaveAttribute('aria-live', 'assertive');
+  });
+
   test('Stats 탭 수동 새로고침 버튼이 존재', async ({ page }) => {
     await setupDetailMocks(page);
     await page.goto('/domains/textbook.com');

@@ -92,10 +92,12 @@ export function PeriodSelector({ value, onChange }: Props) {
         // 커스텀 날짜 범위 입력: <Input> 컴포넌트로 포커스 링·디자인 일관성 확보
         <div className="flex flex-col gap-1" data-testid="period-custom-range">
           <div className="flex items-center gap-2">
+            {/* 시작일 입력 — aria-label로 스크린리더에 "시작일" 레이블 제공 */}
             <Input
               type="date"
               className={cn('h-8 w-36 px-2 text-xs', customError && 'border-destructive focus-visible:ring-destructive')}
               defaultValue={value.from ? epochToDateStr(value.from) : ''}
+              aria-label="시작일"
               onChange={(e) => {
                 // to가 없으면 오늘 날짜를 기본값으로 사용 — from만 입력해도 오늘까지 범위 적용
                 const today = epochToDateStr(Math.floor(Date.now() / 1000));
@@ -104,11 +106,13 @@ export function PeriodSelector({ value, onChange }: Props) {
               }}
               data-testid="period-custom-from"
             />
-            <span className="text-xs text-muted-foreground">~</span>
+            <span className="text-xs text-muted-foreground" aria-hidden="true">~</span>
+            {/* 종료일 입력 — aria-label로 스크린리더에 "종료일" 레이블 제공 */}
             <Input
               type="date"
               className={cn('h-8 w-36 px-2 text-xs', customError && 'border-destructive focus-visible:ring-destructive')}
               defaultValue={value.to ? epochToDateStr(value.to) : ''}
+              aria-label="종료일"
               onChange={(e) => {
                 const fromStr = value.from ? epochToDateStr(value.from) : e.target.value;
                 applyCustom(fromStr, e.target.value);
@@ -116,9 +120,9 @@ export function PeriodSelector({ value, onChange }: Props) {
               data-testid="period-custom-to"
             />
           </div>
-          {/* 역방향 날짜 범위 에러 메시지 — 입력 필드 아래 표시 */}
+          {/* 역방향 날짜 범위 에러 메시지 — role="alert" + aria-live로 스크린리더에 즉시 알림 */}
           {customError && (
-            <p className="text-xs text-destructive" data-testid="period-custom-error">
+            <p className="text-xs text-destructive" data-testid="period-custom-error" role="alert" aria-live="assertive">
               {customError}
             </p>
           )}
