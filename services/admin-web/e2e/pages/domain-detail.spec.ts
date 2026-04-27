@@ -709,6 +709,44 @@ test.describe('도메인 상세 — 통계 탭', () => {
    * 이슈 #53 회귀 방지 — 텍스트 압축 통계 카드가 PeriodSelector 무시하고 항상 30d 조회
    * 수정 후: PeriodSelector 기간 변경 시 텍스트 압축 카드 제목과 API 요청 period가 함께 바뀌어야 한다.
    */
+  /**
+   * 이슈 #91 회귀 방지 — 역방향 날짜 범위(시작일 > 종료일) 입력 시 에러 없이 조용히 무시되던 버그
+   * 수정 후: 에러 메시지(period-custom-error)가 표시되고, 올바른 범위로 정정하면 에러가 사라진다.
+   *
+   * 테스트 전략: to 먼저 유효 날짜로 설정 후 from에 더 나중 날짜를 입력해 역방향 조건 유발.
+   * - to=2026-04-01 먼저 입력(from=e.target.value="2026-04-01"이므로 동일 → to=endOfDay>from=startOfDay OK → period=custom)
+   * - 그 다음 from=2026-12-31 입력(value.from이 설정됐으나 from 입력은 value.to 기반으로 계산)
+   *   to input defaultValue=2026-04-01이므로 value.to는 아직 Apr 1 epoch
+   *   applyCustom(from="2026-12-31", to=epochToDateStr(value.to)="2026-04-01") → Dec31 > Apr01 → 에러
+   */
+  test('커스텀 기간 — 역방향 날짜 범위 입력 시 에러 메시지가 표시되고 정정 시 사라진다 (회귀: #91)', async ({ page }) => {
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '최적화' }).click();
+
+    // 커스텀 버튼 클릭 → 날짜 입력 필드 표시
+    await page.getByTestId('period-custom').click();
+    await expect(page.getByTestId('period-custom-from')).toBeVisible();
+
+    // 1단계: 종료일(2026-04-01) 먼저 입력 — from=e.target.value이므로 동일 날짜, to=endOfDay > from=startOfDay → 정상 적용
+    await page.getByTestId('period-custom-to').fill('2026-04-01');
+    // 커스텀 기간이 활성화되어야 한다
+    await expect(page.getByTestId('period-custom')).toHaveAttribute('aria-pressed', 'true');
+
+    // 2단계: 시작일을 종료일보다 나중으로 입력 → to(value.to=Apr1) < from(Dec31) → 에러 발생
+    await page.getByTestId('period-custom-from').fill('2026-12-31');
+
+    // 에러 메시지가 표시되어야 한다 (수정 전: 에러 없이 조용히 무시됨)
+    const errorMsg = page.getByTestId('period-custom-error');
+    await expect(errorMsg).toBeVisible();
+    await expect(errorMsg).toContainText('종료일은 시작일 이후여야 합니다.');
+
+    // 시작일을 종료일 이전으로 정정 → 에러가 사라지고 커스텀 기간 유지
+    await page.getByTestId('period-custom-from').fill('2026-03-01');
+    await expect(errorMsg).not.toBeVisible();
+    await expect(page.getByTestId('period-custom')).toHaveAttribute('aria-pressed', 'true');
+  });
+
   test('텍스트 압축 통계 카드 — PeriodSelector 선택 기간에 따라 카드 제목과 API period가 변경된다 (회귀: #53)', async ({ page }) => {
     await setupDetailMocks(page);
 
