@@ -109,7 +109,8 @@ export function LogViewer() {
 
           <div className="flex flex-wrap items-center gap-2">
             <Select value={service} onValueChange={setService}>
-              <SelectTrigger className="w-[130px]" data-testid="log-service-select">
+              {/* aria-label: 스크린리더가 선택값(서비스명)만 읽고 어떤 필터인지 구분하지 못하는 문제 방지 (#110) */}
+              <SelectTrigger className="w-[130px]" aria-label="서비스 선택" data-testid="log-service-select">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -122,7 +123,8 @@ export function LogViewer() {
             </Select>
 
             <Select value={levelFilter} onValueChange={setLevelFilter}>
-              <SelectTrigger className="w-[100px]" data-testid="log-level-select">
+              {/* aria-label: 스크린리더가 선택값(레벨명)만 읽고 어떤 필터인지 구분하지 못하는 문제 방지 (#110) */}
+              <SelectTrigger className="w-[100px]" aria-label="로그 레벨 필터" data-testid="log-level-select">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

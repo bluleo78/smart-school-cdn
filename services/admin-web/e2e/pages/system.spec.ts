@@ -356,6 +356,17 @@ test.describe('LogViewer', () => {
     expect(scrollAreaText).toContain('어제 로그');
   });
 
+  test('서비스/레벨 SelectTrigger에 aria-label이 설정된다 — 회귀 방지 #110', async ({ page }) => {
+    // aria-label 없으면 스크린리더가 선택값만 읽고 어떤 필터인지 구분 불가 — #110 버그 수정 회귀 방지
+    await mockSse(page);
+    await page.goto('/system');
+
+    // 서비스 선택 셀렉트: aria-label="서비스 선택"
+    await expect(page.getByTestId('log-service-select')).toHaveAttribute('aria-label', '서비스 선택');
+    // 레벨 필터 셀렉트: aria-label="로그 레벨 필터"
+    await expect(page.getByTestId('log-level-select')).toHaveAttribute('aria-label', '로그 레벨 필터');
+  });
+
   test('레벨 필터로 결과가 0줄일 때 "선택한 조건에 해당하는 로그가 없습니다." 가 표시된다 — 회귀 방지 #92', async ({ page }) => {
     // logs가 있어도 필터 결과 없으면 연결 상태 문구(로그를 수신 중입니다...) 대신
     // 필터 안내 문구(선택한 조건에 해당하는 로그가 없습니다.)가 표시되어야 한다
