@@ -235,7 +235,15 @@ export function SystemPage() {
               <TableBody>
                 {certificates.map((cert) => (
                   <TableRow key={cert.domain}>
-                    <TableCell className="font-mono">{cert.domain}</TableCell>
+                    {/* 도메인 셀: 클릭 시 도메인 상세 페이지로 이동 — Link 래핑 */}
+                    <TableCell className="font-mono">
+                      <Link
+                        to={`/domains/${encodeURIComponent(cert.domain)}`}
+                        className="hover:underline"
+                      >
+                        {cert.domain}
+                      </Link>
+                    </TableCell>
                     <TableCell className="text-muted-foreground">
                       {new Date(cert.issued_at).toLocaleDateString('ko-KR')}
                     </TableCell>
