@@ -5,6 +5,7 @@ import { formatBytes, formatDateTime } from '../../../lib/format';
 import { Input } from '../../ui/input';
 import { Button } from '../../ui/button';
 import { Skeleton } from '../../ui/skeleton';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../ui/table';
 import type { StatsPeriod } from '../../../api/domains';
 
 interface Props {
@@ -94,42 +95,40 @@ export function DomainLogTable({ host, period, range, refetchIntervalMs = false 
         <p className="text-sm text-muted-foreground py-4 text-center">로그가 없습니다</p>
       ) : (
         <div className="overflow-x-auto rounded-md border border-border/40">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b border-border/40 bg-muted/30">
-                <th className="px-3 py-2 text-left font-medium text-muted-foreground">시간</th>
-                <th className="px-3 py-2 text-left font-medium text-muted-foreground">경로</th>
-                <th className="px-3 py-2 text-left font-medium text-muted-foreground">상태</th>
-                <th className="px-3 py-2 text-right font-medium text-muted-foreground">크기</th>
-                <th className="px-3 py-2 text-left font-medium text-muted-foreground">캐시</th>
-              </tr>
-            </thead>
-            <tbody>
+          {/* shadcn Table 컴포넌트 사용 — 앱 전체 디자인 시스템 일관성 유지 (#116) */}
+          <Table className="text-xs">
+            <TableHeader>
+              <TableRow className="bg-muted/30">
+                <TableHead className="py-2">시간</TableHead>
+                <TableHead className="py-2">경로</TableHead>
+                <TableHead className="py-2">상태</TableHead>
+                <TableHead className="py-2 text-right">크기</TableHead>
+                <TableHead className="py-2">캐시</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {filtered.map((log, i) => (
-                <tr
-                  key={i}
-                  className="border-b border-border/20 last:border-0 hover:bg-muted/20 transition-colors"
-                >
+                <TableRow key={i}>
                   {/* 타임스탬프(초) → 날짜+시간 — 날짜 없이 시간만 표시하면 다날에 걸친 로그 판독 불가 (#94) */}
-                  <td className="px-3 py-1.5 text-muted-foreground whitespace-nowrap">
+                  <TableCell className="py-1.5 text-muted-foreground whitespace-nowrap">
                     {formatDateTime(log.timestamp * 1000)}
-                  </td>
-                  <td className="px-3 py-1.5 text-foreground max-w-[320px] truncate">
+                  </TableCell>
+                  <TableCell className="py-1.5 text-foreground max-w-[320px] truncate">
                     {log.path}
-                  </td>
-                  <td className={`px-3 py-1.5 font-medium ${statusColor(log.status_code)}`}>
+                  </TableCell>
+                  <TableCell className={`py-1.5 font-medium ${statusColor(log.status_code)}`}>
                     {log.status_code}
-                  </td>
-                  <td className="px-3 py-1.5 text-right text-muted-foreground">
+                  </TableCell>
+                  <TableCell className="py-1.5 text-right text-muted-foreground">
                     {formatBytes(log.size)}
-                  </td>
-                  <td className={`px-3 py-1.5 font-medium ${cacheColor(log.cache_status)}`}>
+                  </TableCell>
+                  <TableCell className={`py-1.5 font-medium ${cacheColor(log.cache_status)}`}>
                     {log.cache_status}
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       )}
 
