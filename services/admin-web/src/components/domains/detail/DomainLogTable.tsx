@@ -1,7 +1,7 @@
 /// 도메인 요청 로그 테이블 — 검색/에러 필터, 자동 갱신 + 기간 필터 지원
 import { useState } from 'react';
 import { useDomainLogs } from '../../../hooks/useDomainLogs';
-import { formatBytes } from '../../../lib/format';
+import { formatBytes, formatDateTime } from '../../../lib/format';
 import { Input } from '../../ui/input';
 import { Button } from '../../ui/button';
 import { Skeleton } from '../../ui/skeleton';
@@ -110,14 +110,9 @@ export function DomainLogTable({ host, period, range, refetchIntervalMs = false 
                   key={i}
                   className="border-b border-border/20 last:border-0 hover:bg-muted/20 transition-colors"
                 >
-                  {/* 타임스탬프(초) → 시:분:초 */}
+                  {/* 타임스탬프(초) → 날짜+시간 — 날짜 없이 시간만 표시하면 다날에 걸친 로그 판독 불가 (#94) */}
                   <td className="px-3 py-1.5 text-muted-foreground whitespace-nowrap">
-                    {new Date(log.timestamp * 1000).toLocaleTimeString('ko-KR', {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                      second: '2-digit',
-                      hour12: false,
-                    })}
+                    {formatDateTime(log.timestamp * 1000)}
                   </td>
                   <td className="px-3 py-1.5 text-foreground max-w-[320px] truncate">
                     {log.path}
