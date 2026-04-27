@@ -629,6 +629,35 @@ test.describe('도메인 상세 — 통계 탭', () => {
   });
 
   /**
+   * 이슈 #89 회귀 방지 — 데이터 없을 때 0 값 대신 빈 상태 UI가 표시되어야 한다.
+   * total=0 && by_decision=[] 응답 시 "아직 데이터가 없습니다" 메시지가 렌더링되어야 한다.
+   */
+  test('텍스트 압축 통계 카드 — 이벤트 0건 시 0 값 대신 빈 상태 안내 메시지가 표시된다 (회귀: #89)', async ({ page }) => {
+    await setupDetailMocks(page);
+
+    // 이벤트 0건 응답 — total=0, by_decision=[] (신규 도메인 시나리오)
+    await page.route('**/api/optimization/stats*', (route) =>
+      route.fulfill({ json: { total: 0, by_decision: [] } }),
+    );
+
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '최적화' }).click();
+
+    // text-compress-stats 카드가 렌더링되어야 한다
+    const statsCard = page.getByTestId('text-compress-stats');
+    await expect(statsCard).toBeVisible();
+
+    // 빈 상태 안내 문구가 표시되어야 한다 (수정 전: "처리 이벤트 0", "0 B → 0 B" 노출)
+    await expect(statsCard).toContainText('아직 데이터가 없습니다');
+    await expect(statsCard).toContainText('텍스트 압축이 실행되면 자동으로 표시됩니다');
+
+    // 0 값 통계 수치가 노출되지 않아야 한다
+    await expect(statsCard).not.toContainText('처리 이벤트');
+    await expect(statsCard).not.toContainText('0 B → 0 B');
+    await expect(statsCard).not.toContainText('평균 절감');
+  });
+
+  /**
    * 이슈 #53 회귀 방지 — 텍스트 압축 통계 카드가 PeriodSelector 무시하고 항상 30d 조회
    * 수정 후: PeriodSelector 기간 변경 시 텍스트 압축 카드 제목과 API 요청 period가 함께 바뀌어야 한다.
    */

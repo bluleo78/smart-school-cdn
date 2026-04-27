@@ -2,6 +2,7 @@
 /// optimization_events 의 event_type='text_compress' 집계(`/api/optimization/stats`)를 사용한다.
 /// period props를 받아 PeriodSelector 선택 기간과 연동한다 (이슈 #53 수정).
 import { useQuery } from '@tanstack/react-query';
+import { FileText } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { Skeleton } from '../../ui/skeleton';
 import { formatBytes } from '../../../lib/format';
@@ -43,6 +44,22 @@ export function DomainTextCompressStats({ host, period = '30d' }: Props) {
       <Card>
         <CardContent className="py-6">
           <Skeleton className="h-20 w-full" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  /**
+   * 빈 상태 분기 — 데이터 없음(신규 도메인·이벤트 0건)과 실제 0값을 구별 가능하게 한다.
+   * DomainStackedChart 와 동일한 패턴: 아이콘 + 안내 문구 표시 (이슈 #89).
+   */
+  if (!data || (data.total === 0 && data.by_decision.length === 0)) {
+    return (
+      <Card data-testid="text-compress-stats">
+        <CardContent className="flex flex-col items-center justify-center py-12 gap-2 text-muted-foreground">
+          <FileText size={32} className="opacity-30" />
+          <p className="text-sm">아직 데이터가 없습니다</p>
+          <p className="text-xs">텍스트 압축이 실행되면 자동으로 표시됩니다</p>
         </CardContent>
       </Card>
     );
