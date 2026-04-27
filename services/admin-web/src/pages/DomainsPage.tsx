@@ -4,7 +4,7 @@
  * - 기존 사이드패널 + 프록시 테스트 제거
  * - 필터 상태를 useSearchParams로 관리하여 URL에 동기화 (#68)
  */
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogTitle } from '../components/ui/dialog';
@@ -17,6 +17,7 @@ import { useAddDomain } from '../hooks/useAddDomain';
 import { useDeleteDomain } from '../hooks/useDeleteDomain';
 import { useToggleDomain } from '../hooks/useToggleDomain';
 import { usePurgeDomain } from '../hooks/usePurgeDomain';
+import { useCertificates } from '../hooks/useTls';
 import type { DomainsFilter } from '../api/domain-types';
 import { DomainSummaryCards } from '../components/domains/DomainSummaryCards';
 import { DomainAlertBanner } from '../components/domains/DomainAlertBanner';
@@ -224,6 +225,14 @@ export function DomainsPage() {
   const purgeMutation = usePurgeDomain();
   const deleteMutation = useDeleteDomain();
 
+  // TLS 인증서 목록 — GET /api/tls/certificates 를 한 번 조회해
+  // 도메인별 만료일 맵을 만든다 (N+1 아님, 전체 목록 한 번 요청)
+  const { data: certs } = useCertificates();
+  const tlsExpiryByHost = useMemo(
+    () => new Map(certs?.map((c) => [c.domain, c.expires_at])),
+    [certs],
+  );
+
   // 단건 삭제 확인
   async function handleDeleteConfirm() {
     if (!deleteTarget) return;
@@ -298,6 +307,7 @@ export function DomainsPage() {
               sortKey={filter.sort}
               sortDir={filter.order}
               onSortChange={handleSortChange}
+              tlsExpiryByHost={tlsExpiryByHost}
             />
           )}
         </CardContent>

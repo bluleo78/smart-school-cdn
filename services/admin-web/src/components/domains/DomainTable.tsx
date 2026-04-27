@@ -1,4 +1,4 @@
-/// 도메인 목록 테이블 — 체크박스, 상태 배지, 액션 버튼 포함
+/// 도메인 목록 테이블 — 체크박스, 상태 배지, TLS 배지, 액션 버튼 포함
 import { Link } from 'react-router';
 import { Globe, Trash2, RefreshCw, ToggleLeft, ToggleRight } from 'lucide-react';
 import {
@@ -12,6 +12,7 @@ import {
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Skeleton } from '../ui/skeleton';
+import { TlsStatusBadge } from '../TlsStatusBadge';
 import type { Domain } from '../../api/domain-types';
 
 interface DomainTableProps {
@@ -48,6 +49,11 @@ interface DomainTableProps {
   sortDir?: 'asc' | 'desc';
   /** 헤더 클릭 시 정렬 컬럼·방향 변경 콜백 — 같은 컬럼을 다시 클릭하면 방향이 토글된다 */
   onSortChange?: (key: string, dir: 'asc' | 'desc') => void;
+  /**
+   * 도메인별 TLS 인증서 만료일 맵 — DomainsPage에서 useCertificates()로 조회한 결과를 전달한다.
+   * 맵에 없는 도메인은 TlsStatusBadge가 null(미발급)로 처리한다.
+   */
+  tlsExpiryByHost?: Map<string, string>;
 }
 
 export function DomainTable({
@@ -66,6 +72,7 @@ export function DomainTable({
   sortKey,
   sortDir,
   onSortChange,
+  tlsExpiryByHost,
 }: DomainTableProps) {
   /**
    * 컬럼 헤더 클릭 핸들러 — 같은 컬럼이면 방향 토글, 다른 컬럼이면 asc 시작
@@ -260,8 +267,11 @@ export function DomainTable({
               {/* 캐시 히트 */}
               <TableCell className="text-right text-xs text-muted-foreground">—</TableCell>
 
-              {/* TLS */}
-              <TableCell className="text-xs text-muted-foreground">—</TableCell>
+              {/* TLS — tlsExpiryByHost에서 도메인별 만료일을 조회해 TlsStatusBadge로 표시한다.
+                   맵에 없으면 null(미발급)으로 처리 */}
+              <TableCell>
+                <TlsStatusBadge expiresAt={tlsExpiryByHost?.get(domain.host) ?? null} />
+              </TableCell>
 
               {/* 액션 버튼 */}
               <TableCell className="text-right">

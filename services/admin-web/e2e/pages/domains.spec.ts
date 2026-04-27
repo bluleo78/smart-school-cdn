@@ -45,11 +45,15 @@ function createDomains() {
   ];
 }
 
-/** 공통 기본 mock 설정 */
+/** 공통 기본 mock 설정
+ * TLS 인증서 엔드포인트를 빈 배열로 모킹한다 — DomainsPage가 useCertificates()를
+ * 호출하므로 미모킹 시 실제 백엔드로 요청이 새어나갈 수 있다 (#99).
+ */
 async function setupBaseMocks(page: Parameters<typeof mockApi>[0]) {
   await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
   await mockApi(page, 'GET', '/proxy/requests', []);
   await mockApi(page, 'GET', '/domains/summary', createDomainSummary());
+  await mockApi(page, 'GET', '/tls/certificates', []);
 }
 
 test.describe('도메인 관리 — 로딩 및 에러 상태', () => {
@@ -705,6 +709,64 @@ test.describe('도메인 관리 — 컬럼 정렬 (#83)', () => {
 
     // 정렬하지 않은 상태에서 aria-sort="none"이어야 한다
     await expect(page.getByTestId('domain-col-host')).toHaveAttribute('aria-sort', 'none');
+  });
+});
+
+/**
+ * 이슈 #99 회귀 방지 — DomainTable TLS 컬럼 하드코딩 em-dash
+ * DomainsPage가 GET /api/tls/certificates 를 한 번 조회해 도메인별 만료일을 맵으로 만들고,
+ * DomainTable이 TlsStatusBadge로 표시한다.
+ *
+ * 모킹 이유: 실제 백엔드의 인증서 만료일은 테스트마다 다를 수 있으므로 고정값으로 재현 조건을 확정.
+ * mock이 재현하는 조건: certificates API가 textbook.com은 60일 후 만료, cdn.school.kr은 3일 후 만료를 반환.
+ * 이 mock이 실제 버그 조건과 동일한 이유: DomainTable은 tlsExpiryByHost 맵에서 도메인별 만료일을 조회해
+ * TlsStatusBadge에 전달하므로, mock 응답이 실제 렌더링 경로를 그대로 따른다.
+ */
+test.describe('도메인 관리 — TLS 상태 표시 (#99)', () => {
+  test('TLS 인증서 목록을 조회해 각 도메인 행에 TLS 상태 배지가 표시된다 (#99 회귀 방지)', async ({ page }) => {
+    const now = new Date();
+    // textbook.com: 60일 후 만료 → '유효' 배지
+    const future60 = new Date(now.getTime() + 60 * 24 * 60 * 60 * 1000).toISOString();
+    // cdn.school.kr: 3일 후 만료 → '만료 3일 전' 배지
+    const future3 = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000).toISOString();
+
+    await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
+    await mockApi(page, 'GET', '/proxy/requests', []);
+    await mockApi(page, 'GET', '/domains/summary', createDomainSummary());
+    await mockApi(page, 'GET', '/domains', createDomains());
+    await mockApi(page, 'GET', '/tls/certificates', [
+      { domain: 'textbook.com', issued_at: now.toISOString(), expires_at: future60 },
+      { domain: 'cdn.school.kr', issued_at: now.toISOString(), expires_at: future3 },
+    ]);
+
+    await page.goto('/domains');
+    await expect(page.getByTestId('domains-table')).toBeVisible();
+
+    // textbook.com 행에 '유효' 배지가 표시되어야 한다 (#99 핵심 — em-dash 대신 실제 TLS 상태)
+    const textbookRow = page.getByTestId('domain-row-textbook.com');
+    await expect(textbookRow.getByText('유효')).toBeVisible();
+
+    // cdn.school.kr 행에 '만료 N일 전' 배지가 표시되어야 한다
+    const cdnRow = page.getByTestId('domain-row-cdn.school.kr');
+    await expect(cdnRow.getByText(/만료 \d+일 전/)).toBeVisible();
+  });
+
+  test('TLS 인증서 미발급 도메인은 "미발급" 배지가 표시된다 (#99 회귀 방지)', async ({ page }) => {
+    await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
+    await mockApi(page, 'GET', '/proxy/requests', []);
+    await mockApi(page, 'GET', '/domains/summary', createDomainSummary());
+    await mockApi(page, 'GET', '/domains', createDomains());
+    // textbook.com만 인증서 있고, cdn.school.kr은 미발급인 시나리오
+    await mockApi(page, 'GET', '/tls/certificates', [
+      { domain: 'textbook.com', issued_at: new Date().toISOString(), expires_at: new Date(Date.now() + 60 * 86400_000).toISOString() },
+    ]);
+
+    await page.goto('/domains');
+    await expect(page.getByTestId('domains-table')).toBeVisible();
+
+    // 인증서가 없는 cdn.school.kr 행에는 '미발급' 배지가 표시되어야 한다
+    const cdnRow = page.getByTestId('domain-row-cdn.school.kr');
+    await expect(cdnRow.getByText('미발급')).toBeVisible();
   });
 });
 
