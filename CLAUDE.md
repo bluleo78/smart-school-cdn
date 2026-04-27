@@ -14,7 +14,6 @@
 ## Commands
 
 - `pnpm dev` / `pnpm build` / `pnpm test` / `pnpm lint`
-- `pnpm dev:infra` — Docker Compose 기동 후 dev
 - `pnpm docker:build` / `pnpm docker:up` / `pnpm docker:down` — 로컬 통합 테스트용 (포트: 8082/4443/7778)
 
 ## Deploy
