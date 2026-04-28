@@ -256,6 +256,14 @@ export async function domainRoutes(
     },
   );
 
+  /**
+   * RFC-1123 도메인명 검증 정규식
+   * - 와일드카드(*.sub.domain.com) 허용
+   * - 각 레이블은 영문자·숫자·하이픈으로 구성, 하이픈으로 시작/끝 불가
+   * - XSS 페이로드(<script> 등) 및 특수문자 차단
+   */
+  const DOMAIN_RE = /^(\*\.)?[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/i;
+
   /** 도메인 추가 (이미 있으면 origin 갱신) — 추가 성공 후 기본 최적화 프로파일 자동 생성 */
   app.post<{ Body: { host?: string; origin?: string } }>(
     '/api/domains',
@@ -263,6 +271,10 @@ export async function domainRoutes(
       const { host, origin } = request.body ?? {};
       if (!host || !origin) {
         return reply.status(400).send({ error: 'host와 origin은 필수 항목입니다.' });
+      }
+      // host 형식 검증 — upsert 전에 수행하여 유효하지 않은 도메인이 DB에 저장되는 것을 방지
+      if (!DOMAIN_RE.test(host)) {
+        return reply.status(400).send({ error: '유효한 도메인 형식이 아닙니다. (예: example.com, *.sub.com)' });
       }
       domainRepo.upsert(host, origin);
       const synced = await syncToProxy(domainRepo);

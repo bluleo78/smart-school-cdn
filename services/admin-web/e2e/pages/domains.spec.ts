@@ -393,6 +393,80 @@ test.describe('도메인 관리 — 도메인 추가', () => {
     await expect(page.getByTestId('add-domain-dialog')).toBeVisible();
   });
 
+  /**
+   * 이슈 #37 회귀 방지 — host 형식 검증 없음 (특수문자·XSS 허용)
+   * XSS 페이로드 입력 시 클라이언트 검증이 차단하여 POST 요청이 전송되지 않아야 한다.
+   * 모킹 이유: 클라이언트 검증 통과 후 서버로 실제 요청이 가지 않아야 함을 확인하기 위해
+   * POST /domains를 모킹하고 호출 여부를 검증한다.
+   * mock이 재현하는 조건: handleSubmit이 DOMAIN_RE 체크에서 hasError=true를 설정해 mutateAsync를 호출하지 않는 상황.
+   */
+  test('XSS 페이로드 host 입력 시 인라인 에러가 표시되고 POST 요청이 전송되지 않는다 (#37)', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', []);
+    // POST가 호출될 경우 201을 반환하도록 모킹 — 실제 호출되면 안 됨
+    let postCalled = false;
+    await page.route('**/api/domains', (route) => {
+      if (route.request().method() === 'POST') {
+        postCalled = true;
+        route.fulfill({ status: 201, contentType: 'application/json', body: '{}' });
+      } else {
+        route.continue();
+      }
+    });
+
+    await page.goto('/domains');
+    await page.getByTestId('toolbar-add-btn').click();
+
+    // XSS 페이로드 입력
+    await page.getByTestId('add-domain-host').fill('<script>alert(1)</script>.evil.com');
+    await page.getByTestId('add-domain-origin').fill('https://origin.test');
+    await page.getByTestId('add-domain-submit').click();
+
+    // 인라인 에러 표시 및 다이얼로그 유지 확인
+    await expect(page.getByTestId('add-domain-host-error')).toBeVisible();
+    await expect(page.getByTestId('add-domain-dialog')).toBeVisible();
+    // 클라이언트 검증이 차단하여 서버로 요청이 전송되지 않아야 한다
+    expect(postCalled).toBe(false);
+  });
+
+  test('유효하지 않은 도메인 형식 입력 시 인라인 에러가 표시된다 (#37)', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', []);
+
+    await page.goto('/domains');
+    await page.getByTestId('toolbar-add-btn').click();
+
+    await page.getByTestId('add-domain-host').fill('in valid!domain');
+    await page.getByTestId('add-domain-origin').fill('https://origin.test');
+    await page.getByTestId('add-domain-submit').click();
+
+    await expect(page.getByTestId('add-domain-host-error')).toBeVisible();
+    await expect(page.getByTestId('add-domain-dialog')).toBeVisible();
+  });
+
+  test('와일드카드 도메인(*.textbook.com) 추가가 정상 처리된다 (#37)', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', []);
+    await mockApi(page, 'POST', '/domains', {
+      host: '*.textbook.com',
+      origin: 'https://textbook.com',
+      enabled: 1,
+      description: '',
+      created_at: 1700000300,
+      updated_at: 1700000300,
+    });
+
+    await page.goto('/domains');
+    await page.getByTestId('toolbar-add-btn').click();
+
+    await page.getByTestId('add-domain-host').fill('*.textbook.com');
+    await page.getByTestId('add-domain-origin').fill('https://textbook.com');
+    await page.getByTestId('add-domain-submit').click();
+
+    // 와일드카드 도메인은 유효하므로 다이얼로그가 닫혀야 한다
+    await expect(page.getByTestId('add-domain-dialog')).not.toBeVisible();
+  });
+
   test('API 오류 시 에러 메시지가 표시되고 다이얼로그가 유지된다', async ({ page }) => {
     await setupBaseMocks(page);
     await mockApi(page, 'GET', '/domains', []);

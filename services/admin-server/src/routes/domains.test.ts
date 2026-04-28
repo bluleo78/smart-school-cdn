@@ -131,6 +131,42 @@ describe('POST /api/domains', () => {
     expect(res.statusCode).toBe(400);
   });
 
+  it('XSS 페이로드 host는 400을 반환한다 (#37)', async () => {
+    const repo = makeRepo();
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/domains',
+      payload: { host: '<script>alert(1)</script>.evil.com', origin: 'https://origin.test' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).error).toContain('유효한 도메인 형식이 아닙니다');
+  });
+
+  it('특수문자가 포함된 host는 400을 반환한다 (#37)', async () => {
+    const repo = makeRepo();
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/domains',
+      payload: { host: 'in valid!domain', origin: 'https://origin.test' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).error).toContain('유효한 도메인 형식이 아닙니다');
+  });
+
+  it('와일드카드 도메인(*.sub.com)은 201을 반환한다 (#37)', async () => {
+    const repo = makeRepo();
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/domains',
+      payload: { host: '*.textbook.com', origin: 'https://textbook.com' },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(JSON.parse(res.body).host).toBe('*.textbook.com');
+  });
+
   it('동일 host POST 시 origin이 갱신된다 (upsert)', async () => {
     const repo = makeRepo();
     repo.upsert('textbook.com', 'https://old.textbook.com');

@@ -28,6 +28,15 @@ import { DomainBulkDeleteDialog } from '../components/domains/DomainBulkDeleteDi
 
 // ─── 도메인 추가 다이얼로그 ──────────────────────────────────────
 
+/**
+ * RFC-1123 도메인명 검증 정규식 (UX 사전 검증용)
+ * - 와일드카드(*.sub.domain.com) 허용
+ * - 각 레이블은 영문자·숫자·하이픈으로 구성, 하이픈으로 시작/끝 불가
+ * - XSS 페이로드(<script> 등) 및 특수문자 차단
+ * - 서버(`routes/domains.ts`)와 동일한 정규식 — 클라이언트는 UX용 사전 차단만 담당
+ */
+const DOMAIN_RE = /^(\*\.)?[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/i;
+
 function AddDomainDialog({ onClose }: { onClose: () => void }) {
   const [host, setHost] = useState('');
   const [origin, setOrigin] = useState('');
@@ -52,6 +61,10 @@ function AddDomainDialog({ onClose }: { onClose: () => void }) {
     let hasError = false;
     if (!h) {
       setHostError('도메인을 입력해주세요.');
+      hasError = true;
+    } else if (!DOMAIN_RE.test(h)) {
+      // RFC-1123 형식 검증 — XSS 페이로드·특수문자 사전 차단 (UX용, 서버도 동일 검증 수행)
+      setHostError('유효한 도메인 형식이 아닙니다. (예: example.com, *.sub.com)');
       hasError = true;
     }
     if (!o) {
