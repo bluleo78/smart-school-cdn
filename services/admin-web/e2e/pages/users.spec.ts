@@ -642,6 +642,90 @@ test.describe('사용자 관리', () => {
     expect(capturedBody!['password']).toBe('newpassword1234');
   });
 
+  // 이슈 #138 회귀 방지 — 비활성화 확인 버튼 isPending 로딩 상태 절대 표시 불가 (즉시 닫힘 버그)
+  test('비활성화 확인 — 처리 중 버튼 텍스트 표시 및 disabled 상태', async ({ page }) => {
+    let resolveRequest: (value: unknown) => void;
+    const requestPromise = new Promise((resolve) => { resolveRequest = resolve; });
+
+    await page.route('**/api/users', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(baseUsers),
+      });
+    });
+
+    // DELETE /users/2 — disableUser API를 의도적으로 지연해 isPending 상태 유지
+    await page.route('**/api/users/2', async (route) => {
+      if (route.request().method() === 'DELETE') {
+        await requestPromise;
+        await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+      } else {
+        return route.fallback();
+      }
+    });
+
+    await page.goto('/users');
+
+    const otherRow = page.getByTestId('user-row-2');
+    await otherRow.getByRole('button', { name: '비활성화' }).click();
+
+    const dialog = page.getByTestId('disable-user-dialog');
+    await expect(dialog).toBeVisible();
+    await dialog.getByTestId('disable-user-confirm').click();
+
+    // 다이얼로그가 즉시 닫히지 않고 열린 상태 유지 — 즉시 닫힘 버그 방지
+    await expect(dialog).toBeVisible();
+    // 처리 중 텍스트가 표시되어야 함
+    await expect(dialog.getByRole('button', { name: '처리 중…' })).toBeDisabled();
+
+    // 요청 완료 → 다이얼로그 닫힘
+    resolveRequest!(null);
+    await expect(dialog).not.toBeVisible();
+  });
+
+  // 이슈 #138 회귀 방지 — 재활성화 확인 버튼 isPending 로딩 상태 절대 표시 불가 (즉시 닫힘 버그)
+  test('재활성화 확인 — 처리 중 버튼 텍스트 표시 및 disabled 상태', async ({ page }) => {
+    let resolveRequest: (value: unknown) => void;
+    const requestPromise = new Promise((resolve) => { resolveRequest = resolve; });
+
+    await page.route('**/api/users', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(usersWithDisabled),
+      });
+    });
+
+    // PUT /users/2/enable — enableUser API를 의도적으로 지연해 isPending 상태 유지
+    await page.route('**/api/users/2/enable', async (route) => {
+      if (route.request().method() === 'PUT') {
+        await requestPromise;
+        await route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' });
+      } else {
+        return route.fallback();
+      }
+    });
+
+    await page.goto('/users');
+
+    const disabledRow = page.getByTestId('user-row-2');
+    await disabledRow.getByRole('button', { name: '재활성화' }).click();
+
+    const dialog = page.getByTestId('enable-user-dialog');
+    await expect(dialog).toBeVisible();
+    await dialog.getByTestId('enable-user-confirm').click();
+
+    // 다이얼로그가 즉시 닫히지 않고 열린 상태 유지 — 즉시 닫힘 버그 방지
+    await expect(dialog).toBeVisible();
+    // 처리 중 텍스트가 표시되어야 함
+    await expect(dialog.getByRole('button', { name: '처리 중…' })).toBeDisabled();
+
+    // 요청 완료 → 다이얼로그 닫힘
+    resolveRequest!(null);
+    await expect(dialog).not.toBeVisible();
+  });
+
   // 이슈 #63 회귀 방지 — 비밀번호 재설정 버튼이 제출 중 disabled 처리 안 되는 버그
   test('비밀번호 재설정 — 제출 중 재설정 버튼 disabled', async ({ page }) => {
     await mockApi(page, 'GET', '/users', baseUsers);

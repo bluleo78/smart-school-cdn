@@ -91,9 +91,11 @@ export function UsersPage() {
 
   const disableMut = useMutation({
     mutationFn: (id: number) => disableUser(id),
+    // 성공 시 다이얼로그 닫기 — onClick에서 즉시 닫으면 isPending 렌더링 기회가 없으므로 onSuccess로 이동
     onSuccess: () => {
       toast.success('사용자가 비활성화되었습니다');
       void qc.invalidateQueries({ queryKey: ['users'] });
+      setDisableTarget(null);
     },
     onError: () => toast.error('사용자 비활성화에 실패했습니다.'),
   });
@@ -101,9 +103,11 @@ export function UsersPage() {
   // 비활성화된 사용자를 재활성화하는 뮤테이션 — enable API 호출 후 목록 갱신
   const enableMut = useMutation({
     mutationFn: (id: number) => enableUser(id),
+    // 성공 시 다이얼로그 닫기 — onClick에서 즉시 닫으면 isPending 렌더링 기회가 없으므로 onSuccess로 이동
     onSuccess: () => {
       toast.success('사용자가 재활성화되었습니다');
       void qc.invalidateQueries({ queryKey: ['users'] });
+      setEnableTarget(null);
     },
     onError: () => toast.error('사용자 재활성화에 실패했습니다.'),
   });
@@ -296,8 +300,8 @@ export function UsersPage() {
               data-testid="enable-user-confirm"
               onClick={() => {
                 if (!enableTarget) return;
+                // setEnableTarget(null) 제거 — onSuccess 콜백에서 닫아야 isPending 로딩 상태 렌더링됨
                 enableMut.mutate(enableTarget.id);
-                setEnableTarget(null);
               }}
             >
               {enableMut.isPending ? '처리 중…' : '재활성화'}
@@ -324,8 +328,8 @@ export function UsersPage() {
               data-testid="disable-user-confirm"
               onClick={() => {
                 if (!disableTarget) return;
+                // setDisableTarget(null) 제거 — onSuccess 콜백에서 닫아야 isPending 로딩 상태 렌더링됨
                 disableMut.mutate(disableTarget.id);
-                setDisableTarget(null);
               }}
             >
               {disableMut.isPending ? '처리 중…' : '비활성화'}
