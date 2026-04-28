@@ -72,9 +72,11 @@ export function UsersPage() {
     mutationFn: ({ id, password, currentPassword }: { id: number; password: string; currentPassword?: string }) =>
       updatePassword(id, password, currentPassword),
     // 성공 시에만 다이얼로그 닫기 — 오류 시 입력값 보존을 위해 onSuccess로 이동
+    // 성공 시 폼 초기화 — 다음 오픈 시 dirty state 잔존 방지 (#161)
     onSuccess: () => {
       toast.success('비밀번호가 재설정되었습니다');
       setPasswordTarget(null);
+      passwordForm.reset();
     },
     onError: (e) => {
       // 현재 비밀번호 오류와 일반 오류를 구분하여 안내 메시지 제공 (이슈 #31)
@@ -232,7 +234,8 @@ export function UsersPage() {
       </Dialog>
 
       {/* 비밀번호 재설정 다이얼로그 */}
-      <Dialog open={!!passwordTarget} onClose={() => setPasswordTarget(null)}>
+      {/* onClose — Escape/backdrop 클릭 포함 모든 닫기 경로에서 폼 초기화 (#161) */}
+      <Dialog open={!!passwordTarget} onClose={() => { setPasswordTarget(null); passwordForm.reset(); }}>
         <DialogContent>
           <DialogTitle>{passwordTarget?.username} 비밀번호 재설정</DialogTitle>
           <form
@@ -280,7 +283,8 @@ export function UsersPage() {
               {passwordForm.formState.errors.password && <p className="text-xs text-destructive">{passwordForm.formState.errors.password.message}</p>}
             </div>
             <div className="flex justify-end gap-2 pt-2">
-              <Button type="button" variant="outline" onClick={() => setPasswordTarget(null)}>취소</Button>
+              {/* 취소 버튼 — 닫기 시 폼 초기화 (dirty state 잔존 방지 #161) */}
+              <Button type="button" variant="outline" onClick={() => { setPasswordTarget(null); passwordForm.reset(); }}>취소</Button>
               {/* isPending 중 disabled + 로딩 텍스트 — 중복 제출 방지 */}
               <Button type="submit" disabled={passwordMut.isPending}>{passwordMut.isPending ? '재설정 중…' : '재설정'}</Button>
             </div>

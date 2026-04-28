@@ -760,6 +760,68 @@ test.describe('사용자 관리', () => {
     expect(passwordApiCalled).toBe(false);
   });
 
+  /**
+   * 이슈 #161 회귀 방지 — 취소 후 다른 사용자 선택 시 이전 입력값 잔존
+   * 수정 전: 취소 버튼 onClick에 passwordForm.reset() 누락 → 다음 오픈 시 dirty state 잔존
+   * 수정 후: 취소/onClose 경로 모두에서 passwordForm.reset() 호출 → 항상 빈 상태로 시작
+   */
+  test('비밀번호 재설정 — 취소 후 다른 사용자 선택 시 이전 입력값 초기화 — 회귀 방지 #161', async ({ page }) => {
+    await mockApi(page, 'GET', '/users', baseUsers);
+
+    await page.goto('/users');
+
+    // 1. other 사용자(id=2)의 비밀번호 재설정 다이얼로그 열기
+    const otherRow = page.getByTestId('user-row-2');
+    await otherRow.getByRole('button', { name: '비밀번호 재설정' }).click();
+
+    // 2. 새 비밀번호 입력
+    const typedPassword = 'dirty-state-test1234';
+    await page.fill('input[name=password]', typedPassword);
+    await expect(page.locator('input[name=password]')).toHaveValue(typedPassword);
+
+    // 3. 취소 버튼 클릭
+    await page.getByRole('button', { name: '취소' }).click();
+    await expect(page.getByRole('dialog')).not.toBeVisible();
+
+    // 4. TEST_USER(본인) 행의 비밀번호 재설정 다이얼로그 열기
+    const myRow = page.getByTestId(`user-row-${TEST_USER.id}`);
+    await myRow.getByRole('button', { name: '비밀번호 재설정' }).click();
+
+    // 5. 이전에 입력한 비밀번호가 잔존하지 않아야 함
+    const newPasswordInput = page.locator('input[name=password]');
+    await expect(newPasswordInput).toBeVisible();
+    await expect(newPasswordInput).toHaveValue('');
+  });
+
+  /**
+   * 이슈 #161 회귀 방지 — 닫기 버튼(X) / Escape로 닫을 때도 폼 초기화
+   * onClose 핸들러에 passwordForm.reset() 추가로 모든 닫기 경로 방어
+   */
+  test('비밀번호 재설정 — 닫기(X) 후 다른 사용자 선택 시 이전 입력값 초기화 — 회귀 방지 #161', async ({ page }) => {
+    await mockApi(page, 'GET', '/users', baseUsers);
+
+    await page.goto('/users');
+
+    // 1. other 사용자 다이얼로그 열기
+    const otherRow = page.getByTestId('user-row-2');
+    await otherRow.getByRole('button', { name: '비밀번호 재설정' }).click();
+
+    // 2. 비밀번호 입력
+    const typedPassword = 'onclose-dirty-state9999';
+    await page.fill('input[name=password]', typedPassword);
+
+    // 3. Escape 키로 닫기 (onClose 경로)
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog')).not.toBeVisible();
+
+    // 4. TEST_USER 비밀번호 재설정 다이얼로그 열기
+    const myRow = page.getByTestId(`user-row-${TEST_USER.id}`);
+    await myRow.getByRole('button', { name: '비밀번호 재설정' }).click();
+
+    // 5. 이전 입력값이 잔존하지 않아야 함
+    await expect(page.locator('input[name=password]')).toHaveValue('');
+  });
+
   // 이슈 #63 회귀 방지 — 비밀번호 재설정 버튼이 제출 중 disabled 처리 안 되는 버그
   test('비밀번호 재설정 — 제출 중 재설정 버튼 disabled', async ({ page }) => {
     await mockApi(page, 'GET', '/users', baseUsers);
