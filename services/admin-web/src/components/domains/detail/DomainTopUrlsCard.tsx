@@ -12,7 +12,8 @@ interface Props {
 }
 
 export function DomainTopUrlsCard({ host, period, range, refetchIntervalMs }: Props) {
-  const { data, isLoading } = useDomainTopUrls(host, period, range, refetchIntervalMs);
+  // error를 함께 destructure하여 API 실패 시 에러 상태 표시 (#148)
+  const { data, isLoading, error } = useDomainTopUrls(host, period, range, refetchIntervalMs);
 
   return (
     <Card data-testid="domain-top-urls">
@@ -22,6 +23,9 @@ export function DomainTopUrlsCard({ host, period, range, refetchIntervalMs }: Pr
       <CardContent>
         {isLoading ? (
           <Skeleton className="h-24 w-full" />
+        ) : error ? (
+          // API 호출 실패 시 에러 메시지 표시 — DomainLogTable 패턴 동일 적용
+          <p className="text-sm text-destructive">상위 URL을 불러올 수 없습니다</p>
         ) : !data || data.length === 0 ? (
           <p className="py-6 text-center text-xs text-muted-foreground">데이터 없음</p>
         ) : (

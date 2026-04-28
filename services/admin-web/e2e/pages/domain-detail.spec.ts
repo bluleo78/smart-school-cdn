@@ -1168,6 +1168,23 @@ test.describe('도메인 상세 — Logs 탭', () => {
     await expect(page.getByTestId('domain-top-urls')).toContainText('30');
   });
 
+  test('top-urls API 실패 시 에러 메시지가 표시된다 (회귀: #148)', async ({ page }) => {
+    // 버그: error를 destructure하지 않아 500 응답 시 "데이터 없음"으로 표시됨
+    // 수정 후: error가 있으면 "상위 URL을 불러올 수 없습니다" 표시
+    await setupDetailMocks(page);
+    // top-urls 엔드포인트만 500으로 오버라이드
+    await page.route('**/api/domains/textbook.com/top-urls*', (route) =>
+      route.fulfill({ status: 500, json: { error: 'Internal Server Error' } }),
+    );
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '트래픽' }).click();
+
+    // 에러 메시지가 표시되어야 한다
+    await expect(page.getByTestId('domain-top-urls')).toContainText('상위 URL을 불러올 수 없습니다');
+    // "데이터 없음"은 나타나면 안 된다
+    await expect(page.getByTestId('domain-top-urls')).not.toContainText('데이터 없음');
+  });
+
   test('Logs 탭에 트래픽 차트 섹션(요청 추이)이 렌더링된다 (Phase 16-3)', async ({ page }) => {
     await setupDetailMocks(page);
     await page.goto('/domains/textbook.com');
