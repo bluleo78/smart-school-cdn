@@ -183,6 +183,48 @@ describe('OptimizationEventsRepository', () => {
     });
   });
 
+  // ─── urlBreakdown search LIKE 이스케이프 (#150) ─────────────────────────
+  describe('urlBreakdown — search LIKE 이스케이프', () => {
+    beforeEach(() => {
+      // "%" 가 포함된 URL 1건, 일반 URL 1건 삽입
+      repo.insertBatch([
+        sample({ url: 'https://cdn.test/img/100%2Fthumb.jpg', ts: new Date().toISOString() }),
+        sample({ url: 'https://cdn.test/img/other.jpg',       ts: new Date().toISOString() }),
+      ]);
+    });
+
+    it('search에 % 포함 시 와일드카드가 아닌 리터럴로 매칭한다', () => {
+      // search="%" 이면 URL에 리터럴 % 를 포함한 건만 반환해야 한다
+      // beforeEach에서 삽입된 2건 중 "100%2Fthumb.jpg" 1건만 매칭되어야 한다
+      // 버그 상태에서는 LIKE "%%" 로 해석돼 전체 2건이 반환됨
+      const result = repo.urlBreakdown({ host: 'webdt.edunet.net', search: '%' });
+      expect(result.total).toBe(1);
+      expect(result.items[0].url).toBe('https://cdn.test/img/100%2Fthumb.jpg');
+    });
+
+    it('search에 % 를 포함한 URL은 정상 매칭한다 (host 일치 조건 포함)', () => {
+      repo.insertBatch([
+        sample({ host: 'cdn.test', url: 'https://cdn.test/img/100%2Fthumb.jpg', ts: new Date().toISOString() }),
+        sample({ host: 'cdn.test', url: 'https://cdn.test/img/other.jpg',       ts: new Date().toISOString() }),
+      ]);
+      // search="%2F" → "%" 포함 URL만 반환
+      const result = repo.urlBreakdown({ host: 'cdn.test', search: '%2F' });
+      expect(result.total).toBe(1);
+      expect(result.items[0].url).toBe('https://cdn.test/img/100%2Fthumb.jpg');
+    });
+
+    it('search에 % 만 포함 시 전체를 반환하지 않는다 (와일드카드 방지)', () => {
+      repo.insertBatch([
+        sample({ host: 'cdn.test', url: 'https://cdn.test/a.jpg', ts: new Date().toISOString() }),
+        sample({ host: 'cdn.test', url: 'https://cdn.test/b.jpg', ts: new Date().toISOString() }),
+      ]);
+      // "%" 를 와일드카드로 해석하면 모든 URL이 매칭되어 total>0이 되는 버그
+      // 이스케이프 후에는 URL에 "%" 없으면 0건
+      const result = repo.urlBreakdown({ host: 'cdn.test', search: 'nopercent%' });
+      expect(result.total).toBe(0);
+    });
+  });
+
   // ─── prune ──────────────────────────────────────────────────────────────
   describe('prune', () => {
     it('기준 시각 이전 이벤트를 삭제하고 삭제 개수를 반환', () => {

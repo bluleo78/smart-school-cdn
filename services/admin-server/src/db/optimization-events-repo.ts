@@ -100,6 +100,15 @@ function hashUrl(url: string): string {
 }
 
 /**
+ * LIKE 패턴에서 SQL 와일드카드 문자를 이스케이프한다.
+ * `%`, `_`, `\` 를 `\` 로 이스케이프하여 리터럴 문자열 검색이 되도록 한다.
+ * SQL 쿼리에서는 반드시 `ESCAPE '\'` 절과 함께 사용해야 한다.
+ */
+function escapeLike(s: string): string {
+  return s.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+}
+
+/**
  * 최적화 이벤트 리포지토리.
  * proxy가 배치 push한 이벤트 레코드를 저장·조회·정리한다.
  */
@@ -257,7 +266,8 @@ export class OptimizationEventsRepository {
     const where: string[] = ['host = @host', 'ts >= @since'];
     const params: Record<string, string> = { host: q.host, since };
     if (q.decision) { where.push('decision = @decision'); params.decision = q.decision; }
-    if (q.search)   { where.push('url LIKE @q');          params.q        = `%${q.search}%`; }
+    // LIKE 특수문자(%, _, \)를 이스케이프하여 리터럴 검색을 보장한다
+    if (q.search)   { where.push(`url LIKE @q ESCAPE '\\'`); params.q = `%${escapeLike(q.search)}%`; }
 
     const limit  = Math.min(Math.max(q.limit ?? 50, 1), 500);
     const offset = Math.max(q.offset ?? 0, 0);

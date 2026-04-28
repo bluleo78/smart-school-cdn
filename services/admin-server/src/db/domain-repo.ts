@@ -42,6 +42,15 @@ export interface FindAllOptions {
   order?: string;
 }
 
+/**
+ * LIKE 패턴에서 SQL 와일드카드 문자를 이스케이프한다.
+ * `%`, `_`, `\` 를 `\` 로 이스케이프하여 리터럴 문자열 검색이 되도록 한다.
+ * SQL 쿼리에서는 반드시 `ESCAPE '\'` 절과 함께 사용해야 한다.
+ */
+function escapeLike(s: string): string {
+  return s.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+}
+
 /** sort 화이트리스트 — SQL injection 방지 */
 const SORT_WHITELIST = new Set(['host', 'created_at', 'updated_at']);
 
@@ -92,8 +101,9 @@ export class DomainRepository {
     const params: (string | number)[] = [];
 
     if (options?.q) {
-      conditions.push(`(host LIKE ? OR origin LIKE ?)`);
-      const like = `%${options.q}%`;
+      // LIKE 특수문자(%, _, \)를 이스케이프하여 리터럴 검색을 보장한다
+      conditions.push(`(host LIKE ? ESCAPE '\\' OR origin LIKE ? ESCAPE '\\')`);
+      const like = `%${escapeLike(options.q)}%`;
       params.push(like, like);
     }
 

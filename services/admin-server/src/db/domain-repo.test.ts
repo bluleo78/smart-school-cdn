@@ -71,6 +71,25 @@ describe('DomainRepository', () => {
       expect(results[0].origin).toBe('https://cdn.example.com');
     });
 
+    // LIKE 특수문자 이스케이프 검증 (#150)
+    it('q에 % 포함 시 와일드카드가 아닌 리터럴로 매칭한다', () => {
+      // "%" 는 어떤 도메인에도 포함되지 않으므로 결과가 0건이어야 한다
+      expect(repo.findAll({ q: '%' })).toHaveLength(0);
+    });
+
+    it('q에 _ 포함 시 임의 1자 와일드카드가 아닌 리터럴로 매칭한다', () => {
+      // "school_local" 은 존재하지 않는다 (실제 host는 "school.local")
+      expect(repo.findAll({ q: 'school_local' })).toHaveLength(0);
+    });
+
+    it('q에 리터럴 % 를 포함한 도메인은 정상 매칭한다', () => {
+      // host에 실제 "%" 문자가 들어간 도메인은 q=% 로 검색되어야 한다
+      repo.upsert('100%.cdn.test', 'https://cdn.test');
+      const results = repo.findAll({ q: '%' });
+      expect(results).toHaveLength(1);
+      expect(results[0].host).toBe('100%.cdn.test');
+    });
+
     it('enabled=true 필터링 — 활성 도메인만 반환한다', () => {
       const results = repo.findAll({ enabled: true });
       expect(results.every((d) => d.enabled === 1)).toBe(true);
