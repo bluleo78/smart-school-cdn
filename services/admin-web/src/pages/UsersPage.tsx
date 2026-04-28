@@ -292,16 +292,16 @@ export function UsersPage() {
         </DialogContent>
       </Dialog>
 
-      {/* 재활성화 확인 다이얼로그 — 비활성 사용자를 다시 활성화하기 전 의도 확인 */}
-      <AlertDialog open={!!enableTarget} onClose={() => setEnableTarget(null)}>
-        <AlertDialogContent className="max-w-sm" data-testid="enable-user-dialog">
+      {/* 재활성화 확인 다이얼로그 — 비활성 사용자를 다시 활성화하기 전 의도 확인. 진행 중 ESC/백드롭/X 닫기 차단 (#165) */}
+      <AlertDialog open={!!enableTarget} onClose={() => { if (!enableMut.isPending) setEnableTarget(null); }}>
+        <AlertDialogContent className="max-w-sm" data-testid="enable-user-dialog" disableClose={enableMut.isPending}>
           <AlertDialogTitle>사용자 재활성화</AlertDialogTitle>
           <p className="text-sm text-muted-foreground">
             <span className="font-medium">{enableTarget?.username}</span>을(를) 재활성화하시겠습니까?
             재활성화된 사용자는 다시 로그인할 수 있습니다.
           </p>
           <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setEnableTarget(null)}>
+            <Button variant="outline" onClick={() => setEnableTarget(null)} disabled={enableMut.isPending}>
               취소
             </Button>
             <Button
@@ -319,16 +319,16 @@ export function UsersPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* 비활성화 확인 다이얼로그 — 네이티브 confirm() 대신 shadcn AlertDialog로 UX 일관성 확보 */}
-      <AlertDialog open={!!disableTarget} onClose={() => setDisableTarget(null)}>
-        <AlertDialogContent className="max-w-sm" data-testid="disable-user-dialog">
+      {/* 비활성화 확인 다이얼로그 — 네이티브 confirm() 대신 shadcn AlertDialog로 UX 일관성 확보. 진행 중 ESC/백드롭/X 닫기 차단 (#165) */}
+      <AlertDialog open={!!disableTarget} onClose={() => { if (!disableMut.isPending) setDisableTarget(null); }}>
+        <AlertDialogContent className="max-w-sm" data-testid="disable-user-dialog" disableClose={disableMut.isPending}>
           <AlertDialogTitle>사용자 비활성화</AlertDialogTitle>
           <p className="text-sm text-muted-foreground">
             <span className="font-medium">{disableTarget?.username}</span>을(를) 비활성화하시겠습니까?
             비활성화된 사용자는 로그인할 수 없습니다.
           </p>
           <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setDisableTarget(null)}>
+            <Button variant="outline" onClick={() => setDisableTarget(null)} disabled={disableMut.isPending}>
               취소
             </Button>
             <Button

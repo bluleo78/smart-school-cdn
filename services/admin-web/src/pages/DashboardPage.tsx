@@ -100,15 +100,15 @@ export function DashboardPage() {
         </CardContent>
       </Card>
 
-      {/* 퍼지 확인 AlertDialog */}
-      <AlertDialog open={showConfirm} onClose={() => setShowConfirm(false)}>
-        <AlertDialogContent className="max-w-sm">
+      {/* 퍼지 확인 AlertDialog — 진행 중 ESC/백드롭/X 닫기 차단 (#165) */}
+      <AlertDialog open={showConfirm} onClose={() => { if (!isPending) setShowConfirm(false); }}>
+        <AlertDialogContent className="max-w-sm" data-testid="purge-all-dialog" disableClose={isPending}>
           <AlertDialogTitle>전체 캐시 퍼지</AlertDialogTitle>
           <p className="text-sm text-muted-foreground">
             전체 캐시를 삭제합니다. 계속하시겠습니까?
           </p>
           <div className="flex justify-end gap-2 mt-4">
-            <Button variant="outline" onClick={() => setShowConfirm(false)}>
+            <Button variant="outline" onClick={() => setShowConfirm(false)} disabled={isPending}>
               취소
             </Button>
             <Button variant="destructive" disabled={isPending} onClick={handlePurge}>

@@ -132,9 +132,9 @@ export function DomainDetailHeader({ domain }: Props) {
         </Button>
       </div>
 
-      {/* 삭제 확인 AlertDialog */}
-      <AlertDialog open={showDeleteDialog} onClose={() => setShowDeleteDialog(false)}>
-        <AlertDialogContent className="max-w-sm" data-testid="domain-delete-dialog">
+      {/* 삭제 확인 AlertDialog — 진행 중 ESC/백드롭/X 닫기 차단 (#165) */}
+      <AlertDialog open={showDeleteDialog} onClose={() => { if (!deleteDomain.isPending) setShowDeleteDialog(false); }}>
+        <AlertDialogContent className="max-w-sm" data-testid="domain-delete-dialog" disableClose={deleteDomain.isPending}>
           <AlertDialogTitle>도메인 삭제</AlertDialogTitle>
           <p className="text-sm text-muted-foreground">
             <span className="font-mono font-medium">{domain.host}</span>을(를) 삭제하시겠습니까?
@@ -144,6 +144,7 @@ export function DomainDetailHeader({ domain }: Props) {
             <Button
               variant="outline"
               onClick={() => setShowDeleteDialog(false)}
+              disabled={deleteDomain.isPending}
             >
               취소
             </Button>

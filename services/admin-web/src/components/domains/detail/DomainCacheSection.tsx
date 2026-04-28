@@ -106,9 +106,9 @@ export function DomainCacheSection({ host }: Props) {
         </div>
       </CardContent>
 
-      {/* 도메인 전체 퍼지 확인 다이얼로그 */}
-      <AlertDialog open={purgeDialogOpen} onClose={() => setPurgeDialogOpen(false)}>
-        <AlertDialogContent className="max-w-sm" data-testid="domain-purge-dialog">
+      {/* 도메인 전체 퍼지 확인 다이얼로그 — 진행 중 ESC/백드롭/X 닫기 차단 (#165) */}
+      <AlertDialog open={purgeDialogOpen} onClose={() => { if (!purgeMutation.isPending) setPurgeDialogOpen(false); }}>
+        <AlertDialogContent className="max-w-sm" data-testid="domain-purge-dialog" disableClose={purgeMutation.isPending}>
           <AlertDialogTitle>도메인 캐시 퍼지</AlertDialogTitle>
           <p className="text-sm text-muted-foreground">
             <strong>{host}</strong>의 전체 캐시를 삭제합니다. 계속하시겠습니까?
@@ -118,6 +118,7 @@ export function DomainCacheSection({ host }: Props) {
               variant="outline"
               onClick={() => setPurgeDialogOpen(false)}
               size="sm"
+              disabled={purgeMutation.isPending}
             >
               취소
             </Button>

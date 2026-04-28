@@ -163,14 +163,14 @@ function DeleteConfirmDialog({
   isPending: boolean;
 }) {
   return (
-    <AlertDialogContent className="max-w-sm" data-testid="delete-domain-dialog">
+    <AlertDialogContent className="max-w-sm" data-testid="delete-domain-dialog" disableClose={isPending}>
       <AlertDialogTitle>도메인 삭제</AlertDialogTitle>
       <p className="text-sm text-muted-foreground">
         <span className="font-mono font-medium">{host}</span>을(를) 삭제하시겠습니까?
         DNS 오버라이드와 캐시가 함께 해제됩니다.
       </p>
       <div className="flex justify-end gap-2">
-        <Button variant="outline" onClick={onCancel}>
+        <Button variant="outline" onClick={onCancel} disabled={isPending}>
           취소
         </Button>
         <Button
@@ -340,8 +340,8 @@ export function DomainsPage() {
         <AddDomainDialog onClose={() => setShowAddDialog(false)} />
       </Dialog>
 
-      {/* 단건 삭제 확인 다이얼로그 */}
-      <AlertDialog open={!!deleteTarget} onClose={() => setDeleteTarget(null)}>
+      {/* 단건 삭제 확인 다이얼로그 — 진행 중 ESC/백드롭/X 닫기 차단 (#165) */}
+      <AlertDialog open={!!deleteTarget} onClose={() => { if (!deleteMutation.isPending) setDeleteTarget(null); }}>
         {deleteTarget && (
           <DeleteConfirmDialog
             host={deleteTarget}
