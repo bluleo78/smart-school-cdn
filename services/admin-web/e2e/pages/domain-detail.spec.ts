@@ -966,6 +966,51 @@ test.describe('도메인 상세 — Logs 탭', () => {
     // 서버에 status=error로 전송되어야 한다 (5xx만 보내지 않음)
     expect(filteredCallUrl).toContain('status=error');
   });
+
+  /**
+   * 이슈 #134 회귀 방지 — errorsOnly 이중 필터로 '더 보기' 버튼 오작동
+   * 수정 전: API에 status=error를 전달했음에도 클라이언트에서도 status_code < 400 필터를 중복 적용
+   *         → API가 limit=50을 채워도 클라이언트 필터 후 표시 건수가 줄어 '더 보기'가 숨겨짐
+   * 수정 후: 클라이언트 중복 필터 제거 → API 응답 50건이 모두 표시되고 '더 보기' 버튼도 정상 표시
+   */
+  test('"에러만" 토글 — API limit=50 응답 시 클라이언트 중복 필터 없이 전체 50건이 표시된다 (회귀: #134)', async ({ page }) => {
+    await setupDetailMocks(page);
+
+    // mock: errorsOnly 활성화 시 50건 반환 (API는 이미 error 필터 적용 후 반환한다고 가정)
+    // 의도적으로 status_code < 400 항목을 포함시켜 클라이언트 중복 필터가 살아있으면
+    // 표시 건수가 줄어드는 조건을 만든다
+    await page.route('**/api/domains/textbook.com/logs*', (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get('status') === 'error') {
+        // 50건 중 10건(i%5===0)이 status_code=200 — 클라이언트 이중 필터가 남아있으면 40건만 표시됨
+        const logs = Array.from({ length: 50 }, (_, i) => ({
+          timestamp: 1700000000 + i,
+          status_code: i % 5 === 0 ? 200 : 500,
+          cache_status: 'MISS' as const,
+          path: `/path/${i}`,
+          size: 1024,
+        }));
+        return route.fulfill({ json: logs });
+      }
+      return route.fulfill({ json: createDomainLogs() });
+    });
+
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '트래픽' }).click();
+
+    // "에러만" 토글 활성화 → mock이 50건 반환
+    await page.getByRole('button', { name: '에러만' }).click();
+
+    const logTable = page.locator('table');
+    await expect(logTable).toBeVisible();
+
+    // 수정 후: 50건 모두 표시되어야 한다 (이중 필터 제거 → 40건으로 줄면 버그 재현)
+    const rowCount = await logTable.locator('tbody tr').count();
+    expect(rowCount).toBe(50);
+
+    // '더 보기' 버튼이 표시되어야 한다 (data.length=50 >= limit=50)
+    await expect(page.getByRole('button', { name: '더 보기' })).toBeVisible();
+  });
 });
 
 // ─────────────────────────────────────────────

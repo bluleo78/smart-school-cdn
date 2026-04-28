@@ -63,9 +63,8 @@ export function DomainLogTable({ host, period, range, refetchIntervalMs = false 
 
   const logs = data ?? [];
 
-  /** 필터 적용: 검색어 + 에러만 */
+  /** 필터 적용: 검색어만 — errorsOnly는 API 파라미터(status:'error')로 위임하므로 클라이언트 중복 필터 제거 (#134) */
   const filtered = logs.filter((log) => {
-    if (errorsOnly && log.status_code < 400) return false;
     if (search && !log.path.toLowerCase().includes(search.toLowerCase())) return false;
     return true;
   });
