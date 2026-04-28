@@ -21,13 +21,15 @@ import { formatUptime } from '../lib/format';
 import { LogViewer } from '../components/system/LogViewer';
 import type { SystemStatus } from '../api/system';
 
-/** 서비스 키 → 표시 레이블 매핑 (SystemStatus 타입과 동기화) */
+/** 서비스 키 → 표시 레이블 매핑 (SystemStatus 타입과 동기화)
+ * DNS·TLS는 전 세계 공통 기술 약어이므로 영문 유지,
+ * Proxy·Storage·Optimizer는 한국어 표기가 표준화됨 */
 const SERVICE_LABELS: Record<keyof SystemStatus, string> = {
-  proxy: 'Proxy',
-  storage: 'Storage',
-  tls: 'TLS',
-  dns: 'DNS',
-  optimizer: 'Optimizer',
+  proxy: '프록시',
+  storage: '스토리지',
+  tls: 'TLS',        // 기술 약어 — 영문 유지
+  dns: 'DNS',        // 기술 약어 — 영문 유지
+  optimizer: '최적화기',
 };
 
 
