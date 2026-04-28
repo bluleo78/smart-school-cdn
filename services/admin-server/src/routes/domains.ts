@@ -217,6 +217,14 @@ export async function domainRoutes(
     };
   });
 
+  /**
+   * RFC-1123 도메인명 검증 정규식 — bulk/단일 추가 양쪽에서 공유
+   * - 와일드카드(*.sub.domain.com) 허용
+   * - 각 레이블은 영문자·숫자·하이픈으로 구성, 하이픈으로 시작/끝 불가
+   * - XSS 페이로드(<script> 등) 및 특수문자 차단
+   */
+  const DOMAIN_RE = /^(\*\.)?[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/i;
+
   /** 도메인 일괄 추가 — 성공한 각 도메인에 기본 최적화 프로파일 자동 생성 */
   app.post<{ Body: { domains?: Array<{ host: string; origin: string }> } }>(
     '/api/domains/bulk',
@@ -224,6 +232,13 @@ export async function domainRoutes(
       const { domains } = request.body ?? {};
       if (!Array.isArray(domains) || domains.length === 0) {
         return reply.status(400).send({ error: 'domains 배열은 필수 항목입니다.' });
+      }
+      // host 형식 검증 — RFC-1123 DOMAIN_RE 적용 (#152)
+      // 단일 추가(/api/domains)와 동일한 검증을 적용하여 비정상 host가 DB에 저장되는 것을 방지
+      for (const d of domains) {
+        if (typeof d.host !== 'string' || !DOMAIN_RE.test(d.host)) {
+          return reply.status(400).send({ error: `유효한 도메인 형식이 아닙니다: "${d.host}"` });
+        }
       }
       // 각 도메인의 origin URL scheme 검증 — http:// 또는 https://만 허용
       // javascript:, file://, ftp:// 등 비정상 scheme이 DB에 저장되는 것을 방지한다 (#42)
@@ -271,14 +286,6 @@ export async function domainRoutes(
       return reply.status(200).send({ deleted });
     },
   );
-
-  /**
-   * RFC-1123 도메인명 검증 정규식
-   * - 와일드카드(*.sub.domain.com) 허용
-   * - 각 레이블은 영문자·숫자·하이픈으로 구성, 하이픈으로 시작/끝 불가
-   * - XSS 페이로드(<script> 등) 및 특수문자 차단
-   */
-  const DOMAIN_RE = /^(\*\.)?[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/i;
 
   /** 도메인 추가 (이미 있으면 origin 갱신) — 추가 성공 후 기본 최적화 프로파일 자동 생성 */
   app.post<{ Body: { host?: string; origin?: string } }>(

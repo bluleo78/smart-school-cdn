@@ -347,6 +347,46 @@ describe('POST /api/domains/bulk', () => {
     // 정상 도메인도 저장되지 않아야 한다 (검증 실패 시 전체 요청을 거부)
     expect(repo.findByHost('good.com')).toBeUndefined();
   });
+
+  /** host 형식 검증 — DOMAIN_RE 누락 보완 (#152) */
+  it('XSS 페이로드가 포함된 host는 400을 반환한다 (#152)', async () => {
+    const repo = makeRepo();
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'POST', url: '/api/domains/bulk',
+      payload: { domains: [{ host: '<script>alert(1)</script>.invalid', origin: 'http://example.com' }] },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).error).toContain('유효한 도메인 형식이 아닙니다');
+  });
+
+  it('path traversal host는 400을 반환한다 (#152)', async () => {
+    const repo = makeRepo();
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'POST', url: '/api/domains/bulk',
+      payload: { domains: [{ host: '../traversal', origin: 'http://example.com' }] },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).error).toContain('유효한 도메인 형식이 아닙니다');
+  });
+
+  it('혼합 목록에서 하나라도 비정상 host가 있으면 전체 400 반환한다 (#152)', async () => {
+    const repo = makeRepo();
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'POST', url: '/api/domains/bulk',
+      payload: {
+        domains: [
+          { host: 'valid.com', origin: 'https://valid.com' },
+          { host: '<bad>', origin: 'http://bad.com' },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    // 정상 도메인도 저장되지 않아야 한다 (검증 실패 시 전체 요청을 거부)
+    expect(repo.findByHost('valid.com')).toBeUndefined();
+  });
 });
 
 describe('PUT /api/domains/:host', () => {
