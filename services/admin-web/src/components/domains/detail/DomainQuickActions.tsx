@@ -39,8 +39,13 @@ function ProxyTestDialog({
     error?: string;
   } | null>(null);
 
-  /** 테스트 요청 전송 */
+  /** 테스트 요청 전송 — 경로가 비어있으면 API 호출 없이 클라이언트 오류 반환 */
   async function handleTest() {
+    // 빈 경로는 서버가 400을 반환하므로 클라이언트에서 사전 차단
+    if (!path.trim()) {
+      setResult({ success: false, status_code: 0, response_time_ms: 0, error: '경로를 입력하세요' });
+      return;
+    }
     setLoading(true);
     setResult(null);
     try {

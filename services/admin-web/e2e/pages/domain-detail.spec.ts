@@ -399,6 +399,45 @@ test.describe('도메인 상세 — Overview 탭', () => {
   });
 
   /**
+   * 이슈 #132 회귀 방지 — 빈 경로 입력 시 API 호출 없이 클라이언트 오류 메시지 표시
+   * 수정 전: path='' 로 testProxy()가 호출되어 서버가 400 반환
+   * 수정 후: handleTest()가 path.trim() 검사로 API 호출 차단 → 오류 메시지 노출
+   */
+  test('프록시 테스트 다이얼로그 — 빈 경로 제출 시 API 호출 없이 오류 메시지가 표시된다 (회귀: #132)', async ({ page }) => {
+    await setupDetailMocks(page);
+    // /proxy/test mock을 등록하되, 실제로 호출되면 안 된다
+    let proxyTestCalled = false;
+    await page.route('**/api/proxy/test', (route) => {
+      proxyTestCalled = true;
+      return route.fulfill({ json: { success: true, status_code: 200, response_time_ms: 0 } });
+    });
+
+    await page.goto('/domains/textbook.com');
+
+    // 프록시 테스트 다이얼로그 열기
+    await page.getByTestId('proxy-test-open').click();
+    await expect(page.getByTestId('proxy-test-dialog')).toBeVisible();
+
+    // 경로 입력 필드를 빈 문자열로 초기화 (기본값 '/'를 지움)
+    await page.getByTestId('proxy-test-path-input').fill('/');
+    await page.getByTestId('proxy-test-path-input').selectText();
+    await page.keyboard.press('Backspace');
+    // 빈 상태 확인
+    await expect(page.getByTestId('proxy-test-path-input')).toHaveValue('');
+
+    // 빈 경로로 테스트 버튼 클릭
+    await page.getByTestId('proxy-test-submit').click();
+
+    // 클라이언트 검증 오류 메시지가 결과 영역에 표시되어야 한다
+    const result = page.getByTestId('proxy-test-result');
+    await expect(result).toBeVisible();
+    await expect(result).toContainText('경로를 입력하세요');
+
+    // API가 실제로 호출되어서는 안 된다 (서버 400 차단)
+    expect(proxyTestCalled).toBe(false);
+  });
+
+  /**
    * 이슈 #87 회귀 방지 — delta=0일 때 DeltaBadge가 ↑ 화살표 대신 중립(—) 표시
    * requestsDelta=0, cacheHitRateDelta=0, responseTimeDelta=0 시나리오에서
    * ↑ 화살표가 사라지고 — 기호가 표시되어야 한다.
