@@ -361,7 +361,7 @@ test.describe('도메인 관리 — 도메인 추가', () => {
     await expect(page.getByTestId('add-domain-dialog')).not.toBeVisible();
   });
 
-  test('원본 URL이 http/https로 시작하지 않으면 오류가 표시된다', async ({ page }) => {
+  test('오리진 URL이 http/https로 시작하지 않으면 오류가 표시된다', async ({ page }) => {
     await setupBaseMocks(page);
     await mockApi(page, 'GET', '/domains', []);
 
@@ -372,7 +372,7 @@ test.describe('도메인 관리 — 도메인 추가', () => {
     await page.getByTestId('add-domain-origin').fill('newdomain.com');
     await page.getByTestId('add-domain-submit').click();
 
-    // 원본 URL 필드 바로 아래 인라인 에러로 표시 (#16 인라인 에러 개선)
+    // 오리진 URL 필드 바로 아래 인라인 에러로 표시 (#16 인라인 에러 개선)
     await expect(page.getByTestId('add-domain-origin-error')).toBeVisible();
   });
 

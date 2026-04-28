@@ -68,10 +68,10 @@ function AddDomainDialog({ onClose }: { onClose: () => void }) {
       hasError = true;
     }
     if (!o) {
-      setOriginError('원본 URL을 입력해주세요.');
+      setOriginError('오리진 URL을 입력해주세요.');
       hasError = true;
     } else if (!o.startsWith('http://') && !o.startsWith('https://')) {
-      setOriginError('원본 URL은 http:// 또는 https://로 시작해야 합니다.');
+      setOriginError('오리진 URL은 http:// 또는 https://로 시작해야 합니다.');
       hasError = true;
     }
     if (hasError) return;
@@ -114,7 +114,7 @@ function AddDomainDialog({ onClose }: { onClose: () => void }) {
         <div className="space-y-1">
           {/* 필수 필드 라벨 — text-foreground + * 표시로 시각 위계 명확히 (이슈 #22) */}
           <label htmlFor="add-origin" className="text-sm font-medium text-foreground">
-            원본 URL <span className="text-destructive" aria-hidden="true">*</span>
+            오리진 URL <span className="text-destructive" aria-hidden="true">*</span>
           </label>
           <Input
             id="add-origin"
@@ -123,7 +123,7 @@ function AddDomainDialog({ onClose }: { onClose: () => void }) {
             placeholder="https://textbook.com"
             data-testid="add-domain-origin"
           />
-          {/* 원본 URL 필드 인라인 에러 */}
+          {/* 오리진 URL 필드 인라인 에러 — 테이블 헤더 '오리진'과 용어 통일 (이슈 #128) */}
           {originError && (
             <p className="text-xs text-destructive" data-testid="add-domain-origin-error">
               {originError}
