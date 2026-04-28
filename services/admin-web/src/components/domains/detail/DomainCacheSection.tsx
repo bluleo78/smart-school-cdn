@@ -55,7 +55,7 @@ export function DomainCacheSection({ host }: Props) {
       setPurgeDialogOpen(false);
       toast.success(`도메인 캐시 퍼지 완료 — ${result.purged_count}건 삭제`);
     } catch {
-      setPurgeDialogOpen(false);
+      // 실패 시 다이얼로그를 유지하여 사용자가 재시도할 수 있도록 한다
       toast.error('캐시 퍼지에 실패했습니다.');
     }
   }

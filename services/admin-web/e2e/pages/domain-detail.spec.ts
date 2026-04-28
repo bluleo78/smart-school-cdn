@@ -1416,6 +1416,37 @@ test.describe('도메인 상세 — 설정 탭', () => {
     resolveRoute!();
     await expect(page.getByTestId('domain-purge-dialog')).not.toBeVisible({ timeout: 3000 });
   });
+
+  /**
+   * 이슈 #136 회귀 방지 — 도메인 전체 퍼지 실패 시 확인 다이얼로그가 닫히던 버그
+   * 수정 후: API 실패 시 다이얼로그가 유지되어 사용자가 재시도할 수 있어야 한다
+   */
+  test('DomainCacheSection — 도메인 전체 퍼지 실패 시 확인 다이얼로그가 유지된다 (회귀: #136)', async ({ page }) => {
+    // 수정 전: catch 블록에서 setPurgeDialogOpen(false) 호출로 실패 시에도 다이얼로그가 닫혔음
+    // 수정 후: catch 블록에서 setPurgeDialogOpen 호출 제거 → 다이얼로그 유지 + 에러 토스트 표시
+    await setupDetailMocks(page);
+
+    // purge API를 500 에러로 모킹하여 실패 조건 재현
+    await page.route('**/api/cache/purge', (route) =>
+      route.fulfill({ status: 500, json: { error: 'Internal Server Error' } }),
+    );
+
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '설정' }).click();
+
+    // 도메인 전체 퍼지 버튼 클릭 → 확인 다이얼로그 표시
+    await page.getByTestId('domain-purge-btn').click();
+    await expect(page.getByTestId('domain-purge-dialog')).toBeVisible();
+
+    // 퍼지 실행 → API 실패
+    await page.getByTestId('domain-purge-confirm-btn').click();
+
+    // 에러 토스트가 표시되어야 한다
+    await expect(page.getByText('캐시 퍼지에 실패했습니다')).toBeVisible({ timeout: 3000 });
+
+    // 실패 후에도 다이얼로그가 열린 상태를 유지해야 한다 (재시도 가능)
+    await expect(page.getByTestId('domain-purge-dialog')).toBeVisible({ timeout: 1000 });
+  });
 });
 
 // ─── 헤더 액션 에러 처리 (#45 회귀) ──────────────────────────────
