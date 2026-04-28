@@ -48,6 +48,15 @@ export function DomainUrlOptimizationTable({ host, period = '24h' }: { host: str
   const [decision, setDecision] = useState<Decision>('all');
   const [offset, setOffset] = useState(0);
 
+  // period prop이 변경되면 offset을 첫 페이지(0)로 리셋한다.
+  // React 권장 패턴: useEffect 대신 렌더 중 prev prop 비교로 상태 조정.
+  // useEffect 내 setState는 cascading render 우려로 react-hooks/set-state-in-effect 규칙에 저촉됨 (#145).
+  const [prevPeriod, setPrevPeriod] = useState(period);
+  if (period !== prevPeriod) {
+    setPrevPeriod(period);
+    setOffset(0);
+  }
+
   const { data, isLoading } = useDomainUrlOptimization({
     host,
     period,

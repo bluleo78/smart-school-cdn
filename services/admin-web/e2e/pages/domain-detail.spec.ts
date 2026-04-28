@@ -991,6 +991,67 @@ test.describe('도메인 상세 — 통계 탭', () => {
     expect(capturedPeriods).toContain('1h');
     expect(capturedPeriods).toContain('7d');
   });
+
+  /**
+   * 이슈 #145 회귀 방지 — period prop 변경 시 DomainUrlOptimizationTable의 offset이 리셋되지 않던 버그.
+   * 수정 후: PeriodSelector 기간 변경 시 내부 offset이 0으로 리셋되어 첫 페이지 데이터를 요청해야 한다.
+   *
+   * 테스트 전략:
+   * 1. total=100 응답으로 "다음" 버튼 활성화 → 클릭해 offset=50 으로 이동
+   * 2. PeriodSelector 기간 변경 (24h → 7d)
+   * 3. 이후 url-breakdown API 요청의 offset 파라미터가 0인지 검증
+   */
+  test('URL 최적화 표 — period 변경 시 offset이 0으로 리셋된다 (회귀: #145)', async ({ page }) => {
+    await setupDetailMocks(page);
+
+    // url-breakdown: 총 100건 — offset=0 시 첫 50건, offset=50 시 두 번째 50건 시뮬레이션
+    const capturedOffsets: number[] = [];
+    await page.route('**/api/domains/textbook.com/optimization/url-breakdown*', (route) => {
+      const url = new URL(route.request().url());
+      const offset = parseInt(url.searchParams.get('offset') ?? '0', 10);
+      capturedOffsets.push(offset);
+      // 페이지와 무관하게 항목 1건 + total=100 반환 (다음 버튼 활성 유지)
+      return route.fulfill({
+        json: {
+          total: 100,
+          items: [
+            {
+              url: '/test.jpg',
+              events: 5,
+              total_orig: 1024,
+              total_out: 512,
+              savings_ratio: 0.5,
+              decisions: 'optimized',
+            },
+          ],
+        },
+      });
+    });
+
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '최적화' }).click();
+    await expect(page.getByTestId('url-optimization-table')).toBeVisible();
+
+    // 초기 offset=0 요청 확인
+    expect(capturedOffsets[capturedOffsets.length - 1]).toBe(0);
+
+    // "다음" 버튼 클릭 → offset=50으로 이동
+    await page.getByTestId('url-opt-next').click();
+    await expect(page.getByTestId('url-optimization-table')).toBeVisible();
+    expect(capturedOffsets[capturedOffsets.length - 1]).toBe(50);
+
+    // PeriodSelector에서 7d로 변경 → useEffect가 setOffset(0)을 호출한다.
+    // React 렌더 순서상 period 변경 → offset=50으로 첫 쿼리 실행 → useEffect → offset=0으로 재쿼리.
+    // 따라서 마지막 요청의 offset이 0인지 확인한다 (수정 전: offset=50 유지로 0 요청이 발생하지 않음).
+    capturedOffsets.length = 0; // 이후 요청만 추적
+    await page.getByTestId('period-7d').click();
+    // offset 리셋 후 최종 재요청이 일어날 때까지 대기 — 두 번의 렌더가 안정될 시간 확보
+    await page.waitForTimeout(500);
+    await expect(page.getByTestId('url-optimization-table')).toBeVisible();
+
+    // period 변경 후 최종 url-breakdown 요청의 offset은 0이어야 한다 (리셋 확인)
+    expect(capturedOffsets[capturedOffsets.length - 1]).toBe(0);
+  });
 });
 
 // ─────────────────────────────────────────────
