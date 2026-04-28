@@ -240,6 +240,11 @@ export function UsersPage() {
               if (!passwordTarget) return;
               // 자기 자신 변경 시 currentPassword 포함. 다른 사용자 변경 시 생략 (이슈 #31)
               const isSelf = passwordTarget.id === myId;
+              // 자기 자신 변경 시 현재 비밀번호 빈값 클라이언트 검증 — 서버 왕복 없이 인라인 에러 표시 (#159)
+              if (isSelf && !d.currentPassword) {
+                passwordForm.setError('currentPassword', { message: '현재 비밀번호를 입력해주세요.' });
+                return;
+              }
               passwordMut.mutate({
                 id: passwordTarget.id,
                 password: d.password,

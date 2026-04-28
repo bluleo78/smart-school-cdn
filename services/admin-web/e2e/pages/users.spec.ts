@@ -726,6 +726,40 @@ test.describe('사용자 관리', () => {
     await expect(dialog).not.toBeVisible();
   });
 
+  /**
+   * 이슈 #159 회귀 방지 — 자기 자신 비밀번호 변경 시 빈 currentPassword 클라이언트 검증 누락
+   * 수정 전: currentPassword 빈값으로 제출 → 서버 API 호출 → 모호한 에러 토스트
+   * 수정 후: isSelf + currentPassword 빈값 → 클라이언트 인라인 에러, 서버 호출 없음
+   */
+  test('자기 자신 비밀번호 재설정 — 현재 비밀번호 빈값 제출 시 인라인 에러 표시, API 미호출 — 회귀 방지 #159', async ({ page }) => {
+    await mockApi(page, 'GET', '/users', baseUsers);
+
+    // 서버 호출 여부 추적 — 클라이언트 검증이 올바르면 이 라우트는 호출되지 않아야 한다
+    let passwordApiCalled = false;
+    await page.route(`**/api/users/${TEST_USER.id}/password`, async (route) => {
+      passwordApiCalled = true;
+      return route.fallback();
+    });
+
+    await page.goto('/users');
+
+    // 자기 자신(TEST_USER) 행의 비밀번호 재설정 버튼 클릭
+    const myRow = page.getByTestId(`user-row-${TEST_USER.id}`);
+    await myRow.getByRole('button', { name: '비밀번호 재설정' }).click();
+
+    // 현재 비밀번호 필드를 비운 채 새 비밀번호만 입력
+    await page.fill('input#reset-password', 'newpassword1234');
+
+    // 제출 — currentPassword 빈값
+    await page.getByRole('button', { name: '재설정', exact: true }).click();
+
+    // 인라인 에러 메시지가 즉시 표시되어야 한다 (서버 왕복 없이)
+    await expect(page.getByText('현재 비밀번호를 입력해주세요.')).toBeVisible();
+
+    // 서버 API가 호출되지 않아야 한다 (클라이언트 검증에서 막혀야 함)
+    expect(passwordApiCalled).toBe(false);
+  });
+
   // 이슈 #63 회귀 방지 — 비밀번호 재설정 버튼이 제출 중 disabled 처리 안 되는 버그
   test('비밀번호 재설정 — 제출 중 재설정 버튼 disabled', async ({ page }) => {
     await mockApi(page, 'GET', '/users', baseUsers);
