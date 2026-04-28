@@ -143,7 +143,12 @@ async function setupDetailMocks(page: Page) {
   await mockApi(page, 'GET', '/proxy/requests', []);
   await mockApi(page, 'GET', '/domains/summary', createDomainSummary());
   await mockApi(page, 'GET', '/domains/textbook.com', createDomain());
-  await mockApi(page, 'GET', '/domains/textbook.com/stats', createDomainStats());
+  // stats 엔드포인트는 ?period= 쿼리 파라미터가 붙으므로 page.route()로 직접 등록한다
+  await page.route('**/api/domains/textbook.com/stats*', (route) =>
+    route.request().method() === 'GET'
+      ? route.fulfill({ json: createDomainStats() })
+      : route.fallback(),
+  );
   await mockApi(page, 'GET', '/domains/textbook.com/logs', createDomainLogs());
   await mockApi(page, 'GET', '/domains/textbook.com/summary', createDomainHostSummary());
   await mockApi(page, 'GET', '/tls/certificates', createCertificates());
@@ -485,28 +490,34 @@ test.describe('도메인 상세 — Overview 탭', () => {
   test('Overview — delta=0 통계 카드에서 ↑ 화살표 없이 중립(—) 표시가 나타난다 (#87 회귀 방지)', async ({
     page,
   }) => {
-    // delta가 모두 0인 stats mock으로 오버라이드
+    // delta가 모두 0인 stats mock으로 오버라이드 — ?period= 쿼리 파라미터 포함 URL을 위해 page.route() 직접 사용
     await setupDetailMocks(page);
-    await mockApi(page, 'GET', '/domains/textbook.com/stats', {
-      host: 'textbook.com',
-      period: '24h',
-      summary: {
-        totalRequests: 0,
-        requestsDelta: 0,
-        cacheHitRate: 0,
-        cacheHitRateDelta: 0,
-        bandwidth: 0,
-        avgResponseTime: 0,
-        responseTimeDelta: 0,
-      },
-      timeseries: {
-        labels: ['00:00'],
-        hits: [0],
-        misses: [0],
-        bandwidth: [0],
-        responseTime: [0],
-      },
-    });
+    await page.route('**/api/domains/textbook.com/stats*', (route) =>
+      route.request().method() === 'GET'
+        ? route.fulfill({
+            json: {
+              host: 'textbook.com',
+              period: '24h',
+              summary: {
+                totalRequests: 0,
+                requestsDelta: 0,
+                cacheHitRate: 0,
+                cacheHitRateDelta: 0,
+                bandwidth: 0,
+                avgResponseTime: 0,
+                responseTimeDelta: 0,
+              },
+              timeseries: {
+                labels: ['00:00'],
+                hits: [0],
+                misses: [0],
+                bandwidth: [0],
+                responseTime: [0],
+              },
+            },
+          })
+        : route.fallback(),
+    );
     await page.goto('/domains/textbook.com');
 
     // 통계 카드 렌더링 완료 대기
@@ -616,6 +627,31 @@ test.describe('도메인 상세 — Overview 탭', () => {
     await expect(modifiedRow).not.toContainText('1970');
     // 미수정 상태임을 나타내는 대시가 표시되어야 한다
     await expect(modifiedRow).toContainText('—');
+  });
+
+  /**
+   * 이슈 #147 회귀 방지 — SummaryCards에서 통계 API 에러 시 0으로만 표시되던 버그
+   * 수정 후: isError=true이면 에러 메시지(domain-stat-cards-error)가 표시되고,
+   *          0 수치 카드(domain-stat-cards)가 렌더링되지 않아야 한다.
+   */
+  test('SummaryCards — 통계 API 500 에러 시 에러 메시지가 표시된다 (회귀: #147)', async ({ page }) => {
+    // 수정 전: isError 처리 없어 data=undefined → 모두 0으로 표시, 에러 메시지 없음
+    // 수정 후: isError=true → "통계를 불러오지 못했습니다." 텍스트 노출, 0 카드 숨김
+    await setupDetailMocks(page);
+
+    // 통계 API만 500으로 덮어씌워 에러 상태를 강제한다
+    await page.route('**/api/domains/textbook.com/stats*', (route) =>
+      route.fulfill({ status: 500, json: { error: 'Internal Server Error' } }),
+    );
+
+    await page.goto('/domains/textbook.com');
+
+    // 에러 메시지가 표시되어야 한다
+    await expect(page.getByTestId('domain-stat-cards-error')).toBeVisible();
+    await expect(page.getByTestId('domain-stat-cards-error')).toContainText('통계를 불러오지 못했습니다');
+
+    // 0 수치 카드는 렌더링되지 않아야 한다 (에러를 0으로 오해 방지)
+    await expect(page.getByTestId('domain-stat-cards')).not.toBeVisible();
   });
 
 });

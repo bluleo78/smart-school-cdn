@@ -14,7 +14,18 @@ interface Props {
 
 /** 요약 카드 — 오늘 기준 4개(요청/히트율/대역폭/응답시간) */
 function SummaryCards({ host }: { host: string }) {
-  const { data, isLoading } = useDomainStats(host, '24h');
+  // isError: API 요청 실패 여부 — isError가 true이면 0 fallback 대신 에러 메시지 표시 (#147)
+  const { data, isLoading, isError } = useDomainStats(host, '24h');
+
+  // API 실패 시 0으로 오해하지 않도록 에러 상태를 명시적으로 표시한다
+  if (isError) {
+    return (
+      <p className="text-sm text-destructive" data-testid="domain-stat-cards-error">
+        통계를 불러오지 못했습니다.
+      </p>
+    );
+  }
+
   if (isLoading) {
     return (
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4">
