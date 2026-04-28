@@ -45,6 +45,9 @@ certs/
 .claude/
 .omc/
 
+# Graphify knowledge graph output
+graphify-out/
+
 # Superpowers brainstorm artifacts
 docs/superpowers/
 .superpowers/
