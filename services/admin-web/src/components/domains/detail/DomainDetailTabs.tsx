@@ -31,9 +31,10 @@ export function DomainDetailTabs({ domain }: Props) {
   const tabParam = searchParams.get('tab');
   const activeTab: TabValue = isValidTab(tabParam) ? tabParam : 'overview';
 
-  // 트래픽 탭의 조회 기간·갱신 주기 상태를 여기서 관리한다.
-  // DomainLogsTab이 비활성 탭 전환 시 언마운트되면 로컬 state가 초기화되기 때문에,
-  // 부모 컴포넌트로 끌어올려 탭 전환과 무관하게 값을 유지한다. (#133)
+  // 최적화·트래픽 탭의 조회 기간·갱신 주기 상태를 여기서 관리한다.
+  // 각 탭이 비활성 시 언마운트되면 로컬 state가 초기화되기 때문에,
+  // 부모 컴포넌트로 끌어올려 탭 전환과 무관하게 값을 유지한다. (#133, #135)
+  const [optimizerPeriod, setOptimizerPeriod] = useState<PeriodValue>({ period: '24h' });
   const [trafficPeriod, setTrafficPeriod] = useState<PeriodValue>({ period: '24h' });
   const [trafficRefresh, setTrafficRefresh] = useState<RefreshIntervalMs>(30_000);
 
@@ -54,7 +55,11 @@ export function DomainDetailTabs({ domain }: Props) {
         <DomainOverviewTab domain={domain} />
       </TabsContent>
       <TabsContent value="optimizer" className="mt-4">
-        <DomainStatsTab host={domain.host} />
+        <DomainStatsTab
+          host={domain.host}
+          period={optimizerPeriod}
+          onPeriodChange={setOptimizerPeriod}
+        />
       </TabsContent>
       <TabsContent value="traffic" className="mt-4">
         <DomainLogsTab

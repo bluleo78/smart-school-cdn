@@ -1,5 +1,4 @@
 /// 도메인 통계 탭 — 기간 토글 + 수동 새로고침. 캐시/최적화 2섹션.
-import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Info } from 'lucide-react';
 import { PeriodSelector, type PeriodValue } from './PeriodSelector';
@@ -13,6 +12,9 @@ import { DomainUrlOptimizationTable } from './DomainUrlOptimizationTable';
 
 interface Props {
   host: string;
+  /** 조회 기간 — 부모(DomainDetailTabs)에서 관리하여 탭 전환 시에도 값이 유지된다 (#135) */
+  period: PeriodValue;
+  onPeriodChange: (v: PeriodValue) => void;
 }
 
 /** PeriodValue → DomainCacheCards/DomainStackedChart 가 기대하는 '1h'|'24h' 로 축약.
@@ -27,8 +29,7 @@ function isSeriesDegraded(p: PeriodValue): boolean {
   return p.period !== '1h' && p.period !== '24h';
 }
 
-export function DomainStatsTab({ host }: Props) {
-  const [period, setPeriod] = useState<PeriodValue>({ period: '24h' });
+export function DomainStatsTab({ host, period, onPeriodChange }: Props) {
   const qc = useQueryClient();
 
   /** 수동 새로고침 — 이 도메인과 연관된 모든 쿼리 무효화 */
@@ -39,7 +40,7 @@ export function DomainStatsTab({ host }: Props) {
   return (
     <div className="space-y-6" data-testid="domain-optimization-tab">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <PeriodSelector value={period} onChange={setPeriod} />
+        <PeriodSelector value={period} onChange={onPeriodChange} />
         <ManualRefreshButton onClick={handleRefresh} />
       </div>
 
