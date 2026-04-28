@@ -44,9 +44,12 @@ export function SystemPage() {
   const { data: status, isLoading: statusLoading, error: statusError } = useProxyStatus();
   const { data: cache, isLoading: cacheLoading, error: cacheError } = useCacheStats();
   const { data: certificates, isLoading: certsLoading, error: certsError } = useCertificates();
-  const { data: systemStatus } = useSystemStatus();
+  // isLoading: 첫 요청이 완료되기 전 true — 로딩 중엔 Skeleton으로 대체해
+  // systemStatus=undefined 시 ?? true fallback으로 오표시되는 버그(#139) 방지
+  const { data: systemStatus, isLoading: systemStatusLoading } = useSystemStatus();
 
   // 하나라도 오프라인인 서비스가 있으면 장애 배너 표시
+  // systemStatus가 없는 로딩 중엔 배너를 표시하지 않는다
   const anyOffline = systemStatus
     ? !systemStatus.proxy.online || !systemStatus.storage.online || !systemStatus.tls.online || !systemStatus.dns.online || !systemStatus.optimizer.online
     : false;
@@ -69,16 +72,27 @@ export function SystemPage() {
         <p className="text-sm text-muted-foreground mt-1">서비스 상태, 인증서, 디스크 사용량을 확인합니다.</p>
       </div>
 
-      {/* 마이크로서비스 상태 그리드 */}
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
-        {(['proxy', 'storage', 'tls', 'dns', 'optimizer'] as const).map((key) => (
-          <ServiceStatusCard
-            key={key}
-            name={SERVICE_LABELS[key]}
-            online={systemStatus?.[key]?.online ?? true}
-            latency_ms={systemStatus?.[key]?.latency_ms ?? 0}
-          />
-        ))}
+      {/* 마이크로서비스 상태 그리드
+       * 로딩 중: Skeleton 카드 5개 표시 — 실제 데이터 오기 전 온라인 오표시(#139) 방지
+       * 로드 후: 실제 online/latency_ms 값 사용 (fallback ?? true 제거) */}
+      <div
+        data-testid="service-status-grid"
+        className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5"
+      >
+        {systemStatusLoading || !systemStatus ? (
+          [...Array(5)].map((_, i) => (
+            <Skeleton key={i} data-testid="service-status-skeleton" className="h-28 w-full rounded-xl" />
+          ))
+        ) : (
+          (['proxy', 'storage', 'tls', 'dns', 'optimizer'] as const).map((key) => (
+            <ServiceStatusCard
+              key={key}
+              name={SERVICE_LABELS[key]}
+              online={systemStatus[key].online}
+              latency_ms={systemStatus[key].latency_ms}
+            />
+          ))
+        )}
       </div>
 
       {/* 실시간 로그 뷰어 */}

@@ -192,6 +192,25 @@ test.describe('서비스 상태 그리드', () => {
     // 배너가 없는 경우 — 렌더링되지 않아야 함
     await expect(page.getByTestId('service-offline-banner')).not.toBeVisible();
   });
+
+  /// 회귀 방지 #139: 초기 로딩 중 모든 서비스 온라인 오표시
+  /// systemStatus=undefined 시 ?? true fallback이 적용되던 버그 — Skeleton으로 대체 후 해결됨
+  test('초기 로딩 중에는 Skeleton이 표시되고 온라인 배지가 없다 — 회귀 방지 #139', async ({ page }) => {
+    // 500ms 지연으로 로딩 중 상태를 안정적으로 포착
+    await mockApi(page, 'GET', '/system/status', allOnlineStatus, { delay: 500 });
+    await page.goto('/system');
+
+    // 응답 도착 전: Skeleton 5개가 표시되어야 한다
+    const skeletons = page.getByTestId('service-status-skeleton');
+    await expect(skeletons).toHaveCount(5);
+
+    // 응답 도착 전: 온라인/오프라인 배지가 표시되어서는 안 된다 (오표시 방지)
+    await expect(page.getByTestId('service-status-badge')).toHaveCount(0);
+
+    // 응답 도착 후: 실제 카드로 전환된다
+    await expect(page.getByTestId('service-status-card')).toHaveCount(5, { timeout: 5000 });
+    await expect(skeletons).toHaveCount(0);
+  });
 });
 
 /// LogViewer — Phase 8-3 실시간 로그 뷰어 통합 테스트
