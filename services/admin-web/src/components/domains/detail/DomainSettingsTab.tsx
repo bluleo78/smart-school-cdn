@@ -76,7 +76,17 @@ function OriginSection({ domain }: { domain: Domain }) {
     }
     updateMutation.mutate(
       { host: domain.host, body: { origin, description } },
-      { onSuccess: () => setEditing(false) },
+      {
+        onSuccess: (data) => {
+          // 서버 응답값으로 로컬 state를 명시적으로 동기화
+          // — useState 초기값은 마운트 시 1회만 평가되므로, React Query 무효화 후
+          //   prop이 갱신되어도 state가 자동 반영되지 않음.
+          //   저장 후 재편집 시 서버 정규화 값이 아닌 입력값이 표시되는 버그 방지 (#137)
+          setOrigin(data.origin);
+          setDescription(data.description);
+          setEditing(false);
+        },
+      },
     );
   }
 

@@ -1161,6 +1161,42 @@ test.describe('도메인 상세 — 설정 탭', () => {
     await expect(page.getByTestId('edit-domain-btn')).toBeVisible();
   });
 
+  /**
+   * 이슈 #137 회귀 방지 — OriginSection 저장 후 재편집 시 서버 정규화 값 대신 입력값이 표시되던 버그
+   *
+   * 수정 전: onSuccess에서 state를 동기화하지 않아, 재편집 시 사용자 입력값(대문자)이 표시됨.
+   * 수정 후: onSuccess(data)에서 서버 응답값으로 state를 갱신하므로, 재편집 시 정규화된 값이 표시되어야 한다.
+   *
+   * mock이 재현하는 조건: PUT 응답이 사용자 입력과 다른 값(서버 정규화 후 소문자)을 반환하는 상황.
+   * 이 mock이 실제 버그 조건과 동일한 이유: OriginSection의 onSuccess 콜백이 서버 응답값을
+   * state에 반영하는지 직접 검증하므로, 클라이언트-서버 정규화 불일치를 정확히 재현한다.
+   */
+  test('OriginSection — 저장 후 재편집 시 서버 정규화 값이 입력란에 표시된다 (회귀: #137)', async ({ page }) => {
+    await setupDetailMocks(page);
+    // 서버가 origin을 소문자로 정규화하여 반환하는 상황을 모킹
+    await mockApi(page, 'PUT', '/domains/textbook.com', {
+      ...createDomain(),
+      origin: 'https://normalized-origin.com',
+    });
+    await page.goto('/domains/textbook.com');
+
+    // 설정 탭으로 전환
+    await page.getByRole('tab', { name: '설정' }).click();
+    await expect(page.getByTestId('domain-settings-tab')).toBeVisible();
+
+    // 편집 모드 진입 → 대문자 origin 입력 → 저장
+    await page.getByTestId('edit-domain-btn').click();
+    await page.getByTestId('origin-input').fill('https://NORMALIZED-ORIGIN.COM');
+    await page.getByTestId('save-domain-btn').click();
+
+    // 저장 후 편집 모드 해제 확인
+    await expect(page.getByTestId('edit-domain-btn')).toBeVisible();
+
+    // 다시 편집 모드 진입 — 서버가 반환한 정규화 값이 표시되어야 한다 (사용자 입력값 아님)
+    await page.getByTestId('edit-domain-btn').click();
+    await expect(page.getByTestId('origin-input')).toHaveValue('https://normalized-origin.com');
+  });
+
   test('최적화 프로파일 편집이 동작한다', async ({ page }) => {
     await setupDetailMocks(page);
     await mockApi(page, 'PUT', '/optimizer/profiles/textbook.com', {});
