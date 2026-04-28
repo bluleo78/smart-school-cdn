@@ -38,6 +38,16 @@ export function DomainLogTable({ host, period, range, refetchIntervalMs = false 
   /** 로그 표시 건수 — 기본 50, "더 보기"로 50씩 증가 */
   const [limit, setLimit] = useState(50);
 
+  // period 또는 errorsOnly 변경 시 limit을 초기값(50)으로 리셋한다.
+  // DomainUrlOptimizationTable의 prev-prop 비교 패턴 적용 — 회귀 방지 #158
+  const [prevPeriod, setPrevPeriod] = useState(period);
+  const [prevErrorsOnly, setPrevErrorsOnly] = useState(errorsOnly);
+  if (period !== prevPeriod || errorsOnly !== prevErrorsOnly) {
+    setPrevPeriod(period);
+    setPrevErrorsOnly(errorsOnly);
+    setLimit(50);
+  }
+
   const { data, isLoading, error } = useDomainLogs(
     host,
     {

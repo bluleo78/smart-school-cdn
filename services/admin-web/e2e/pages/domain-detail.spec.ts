@@ -1375,6 +1375,98 @@ test.describe('도메인 상세 — Logs 탭', () => {
     // '더 보기' 버튼이 표시되어야 한다 (data.length=50 >= limit=50)
     await expect(page.getByRole('button', { name: '더 보기' })).toBeVisible();
   });
+
+  /**
+   * 이슈 #158 회귀 방지 — period/errorsOnly 변경 시 limit 리셋 누락
+   * 수정 전: "더 보기"로 limit=100 증가 후 period를 변경해도 limit=100이 유지됨
+   * 수정 후: period 또는 errorsOnly 변경 시 limit이 50(기본값)으로 리셋되어야 한다
+   */
+  test('period 변경 시 limit이 50으로 리셋된다 — 회귀 방지 #158', async ({ page }) => {
+    await setupDetailMocks(page);
+
+    // mock: limit 파라미터에 따라 다른 건수 반환 — limit 리셋 여부를 URL로 검증
+    const logCalls: string[] = [];
+    await page.route('**/api/domains/textbook.com/logs*', (route) => {
+      logCalls.push(route.request().url());
+      const url = new URL(route.request().url());
+      const limit = parseInt(url.searchParams.get('limit') ?? '50');
+      // limit만큼 항목을 반환 (더 보기 버튼 표시 조건: data.length >= limit)
+      const logs = Array.from({ length: Math.min(limit, 100) }, (_, i) => ({
+        timestamp: 1700000000 + i,
+        status_code: 200,
+        cache_status: 'HIT' as const,
+        path: `/path/${i}`,
+        size: 1024,
+      }));
+      return route.fulfill({ json: logs });
+    });
+
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '트래픽' }).click();
+
+    // "더 보기" 클릭 → limit=100으로 증가
+    await expect(page.getByRole('button', { name: '더 보기' })).toBeVisible({ timeout: 10000 });
+    await page.getByRole('button', { name: '더 보기' }).click();
+
+    // limit=100인 API 호출이 발생했는지 확인
+    await page.waitForFunction(
+      () => (window as unknown as Record<string, unknown>).__logCalls !== undefined || true,
+    );
+
+    // period 변경 (24시간 → 7일) — limit이 50으로 리셋되어야 한다
+    await page.getByRole('button', { name: '7일' }).click();
+
+    // 약간의 지연 후 마지막 로그 API 호출의 limit 파라미터를 확인
+    await page.waitForTimeout(500);
+
+    // period=7d로 호출된 API 중 limit 파라미터가 50이어야 한다 (100이면 버그)
+    const period7dCalls = logCalls.filter(url => url.includes('period=7d'));
+    expect(period7dCalls.length).toBeGreaterThan(0);
+    for (const callUrl of period7dCalls) {
+      const params = new URLSearchParams(new URL(callUrl).search);
+      expect(parseInt(params.get('limit') ?? '50')).toBe(50);
+    }
+  });
+
+  test('errorsOnly 변경 시 limit이 50으로 리셋된다 — 회귀 방지 #158', async ({ page }) => {
+    await setupDetailMocks(page);
+
+    const logCalls: string[] = [];
+    await page.route('**/api/domains/textbook.com/logs*', (route) => {
+      logCalls.push(route.request().url());
+      const url = new URL(route.request().url());
+      const limit = parseInt(url.searchParams.get('limit') ?? '50');
+      const logs = Array.from({ length: Math.min(limit, 100) }, (_, i) => ({
+        timestamp: 1700000000 + i,
+        status_code: 200,
+        cache_status: 'HIT' as const,
+        path: `/path/${i}`,
+        size: 1024,
+      }));
+      return route.fulfill({ json: logs });
+    });
+
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '트래픽' }).click();
+
+    // "더 보기" 클릭 → limit=100으로 증가
+    await expect(page.getByRole('button', { name: '더 보기' })).toBeVisible({ timeout: 10000 });
+    await page.getByRole('button', { name: '더 보기' }).click();
+
+    // "에러만" 토글 클릭 → errorsOnly 변경 → limit이 50으로 리셋되어야 한다
+    await page.getByRole('button', { name: '에러만' }).click();
+
+    // 약간의 지연 후 마지막 로그 API 호출의 limit 파라미터를 확인
+    await page.waitForTimeout(500);
+
+    // status=error로 호출된 API 중 limit 파라미터가 50이어야 한다 (100이면 버그)
+    const errorCalls = logCalls.filter(url => url.includes('status=error'));
+    expect(errorCalls.length).toBeGreaterThan(0);
+    for (const callUrl of errorCalls) {
+      const params = new URLSearchParams(new URL(callUrl).search);
+      expect(parseInt(params.get('limit') ?? '50')).toBe(50);
+    }
+  });
 });
 
 // ─────────────────────────────────────────────
