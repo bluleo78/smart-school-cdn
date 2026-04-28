@@ -92,4 +92,26 @@ test.describe('AppLayout', () => {
     await page.goto('/optimizer');
     await expect(page).toHaveURL('/domains');
   });
+
+  test('페이지 이동 시 메인 콘텐츠 스크롤이 상단으로 초기화된다 (#146)', async ({ page }) => {
+    // 시스템 페이지(긴 콘텐츠)에서 스크롤 후 다른 페이지로 이동하면
+    // 이전 스크롤 위치가 유지되는 버그 회귀 방지
+    await page.goto('/system');
+
+    // 메인 콘텐츠 영역을 스크롤 다운
+    const main = page.locator('main');
+    await main.evaluate((el) => {
+      el.scrollTop = 800;
+    });
+    const scrollBefore = await main.evaluate((el) => el.scrollTop);
+    expect(scrollBefore).toBeGreaterThan(0);
+
+    // React Router SPA 네비게이션으로 다른 페이지로 이동
+    await page.getByRole('link', { name: 'DNS' }).click();
+    await expect(page.getByRole('heading', { name: 'DNS' })).toBeVisible();
+
+    // 메인 콘텐츠 영역이 상단으로 초기화되어야 한다
+    const scrollAfter = await main.evaluate((el) => el.scrollTop);
+    expect(scrollAfter).toBe(0);
+  });
 });

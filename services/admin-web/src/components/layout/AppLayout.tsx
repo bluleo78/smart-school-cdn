@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router';
 import {
   LayoutDashboard,
@@ -27,11 +27,22 @@ export function AppLayout() {
   const { state } = useAuth();
   const location = useLocation();
 
+  // 메인 콘텐츠 영역 ref — 페이지 이동 시 스크롤 위치 초기화에 사용
+  // window가 아닌 <main> 요소에 overflow-auto가 적용되므로 ref로 직접 참조
+  const mainRef = useRef<HTMLElement>(null);
+
   // 모바일 사이드바 열림 상태 — 라우트 변경 시 자동 닫힘
   const [mobileOpen, setMobileOpen] = useState(false);
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- 라우트 변경에 따른 UI 상태 동기화
     setMobileOpen(false);
+  }, [location.pathname]);
+
+  // 페이지 이동 시 메인 콘텐츠 영역을 상단으로 스크롤 리셋
+  // BrowserRouter + overflow-auto <main>을 사용하기 때문에 window.scrollTo가 아닌
+  // <main> 요소의 scrollTop을 직접 초기화해야 한다 (ScrollRestoration 미사용 대안)
+  useEffect(() => {
+    mainRef.current?.scrollTo({ top: 0, behavior: 'instant' });
   }, [location.pathname]);
 
   // 페이지 이동 시 document.title 업데이트 — WCAG 2.4.2 Page Titled 준수
@@ -134,7 +145,7 @@ export function AppLayout() {
             </span>
           </header>
         )}
-        <main className="flex-1 overflow-auto bg-gradient-main">
+        <main ref={mainRef} className="flex-1 overflow-auto bg-gradient-main">
           <div className="p-4 md:p-6">
             <Outlet />
           </div>
