@@ -728,6 +728,44 @@ test.describe('도메인 상세 — 통계 탭', () => {
     await expect(page.getByTestId('period-custom')).toHaveAttribute('aria-pressed', 'true');
   });
 
+  test('커스텀 기간 날짜 지우면 NaN이 API로 전달되지 않는다 (회귀: #141)', async ({ page }) => {
+    // 수정 전: 날짜 입력란을 비우면 applyCustom("")이 호출되어 NaN이 from/to 파라미터로 전달됨
+    // 수정 후: 빈 문자열 또는 NaN 반환 시 early return — onChange가 호출되지 않아야 한다
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '최적화' }).click();
+
+    // 커스텀 버튼 클릭 → 날짜 입력 표시
+    await page.getByTestId('period-custom').click();
+    await expect(page.getByTestId('period-custom-from')).toBeVisible();
+
+    // 유효한 날짜를 먼저 입력하여 커스텀 기간이 적용되도록 함
+    await page.getByTestId('period-custom-from').fill('2026-04-01');
+    await page.getByTestId('period-custom-to').fill('2026-04-10');
+    await expect(page.getByTestId('period-custom')).toHaveAttribute('aria-pressed', 'true');
+
+    // NaN이 포함된 API 요청이 발생하면 캡처하기 위해 네트워크 요청 감시
+    const nanRequests: string[] = [];
+    page.on('request', (req) => {
+      if (req.url().includes('NaN')) {
+        nanRequests.push(req.url());
+      }
+    });
+
+    // 시작일 입력란을 비운다 — NaN이 API로 전달되면 안 됨
+    await page.getByTestId('period-custom-from').fill('');
+    // React onChange 처리 + 잠재적 API 호출 대기
+    await page.waitForTimeout(300);
+
+    // NaN 파라미터가 포함된 API 요청이 발생하지 않아야 한다
+    expect(nanRequests).toHaveLength(0);
+
+    // 종료일도 지워본다
+    await page.getByTestId('period-custom-to').fill('');
+    await page.waitForTimeout(300);
+    expect(nanRequests).toHaveLength(0);
+  });
+
   test('Stats 탭 수동 새로고침 버튼이 존재', async ({ page }) => {
     await setupDetailMocks(page);
     await page.goto('/domains/textbook.com');

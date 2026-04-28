@@ -53,8 +53,12 @@ export function PeriodSelector({ value, onChange }: Props) {
   }
 
   function applyCustom(fromStr: string, toStr: string) {
+    // 빈 문자열 입력 시 조용히 무시 — NaN이 API 파라미터로 전달되는 것을 방지 (#141)
+    if (!fromStr || !toStr) return;
     const from = dateStrToEpoch(fromStr, false);
     const to = dateStrToEpoch(toStr, true);
+    // NaN/Infinity 방어 — dateStrToEpoch가 파싱 실패 시 NaN을 반환할 수 있음
+    if (!isFinite(from) || !isFinite(to)) return;
     if (to <= from) {
       // 역방향 범위: 시각적 에러 표시 후 onChange 호출 없이 종료
       setCustomError('종료일은 시작일 이후여야 합니다.');
