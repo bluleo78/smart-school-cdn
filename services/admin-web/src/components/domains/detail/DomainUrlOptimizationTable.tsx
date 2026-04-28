@@ -62,7 +62,8 @@ export function DomainUrlOptimizationTable({ host, period = '24h' }: { host: str
     <Card data-testid="url-optimization-table">
       <CardHeader>
         <CardTitle className="text-base font-semibold">URL별 최적화 내역</CardTitle>
-        <p className="text-sm text-muted-foreground">선택 기간 내 optimization_events 기반 집계</p>
+        {/* 사용자 친화적 문구 — 내부 DB 테이블명 대신 의미 전달 (#120) */}
+        <p className="text-sm text-muted-foreground">선택 기간의 이미지 최적화 이벤트를 URL별로 집계합니다</p>
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">
