@@ -11,6 +11,8 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../auth/use-auth';
 import { UserNav } from './UserNav';
+// 전역 TooltipProvider — Radix Tooltip이 동작하려면 트리 최상위에 한 번만 있어야 한다
+import { TooltipProvider } from '../ui/tooltip';
 
 /** 사이드바 네비게이션 항목 — 대시보드/도메인/DNS/사용자/시스템 */
 const navItems = [
@@ -52,6 +54,8 @@ export function AppLayout() {
   }, [currentPageLabel, isDomainDetail]);
 
   return (
+    // TooltipProvider로 전체 레이아웃을 감싸 — 하위 어떤 컴포넌트에서도 Tooltip 사용 가능
+    <TooltipProvider>
     <div className="flex h-screen bg-background text-foreground">
       {/* 모바일 백드롭 — 사이드바 열렸을 때만 */}
       {mobileOpen && (
@@ -137,5 +141,6 @@ export function AppLayout() {
         </main>
       </div>
     </div>
+    </TooltipProvider>
   );
 }

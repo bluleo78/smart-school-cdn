@@ -13,6 +13,8 @@ import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Skeleton } from '../ui/skeleton';
 import { TlsStatusBadge } from '../TlsStatusBadge';
+// 아이콘 전용 버튼에 shadcn Tooltip 적용 — native title 대비 다크모드 대응·즉시 표시 등 UX 개선
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import type { Domain } from '../../api/domain-types';
 
 interface DomainTableProps {
@@ -273,43 +275,61 @@ export function DomainTable({
                 <TlsStatusBadge expiresAt={tlsExpiryByHost?.get(domain.host) ?? null} />
               </TableCell>
 
-              {/* 액션 버튼 */}
+              {/* 액션 버튼 — shadcn Tooltip으로 감싸 다크모드 대응·즉시 표시 UX 확보 */}
               <TableCell className="text-right">
                 <div className="flex items-center justify-end gap-1">
                   {/* 캐시 퍼지 — isPurgePending 중에는 disabled 처리하여 중복 클릭 방지 */}
-                  <button
-                    onClick={() => onPurge(domain.host)}
-                    disabled={isPurgePending}
-                    className="rounded p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    title="캐시 퍼지"
-                    data-testid={`domain-purge-${domain.host}`}
-                    aria-label={`${domain.host} 캐시 퍼지`}
-                  >
-                    <RefreshCw size={14} />
-                  </button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={() => onPurge(domain.host)}
+                        disabled={isPurgePending}
+                        data-testid={`domain-purge-${domain.host}`}
+                        aria-label={`${domain.host} 캐시 퍼지`}
+                      >
+                        <RefreshCw size={14} />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>캐시 퍼지</TooltipContent>
+                  </Tooltip>
 
                   {/* 활성/비활성 토글 — isTogglePending 중에는 disabled 처리하여 중복 클릭 방지 */}
-                  <button
-                    onClick={() => onToggle(domain.host)}
-                    disabled={isTogglePending}
-                    className="rounded p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    title={isEnabled ? '비활성화' : '활성화'}
-                    data-testid={`domain-toggle-${domain.host}`}
-                    aria-label={`${domain.host} ${isEnabled ? '비활성화' : '활성화'}`}
-                  >
-                    {isEnabled ? <ToggleRight size={14} /> : <ToggleLeft size={14} />}
-                  </button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={() => onToggle(domain.host)}
+                        disabled={isTogglePending}
+                        data-testid={`domain-toggle-${domain.host}`}
+                        aria-label={`${domain.host} ${isEnabled ? '비활성화' : '활성화'}`}
+                      >
+                        {isEnabled ? <ToggleRight size={14} /> : <ToggleLeft size={14} />}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{isEnabled ? '비활성화' : '활성화'}</TooltipContent>
+                  </Tooltip>
 
-                  {/* 삭제 */}
-                  <button
-                    onClick={() => onDelete(domain.host)}
-                    className="rounded p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-                    title="삭제"
-                    data-testid={`domain-delete-${domain.host}`}
-                    aria-label={`${domain.host} 삭제`}
-                  >
-                    <Trash2 size={14} />
-                  </button>
+                  {/* 삭제 — hover:text-destructive 유지 */}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 hover:text-destructive hover:bg-destructive/10"
+                        onClick={() => onDelete(domain.host)}
+                        data-testid={`domain-delete-${domain.host}`}
+                        aria-label={`${domain.host} 삭제`}
+                      >
+                        <Trash2 size={14} />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>삭제</TooltipContent>
+                  </Tooltip>
                 </div>
               </TableCell>
             </TableRow>
