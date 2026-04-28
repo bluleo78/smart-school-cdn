@@ -1185,6 +1185,58 @@ test.describe('도메인 상세 — Logs 탭', () => {
     await expect(page.getByTestId('domain-top-urls')).not.toContainText('데이터 없음');
   });
 
+  test('최적화 통계 API 실패 시 에러 메시지가 표시된다 (회귀: #153)', async ({ page }) => {
+    // 버그: isLoading·isError 미사용으로 API 실패 시 0 B / 0 B / 0%로 표시됨
+    // 수정 후: isError=true → "최적화 통계를 불러올 수 없습니다" 표시
+    await setupDetailMocks(page);
+    // 최적화 통계 엔드포인트만 500으로 오버라이드
+    await page.route('**/api/stats/optimization*', (route) =>
+      route.fulfill({ status: 500, json: { error: 'Internal Server Error' } }),
+    );
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '최적화' }).click();
+
+    // 에러 메시지가 표시되어야 한다
+    const statsEl = page.getByTestId('domain-optimization-stats');
+    await expect(statsEl).toBeVisible();
+    await expect(statsEl).toContainText('최적화 통계를 불러올 수 없습니다');
+  });
+
+  test('텍스트 압축 통계 API 실패 시 에러 메시지가 표시된다 (회귀: #153)', async ({ page }) => {
+    // 버그: isError 미사용으로 API 실패 시 빈 상태("아직 데이터가 없습니다")로 표시됨
+    // 수정 후: isError=true → "텍스트 압축 통계를 불러올 수 없습니다" 표시
+    await setupDetailMocks(page);
+    // 텍스트 압축 통계 엔드포인트만 500으로 오버라이드
+    await page.route('**/api/optimization/stats*', (route) =>
+      route.fulfill({ status: 500, json: { error: 'Internal Server Error' } }),
+    );
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '최적화' }).click();
+
+    // 에러 메시지가 표시되어야 한다 (빈 상태가 아닌 에러 상태)
+    const statsCard = page.getByTestId('text-compress-stats');
+    await expect(statsCard).toBeVisible();
+    await expect(statsCard).toContainText('텍스트 압축 통계를 불러올 수 없습니다');
+    await expect(statsCard).not.toContainText('아직 데이터가 없습니다');
+  });
+
+  test('요청 추이 차트 API 실패 시 에러 메시지가 표시된다 (회귀: #153)', async ({ page }) => {
+    // 버그: isError 미사용으로 API 실패 시 스켈레톤이 무한 유지됨
+    // 수정 후: isError=true → "요청 추이를 불러올 수 없습니다" 표시
+    await setupDetailMocks(page);
+    // 도메인 stats 엔드포인트만 500으로 오버라이드
+    await page.route('**/api/domains/textbook.com/stats*', (route) =>
+      route.fulfill({ status: 500, json: { error: 'Internal Server Error' } }),
+    );
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '트래픽' }).click();
+
+    // 에러 메시지가 표시되어야 한다 (스켈레톤이 아닌 에러 텍스트)
+    const chartSection = page.getByTestId('traffic-charts-section');
+    await expect(chartSection).toBeVisible();
+    await expect(chartSection).toContainText('요청 추이를 불러올 수 없습니다');
+  });
+
   test('Logs 탭에 트래픽 차트 섹션(요청 추이)이 렌더링된다 (Phase 16-3)', async ({ page }) => {
     await setupDetailMocks(page);
     await page.goto('/domains/textbook.com');

@@ -82,12 +82,18 @@ function DomainTrafficChartsSection({
   period: PeriodValue;
   range?: { from: number; to: number };
 }) {
-  const { data, isLoading } = useDomainStats(host, period.period, range);
+  // isError를 함께 destructure하여 API 실패 시 에러 상태를 명시적으로 처리한다 (#153)
+  const { data, isLoading, isError } = useDomainStats(host, period.period, range);
   return (
     <Card data-testid="traffic-charts-section">
       <CardHeader><CardTitle className="text-base font-semibold">요청 추이</CardTitle></CardHeader>
       <CardContent>
-        {isLoading || !data ? (
+        {isLoading ? (
+          <Skeleton className="h-64 w-full" />
+        ) : isError ? (
+          // API 호출 실패 시 에러 메시지 표시 — DomainTopUrlsCard (#148) 패턴 동일 적용
+          <p className="text-sm text-destructive">요청 추이를 불러올 수 없습니다</p>
+        ) : !data ? (
           <Skeleton className="h-64 w-full" />
         ) : (
           // 모바일(기본) 1열, 데스크톱(md 이상) 2열 — Tailwind mobile-first 순서 수정 (#85)

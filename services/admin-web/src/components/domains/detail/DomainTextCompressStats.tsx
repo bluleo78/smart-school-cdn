@@ -27,7 +27,8 @@ interface Props {
 }
 
 export function DomainTextCompressStats({ host, period = '30d' }: Props) {
-  const { data, isLoading } = useQuery<StatsResponse>({
+  // isError를 함께 destructure하여 API 실패 시 에러 상태를 명시적으로 처리한다 (#153)
+  const { data, isLoading, isError } = useQuery<StatsResponse>({
     // period를 queryKey에 포함시켜 기간 변경 시 자동 재조회
     queryKey: ['domain', host, 'text-compress-stats', period],
     queryFn: async () => {
@@ -44,6 +45,17 @@ export function DomainTextCompressStats({ host, period = '30d' }: Props) {
       <Card>
         <CardContent className="py-6">
           <Skeleton className="h-20 w-full" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // API 호출 실패 시 에러 메시지 표시 — DomainTopUrlsCard (#148) 패턴 동일 적용
+  if (isError) {
+    return (
+      <Card data-testid="text-compress-stats">
+        <CardContent className="py-4">
+          <p className="text-sm text-destructive">텍스트 압축 통계를 불러올 수 없습니다</p>
         </CardContent>
       </Card>
     );
