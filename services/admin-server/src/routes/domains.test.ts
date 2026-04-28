@@ -414,6 +414,25 @@ describe('PUT /api/domains/:host', () => {
     });
     expect(res.statusCode).toBe(404);
   });
+
+  it('syncToProxy 실패 시 502를 반환하고 DB를 원래 값으로 롤백한다 (#151)', async () => {
+    // Proxy 동기화 실패 시 DB 변경이 원복되어 toggle과 동일한 일관성을 보장한다
+    const axiosMod = await import('axios');
+    vi.mocked(axiosMod.default.post).mockRejectedValueOnce(new Error('Network error'));
+
+    const repo = makeRepo();
+    repo.upsert('httpbin.org', 'https://httpbin.org');
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/domains/httpbin.org',
+      payload: { origin: 'https://new-origin.com' },
+    });
+
+    expect(res.statusCode).toBe(502);
+    // DB가 원래 origin으로 롤백되었는지 확인
+    expect(repo.findByHost('httpbin.org')?.origin).toBe('https://httpbin.org');
+  });
 });
 
 describe('DELETE /api/domains/:host', () => {
@@ -441,6 +460,26 @@ describe('DELETE /api/domains/:host', () => {
     const res = await app.inject({ method: 'DELETE', url: '/api/domains/%2A.textbook.com' });
     expect(res.statusCode).toBe(204);
     expect(repo.findByHost('*.textbook.com')).toBeUndefined();
+  });
+
+  it('syncToProxy 실패 시 502를 반환하고 삭제된 도메인을 DB에 복원한다 (#151)', async () => {
+    // Proxy 동기화 실패 시 DB에서 삭제한 도메인을 원복하여 toggle·PUT과 동일한 일관성을 보장한다
+    const axiosMod = await import('axios');
+    vi.mocked(axiosMod.default.post).mockRejectedValueOnce(new Error('Network error'));
+
+    const repo = makeRepo();
+    repo.upsert('httpbin.org', 'https://httpbin.org');
+    // 비활성 상태로 변경하여 enabled 복원도 검증한다
+    repo.update('httpbin.org', { enabled: 0 });
+    const app = buildApp(repo);
+    const res = await app.inject({ method: 'DELETE', url: '/api/domains/httpbin.org' });
+
+    expect(res.statusCode).toBe(502);
+    // DB에 도메인이 복원되었는지 확인
+    const restored = repo.findByHost('httpbin.org');
+    expect(restored).toBeDefined();
+    expect(restored?.origin).toBe('https://httpbin.org');
+    expect(restored?.enabled).toBe(0);
   });
 });
 

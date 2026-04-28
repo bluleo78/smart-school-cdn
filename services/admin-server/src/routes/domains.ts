@@ -27,6 +27,15 @@ interface ProxyLogFilters {
   offset: number;
 }
 
+/**
+ * LIKE 패턴에서 SQL 와일드카드 문자를 이스케이프한다.
+ * `%`, `_`, `\` 를 `\` 로 이스케이프하여 리터럴 문자열 검색이 되도록 한다.
+ * SQL 쿼리에서는 반드시 `ESCAPE '\'` 절과 함께 사용해야 한다.
+ */
+function escapeLike(s: string): string {
+  return s.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+}
+
 interface DomainLogRow {
   timestamp: number;    // unix seconds — 기존 access_logs 스키마와 동일 형태
   status_code: number;
@@ -333,12 +342,23 @@ export async function domainRoutes(
     if (origin !== undefined && !origin.startsWith('http://') && !origin.startsWith('https://')) {
       return reply.status(400).send({ error: 'origin은 http:// 또는 https://로 시작해야 합니다.' });
     }
+    // 롤백을 위해 수정 전 원본 값을 먼저 저장한다
+    const original = domainRepo.findByHost(host);
+    if (!original) {
+      return reply.status(404).send({ error: '도메인을 찾을 수 없습니다.' });
+    }
     const updated = domainRepo.update(host, { origin, enabled, description });
     if (!updated) {
       return reply.status(404).send({ error: '도메인을 찾을 수 없습니다.' });
     }
     const synced = await syncToProxy(domainRepo);
     if (!synced) {
+      // Proxy 동기화 실패 시 DB를 원래 값으로 롤백 — toggle과 동일한 일관성 보장 (#151)
+      domainRepo.update(host, {
+        origin: original.origin,
+        enabled: original.enabled,
+        description: original.description,
+      });
       return reply.status(502).send({ error: 'Proxy 동기화 실패' });
     }
     await fanOutGrpc(app, domainRepo);
@@ -581,10 +601,10 @@ export async function domainRoutes(
         params.push(cache.toUpperCase());
       }
 
-      // q: path 부분 문자열 검색 (LIKE)
+      // q: path 부분 문자열 검색 (LIKE) — 특수문자 이스케이프로 리터럴 검색 보장
       if (q) {
-        conditions.push('path LIKE ?');
-        params.push(`%${q}%`);
+        conditions.push(`path LIKE ? ESCAPE '\\'`);
+        params.push(`%${escapeLike(q)}%`);
       }
 
       const where = `WHERE ${conditions.join(' AND ')}`;
@@ -701,12 +721,21 @@ export async function domainRoutes(
   app.delete<{ Params: { host: string } }>('/api/domains/:host', async (request, reply) => {
     // URL 인코딩된 호스트 디코딩 (*.textbook.com → %2A.textbook.com으로 전달됨)
     const host = decodeURIComponent(request.params.host);
+    // 롤백을 위해 삭제 전 원본 값을 먼저 저장한다
+    const original = domainRepo.findByHost(host);
+    if (!original) {
+      return reply.status(404).send({ error: '도메인을 찾을 수 없습니다.' });
+    }
     const deleted = domainRepo.delete(host);
     if (deleted === 0) {
       return reply.status(404).send({ error: '도메인을 찾을 수 없습니다.' });
     }
     const synced = await syncToProxy(domainRepo);
     if (!synced) {
+      // Proxy 동기화 실패 시 DB에 도메인을 복원 — toggle·PUT과 동일한 일관성 보장 (#151)
+      // upsert로 host/origin/description 복원 후 enabled 상태도 원복한다
+      domainRepo.upsert(original.host, original.origin, original.description);
+      domainRepo.update(original.host, { enabled: original.enabled });
       return reply.status(502).send({ error: 'Proxy 동기화 실패' });
     }
     // gRPC fan-out: tls-service + dns-service 도메인 동기화
