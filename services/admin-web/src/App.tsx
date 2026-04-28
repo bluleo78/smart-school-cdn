@@ -2,6 +2,7 @@ import { Routes, Route, Navigate, Link } from 'react-router';
 import { Toaster } from 'sonner';
 import { AppLayout } from './components/layout/AppLayout';
 import { RequireAuth } from './components/auth/RequireAuth';
+import { RequireSetup } from './components/auth/RequireSetup';
 import { LoginPage } from './pages/LoginPage';
 import { SetupPage } from './pages/SetupPage';
 import { DashboardPage } from './pages/DashboardPage';
@@ -46,7 +47,10 @@ export function App() {
     <>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
-        <Route path="/setup" element={<SetupPage />} />
+        {/* RequireSetup 가드 — 이미 설정 완료 상태에서 /setup 직접 접근 시 리다이렉트 (#131) */}
+        <Route element={<RequireSetup />}>
+          <Route path="/setup" element={<SetupPage />} />
+        </Route>
 
         <Route element={<RequireAuth />}>
           <Route element={<AppLayout />}>

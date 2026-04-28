@@ -52,6 +52,21 @@ export async function installAuthDefaults(page: Page) {
   });
 }
 
+/**
+ * needs_setup 상태로 강제 — /setup 접근 시 폼이 렌더링되어야 한다.
+ * RequireSetup 가드 통과 테스트 및 SetupPage 기능 검증에 사용한다.
+ */
+export async function mockNeedsSetup(page: Page) {
+  await page.route('**/api/auth/state', async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback();
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ state: 'needs_setup' }),
+    });
+  });
+}
+
 /** 비로그인 상태로 강제 — 보호 라우트 접근 시 /login 리다이렉트가 일어나야 한다. */
 export async function mockUnauthenticated(page: Page) {
   await page.route('**/api/auth/state', async (route) => {
