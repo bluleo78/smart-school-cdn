@@ -1,0 +1,12 @@
+target
+node_modules
+services/*/node_modules
+logs
+test-results
+graphify-out
+.playwright-cli
+coverage
+playwright-report
+.turbo
+.vite
+monocart-report

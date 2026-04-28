@@ -35,7 +35,7 @@ error() { echo -e "${RED}[error]${NC} $1"; exit 1; }
 
 # --- 사전 검사 ---
 
-docker info &>/dev/null || error "Docker가 실행 중이지 않습니다."
+docker ps &>/dev/null || error "Docker가 실행 중이지 않습니다."
 [ -d "$PROD_DIR" ] || error "운영 디렉터리가 없습니다: $PROD_DIR"
 
 # --- buildx 멀티플랫폼 빌더 확인 ---

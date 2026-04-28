@@ -1,5 +1,6 @@
 # === Stage 1: Build ===
-FROM node:22-alpine AS build
+# 빌드 스테이지는 호스트 네이티브 플랫폼(arm64)으로 실행 — QEMU 에뮬레이션 없이 빠른 빌드
+FROM --platform=$BUILDPLATFORM node:22-alpine AS build
 RUN corepack enable && corepack prepare pnpm@10 --activate
 WORKDIR /app
 # pnpm workspace 루트 파일 복사 (lockfile은 루트에 위치)
