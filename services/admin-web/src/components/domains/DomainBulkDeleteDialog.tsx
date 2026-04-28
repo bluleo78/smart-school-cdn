@@ -28,11 +28,12 @@ export function DomainBulkDeleteDialog({
     }
   }
 
-  const handleClose = () => onOpenChange(false);
+  /** 삭제 진행 중에는 닫기 요청(ESC/백드롭/X/취소)을 모두 무시한다 (#163) */
+  const handleClose = () => { if (!bulkDelete.isPending) onOpenChange(false); };
 
   return (
     <AlertDialog open={open} onClose={handleClose}>
-      <AlertDialogContent className="max-w-sm" data-testid="bulk-delete-dialog">
+      <AlertDialogContent className="max-w-sm" data-testid="bulk-delete-dialog" disableClose={bulkDelete.isPending}>
         <AlertDialogTitle>도메인 일괄 삭제</AlertDialogTitle>
         <p className="text-sm text-muted-foreground">
           <span className="font-medium">{hosts.length}개</span> 도메인을 삭제하시겠습니까?
@@ -49,7 +50,7 @@ export function DomainBulkDeleteDialog({
           </ul>
         )}
         <div className="flex justify-end gap-2 pt-1">
-          <Button variant="outline" onClick={handleClose}>
+          <Button variant="outline" onClick={handleClose} disabled={bulkDelete.isPending}>
             취소
           </Button>
           <Button

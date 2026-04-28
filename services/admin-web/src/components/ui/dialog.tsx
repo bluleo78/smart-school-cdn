@@ -82,8 +82,10 @@ export function Dialog({ open, onClose, children }: DialogProps) {
  * native autoFocus는 Radix FocusScope의 React useEffect보다 먼저 실행되어
  * BODY 복귀를 일으킨다. 대신 data-autofocus 또는 첫 번째 input을 수동 포커스할 것.
  */
-export function DialogContent({ className, onCloseAutoFocus: externalOnCloseAutoFocus, children, ...props }: HTMLAttributes<HTMLDivElement> & {
+export function DialogContent({ className, onCloseAutoFocus: externalOnCloseAutoFocus, disableClose, children, ...props }: HTMLAttributes<HTMLDivElement> & {
   onCloseAutoFocus?: (e: Event) => void;
+  /** true이면 X 닫기 버튼을 disabled 처리한다 — 삭제 진행 중 닫기 방지용 (#163) */
+  disableClose?: boolean;
 }) {
   // 다이얼로그 마운트 시 포커스 복귀 대상을 캡처한다
   const previousFocusRef = useRef<HTMLElement | null>(null);
@@ -112,8 +114,9 @@ export function DialogContent({ className, onCloseAutoFocus: externalOnCloseAuto
       {/* X 닫기 버튼 — 모달 우상단 표준 UX 진입점. DialogPrimitive.Close가 Radix의
           onOpenChange(false)를 트리거하므로 별도 onClick 핸들러 불필요 (#127) */}
       <DialogPrimitive.Close
-        className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none"
+        className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-30"
         aria-label="닫기"
+        disabled={disableClose}
       >
         <X size={16} />
         <span className="sr-only">닫기</span>
