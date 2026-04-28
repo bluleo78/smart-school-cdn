@@ -57,8 +57,9 @@ export function DomainOptimizerSection({ host }: Props) {
           <div className="space-y-3">
             {/* quality */}
             <div className="space-y-1">
-              <Label htmlFor="optimizer-quality" className="text-xs text-muted-foreground">
-                품질 (1–100)
+              {/* Label에는 필드 이름만 — 제약 설명은 별도 <p>로 분리 (shadcn/ui 디자인 시스템 원칙) */}
+              <Label htmlFor="optimizer-quality" className="text-xs">
+                품질
               </Label>
               <Input
                 id="optimizer-quality"
@@ -70,12 +71,14 @@ export function DomainOptimizerSection({ host }: Props) {
                 className="h-8 text-sm"
                 data-testid="optimizer-quality-input"
               />
+              <p className="text-xs text-muted-foreground">1–100 사이의 정수</p>
             </div>
 
             {/* max_width */}
             <div className="space-y-1">
-              <Label htmlFor="optimizer-max-width" className="text-xs text-muted-foreground">
-                최대 너비 px (0 = 무제한)
+              {/* Label에는 필드 이름만 — 제약 설명은 별도 <p>로 분리 (shadcn/ui 디자인 시스템 원칙) */}
+              <Label htmlFor="optimizer-max-width" className="text-xs">
+                최대 너비
               </Label>
               <Input
                 id="optimizer-max-width"
@@ -86,6 +89,7 @@ export function DomainOptimizerSection({ host }: Props) {
                 className="h-8 text-sm"
                 data-testid="optimizer-max-width-input"
               />
+              <p className="text-xs text-muted-foreground">px 단위, 0 입력 시 너비 제한 없음</p>
             </div>
 
             {/* enabled Switch */}

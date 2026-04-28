@@ -1618,4 +1618,30 @@ test.describe('도메인 상세 — 설정 탭 TLS 수동 갱신 (#102)', () => 
     // 성공 토스트가 표시되어야 한다
     await expect(page.getByText('TLS 인증서가 갱신되었습니다.')).toBeVisible();
   });
+
+  test('최적화 프로파일 레이블이 필드 이름만 담고 제약 설명이 별도 <p>로 분리된다 (회귀: #122)', async ({ page }) => {
+    // 수정 전: <Label>이 "품질 (1–100)" / "최대 너비 px (0 = 무제한)" 처럼 힌트를 포함해
+    //          시각 위계가 깨지고 스크린리더가 불필요하게 긴 텍스트를 읽음
+    // 수정 후: Label은 필드 이름만("품질" / "최대 너비"), 제약 설명은 별도 <p>로 분리
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com?tab=settings');
+    await expect(page.getByTestId('domain-settings-tab')).toBeVisible();
+
+    // quality 필드: Label 접근성 이름이 "품질"만이어야 한다 (힌트 포함 금지)
+    const qualityLabel = page.locator('label[for="optimizer-quality"]');
+    await expect(qualityLabel).toHaveText('품질');
+    await expect(qualityLabel).not.toContainText('1–100');
+
+    // 힌트가 별도 <p>로 존재해야 한다
+    await expect(page.getByText('1–100 사이의 정수')).toBeVisible();
+
+    // max_width 필드: Label 접근성 이름이 "최대 너비"만이어야 한다
+    const maxWidthLabel = page.locator('label[for="optimizer-max-width"]');
+    await expect(maxWidthLabel).toHaveText('최대 너비');
+    await expect(maxWidthLabel).not.toContainText('px');
+    await expect(maxWidthLabel).not.toContainText('무제한');
+
+    // 힌트가 별도 <p>로 존재해야 한다
+    await expect(page.getByText('px 단위, 0 입력 시 너비 제한 없음')).toBeVisible();
+  });
 });
