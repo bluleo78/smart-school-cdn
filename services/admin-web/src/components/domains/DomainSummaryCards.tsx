@@ -54,8 +54,9 @@ export function DomainSummaryCards() {
       <Card data-testid="summary-card-requests">
         <CardHeader><CardTitle>오늘 요청</CardTitle></CardHeader>
         <CardContent>
-          <div className="flex items-end justify-between">
-            <div>
+          {/* overflow-hidden: BarSparkline(24바 × 5px)이 카드 경계를 초과하지 않도록 클리핑 (#129) */}
+          <div className="flex items-end justify-between overflow-hidden">
+            <div className="min-w-0">
               <p className="text-3xl font-bold">{(data?.todayRequests ?? 0).toLocaleString()}</p>
               <DeltaBadge delta={data?.todayRequestsDelta ?? 0} unit="%" />
             </div>
@@ -68,8 +69,9 @@ export function DomainSummaryCards() {
       <Card data-testid="summary-card-cache-hit">
         <CardHeader><CardTitle>캐시 히트율</CardTitle></CardHeader>
         <CardContent>
-          <div className="flex items-end justify-between">
-            <div>
+          {/* overflow-hidden: BarSparkline(24바 × 5px)이 카드 경계를 초과하지 않도록 클리핑 (#129) */}
+          <div className="flex items-end justify-between overflow-hidden">
+            <div className="min-w-0">
               <p className="text-3xl font-bold">{((data?.cacheHitRate ?? 0) * 100).toFixed(1)}%</p>
               <DeltaBadge delta={data?.cacheHitRateDelta ?? 0} unit="%" />
             </div>
@@ -82,10 +84,11 @@ export function DomainSummaryCards() {
       <Card data-testid="summary-card-bandwidth">
         <CardHeader><CardTitle>오늘 대역폭</CardTitle></CardHeader>
         <CardContent>
-          <div className="flex items-end justify-between">
+          {/* overflow-hidden: BarSparkline(24바 × 5px)이 카드 경계를 초과하지 않도록 클리핑 (#129) */}
+          <div className="flex items-end justify-between overflow-hidden">
             {/* whitespace-nowrap: "0 B" / "1.2 MB" 등이 공백 기준으로 줄바꿈되지 않도록 */}
             {/* API 응답에 절감량(todaySaved) 필드가 없으므로 수치 없는 라벨 단독 노출 방지 (#125) */}
-            <div>
+            <div className="min-w-0">
               <p className="text-3xl font-bold whitespace-nowrap">{formatBytes(data?.todayBandwidth ?? 0)}</p>
             </div>
             <BarSparkline values={data?.hourlyBandwidth ?? Array(24).fill(0)} />
