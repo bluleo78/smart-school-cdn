@@ -18,7 +18,8 @@ interface Props {
 
 /** 지정 범위의 series 버킷을 합산해 L1/엣지/Bypass 비율 카드 3개를 표시 */
 export function DomainCacheCards({ host, range }: Props) {
-  const { data: buckets, isLoading } = useCacheSeries(range, host);
+  // isError를 함께 destructure하여 API 실패 시 에러 상태를 명시적으로 처리한다 (#154)
+  const { data: buckets, isLoading, isError } = useCacheSeries(range, host);
 
   /** 버킷 합산 후 비율 산출 — 분모는 l1+l2+miss+bypass */
   const rates = useMemo(() => {
@@ -47,6 +48,11 @@ export function DomainCacheCards({ host, range }: Props) {
         ))}
       </div>
     );
+  }
+
+  // API 호출 실패 시 — 0% 오표시 대신 에러 메시지 표시 (#153 패턴 동일 적용)
+  if (isError) {
+    return <p className="text-sm text-destructive">캐시 통계를 불러올 수 없습니다</p>;
   }
 
   return (

@@ -23,7 +23,8 @@ interface Props {
 
 /** 도메인별 캐시 결과 분포를 스택 영역 차트로 표시 */
 export function DomainStackedChart({ host, range }: Props) {
-  const { data: buckets, isLoading } = useCacheSeries(range, host);
+  // isError를 함께 destructure하여 API 실패 시 에러 상태를 명시적으로 처리한다 (#154)
+  const { data: buckets, isLoading, isError } = useCacheSeries(range, host);
 
   /** API 응답을 차트 데이터 형태로 변환 */
   const data = useMemo(
@@ -42,6 +43,9 @@ export function DomainStackedChart({ host, range }: Props) {
     <div className="h-64" data-testid="domain-overview-stacked-chart">
       {isLoading ? (
         <Skeleton className="h-full w-full" />
+      ) : isError ? (
+        // API 호출 실패 시 — "데이터 없음"과 구분하여 에러 메시지 표시 (#153 패턴 동일 적용)
+        <p className="text-sm text-destructive">캐시 차트를 불러올 수 없습니다</p>
       ) : data.length === 0 ? (
         /* 데이터 없음 — 빈 캔버스 대신 안내 메시지로 대체 (CacheHitRateChart 패턴 준용) */
         <div className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground">

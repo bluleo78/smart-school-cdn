@@ -2062,6 +2062,134 @@ test.describe('도메인 상세 — 탭 URL searchParam 동기화 (#61)', () => 
 });
 
 // ─── 설정 탭 TLS 수동 갱신 (#102 회귀) ───────────────────────────────
+test.describe('도메인 상세 — isError 에러 처리 (#154)', () => {
+  /**
+   * DomainCacheCards / DomainStackedChart — cache/series API 500 시 에러 메시지 표시
+   * 수정 전: isError 처리 없어 0% 카드 / "데이터 없음" 오표시
+   * 수정 후: isError=true → 에러 메시지 노출, 정상 카드 숨김
+   */
+  test('cache/series API 실패 시 DomainCacheCards가 에러 메시지를 표시한다', async ({ page }) => {
+    // cache/series만 500 반환 — 나머지는 정상 mock
+    await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
+    await mockApi(page, 'GET', '/proxy/requests', []);
+    await mockApi(page, 'GET', '/domains/summary', createDomainSummary());
+    await mockApi(page, 'GET', '/domains/textbook.com', createDomain());
+    await page.route('**/api/domains/textbook.com/stats*', (route) =>
+      route.request().method() === 'GET'
+        ? route.fulfill({ json: createDomainStats() })
+        : route.fallback(),
+    );
+    await mockApi(page, 'GET', '/domains/textbook.com/logs', createDomainLogs());
+    await mockApi(page, 'GET', '/domains/textbook.com/summary', createDomainHostSummary());
+    await mockApi(page, 'GET', '/tls/certificates', createCertificates());
+    await mockApi(page, 'GET', '/cache/popular', createPopularContent());
+    await mockApi(page, 'GET', '/stats/optimization', createOptimizationStats());
+    await mockApi(page, 'GET', '/optimizer/profiles', createOptimizerProfile());
+    // cache/series → 500 에러 (DomainCacheCards, DomainStackedChart 모두 이 훅 사용)
+    await page.route('**/api/cache/series*', (route) =>
+      route.fulfill({ status: 500, json: { error: 'Internal Server Error' } }),
+    );
+    await page.route('**/api/optimization/stats*', (route) =>
+      route.fulfill({ json: createTextCompressStats() }),
+    );
+    await page.route('**/api/domains/textbook.com/top-urls*', (route) =>
+      route.fulfill({ json: { urls: [] } }),
+    );
+    await page.route('**/api/domains/textbook.com/optimization/url-breakdown*', (route) =>
+      route.fulfill({ json: { total: 0, items: [] } }),
+    );
+
+    await page.goto('/domains/textbook.com');
+    // 최적화 탭으로 이동하여 DomainCacheCards 렌더
+    await page.getByRole('tab', { name: '최적화' }).click();
+
+    // L1 히트율 카드 대신 에러 메시지가 노출되어야 한다
+    await expect(page.getByTestId('domain-overview-l1-hit-rate')).toHaveCount(0);
+    await expect(page.getByText('캐시 통계를 불러올 수 없습니다')).toBeVisible();
+  });
+
+  test('cache/series API 실패 시 DomainStackedChart가 에러 메시지를 표시한다', async ({ page }) => {
+    // cache/series만 500 반환
+    await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
+    await mockApi(page, 'GET', '/proxy/requests', []);
+    await mockApi(page, 'GET', '/domains/summary', createDomainSummary());
+    await mockApi(page, 'GET', '/domains/textbook.com', createDomain());
+    await page.route('**/api/domains/textbook.com/stats*', (route) =>
+      route.request().method() === 'GET'
+        ? route.fulfill({ json: createDomainStats() })
+        : route.fallback(),
+    );
+    await mockApi(page, 'GET', '/domains/textbook.com/logs', createDomainLogs());
+    await mockApi(page, 'GET', '/domains/textbook.com/summary', createDomainHostSummary());
+    await mockApi(page, 'GET', '/tls/certificates', createCertificates());
+    await mockApi(page, 'GET', '/cache/popular', createPopularContent());
+    await mockApi(page, 'GET', '/stats/optimization', createOptimizationStats());
+    await mockApi(page, 'GET', '/optimizer/profiles', createOptimizerProfile());
+    await page.route('**/api/cache/series*', (route) =>
+      route.fulfill({ status: 500, json: { error: 'Internal Server Error' } }),
+    );
+    await page.route('**/api/optimization/stats*', (route) =>
+      route.fulfill({ json: createTextCompressStats() }),
+    );
+    await page.route('**/api/domains/textbook.com/top-urls*', (route) =>
+      route.fulfill({ json: { urls: [] } }),
+    );
+    await page.route('**/api/domains/textbook.com/optimization/url-breakdown*', (route) =>
+      route.fulfill({ json: { total: 0, items: [] } }),
+    );
+
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '최적화' }).click();
+
+    const chart = page.getByTestId('domain-overview-stacked-chart');
+    await expect(chart).toBeVisible();
+    // "데이터 없음" 오표시 대신 에러 메시지가 표시되어야 한다
+    await expect(chart.getByText('아직 데이터가 없습니다')).toHaveCount(0);
+    await expect(chart.getByText('캐시 차트를 불러올 수 없습니다')).toBeVisible();
+  });
+
+  test('url-breakdown API 실패 시 DomainUrlOptimizationTable이 에러 메시지를 표시한다', async ({ page }) => {
+    // url-breakdown만 500 반환
+    await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
+    await mockApi(page, 'GET', '/proxy/requests', []);
+    await mockApi(page, 'GET', '/domains/summary', createDomainSummary());
+    await mockApi(page, 'GET', '/domains/textbook.com', createDomain());
+    await page.route('**/api/domains/textbook.com/stats*', (route) =>
+      route.request().method() === 'GET'
+        ? route.fulfill({ json: createDomainStats() })
+        : route.fallback(),
+    );
+    await mockApi(page, 'GET', '/domains/textbook.com/logs', createDomainLogs());
+    await mockApi(page, 'GET', '/domains/textbook.com/summary', createDomainHostSummary());
+    await mockApi(page, 'GET', '/tls/certificates', createCertificates());
+    await mockApi(page, 'GET', '/cache/popular', createPopularContent());
+    await mockApi(page, 'GET', '/stats/optimization', createOptimizationStats());
+    await mockApi(page, 'GET', '/optimizer/profiles', createOptimizerProfile());
+    await page.route('**/api/cache/series*', (route) =>
+      route.fulfill({ json: { buckets: [] } }),
+    );
+    await page.route('**/api/optimization/stats*', (route) =>
+      route.fulfill({ json: createTextCompressStats() }),
+    );
+    await page.route('**/api/domains/textbook.com/top-urls*', (route) =>
+      route.fulfill({ json: { urls: [] } }),
+    );
+    // url-breakdown → 500 에러
+    await page.route('**/api/domains/textbook.com/optimization/url-breakdown*', (route) =>
+      route.fulfill({ status: 500, json: { error: 'Internal Server Error' } }),
+    );
+
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '최적화' }).click();
+
+    const table = page.getByTestId('url-optimization-table');
+    await expect(table).toBeVisible();
+    // "집계된 이벤트 없음" 오표시 대신 에러 메시지가 표시되어야 한다
+    await expect(table.getByText('집계된 이벤트 없음')).toHaveCount(0);
+    await expect(table.getByText('최적화 내역을 불러올 수 없습니다')).toBeVisible();
+  });
+});
+
 test.describe('도메인 상세 — 설정 탭 TLS 수동 갱신 (#102)', () => {
   /**
    * 회귀 방지: DomainSettingsTab의 "수동 갱신" 버튼이 하드코딩 disabled에서

@@ -57,7 +57,8 @@ export function DomainUrlOptimizationTable({ host, period = '24h' }: { host: str
     setOffset(0);
   }
 
-  const { data, isLoading } = useDomainUrlOptimization({
+  // isError를 함께 destructure하여 API 실패 시 에러 상태를 명시적으로 처리한다 (#154)
+  const { data, isLoading, isError } = useDomainUrlOptimization({
     host,
     period,
     sort,
@@ -130,6 +131,9 @@ export function DomainUrlOptimizationTable({ host, period = '24h' }: { host: str
 
         {isLoading ? (
           <Skeleton className="h-40 w-full" />
+        ) : isError ? (
+          // API 호출 실패 시 — "집계된 이벤트 없음"과 구분하여 에러 메시지 표시 (#153 패턴 동일 적용)
+          <p className="text-sm text-destructive py-6 text-center">최적화 내역을 불러올 수 없습니다</p>
         ) : data && data.items.length > 0 ? (
           <>
             {/* URL별 최적화 내역 테이블 — shadcn Table 컴포넌트 사용 */}
