@@ -580,6 +580,68 @@ test.describe('사용자 관리', () => {
     expect(cellText).not.toContain('PM');
   });
 
+  // 이슈 #31 회귀 방지 — 자기 자신 비밀번호 재설정 다이얼로그에 현재 비밀번호 필드 표시
+  test('자기 자신 비밀번호 재설정 다이얼로그 — 현재 비밀번호 필드 표시', async ({ page }) => {
+    await mockApi(page, 'GET', '/users', baseUsers);
+
+    await page.goto('/users');
+
+    // 자기 자신(TEST_USER) 행의 비밀번호 재설정 버튼 클릭
+    const myRow = page.getByTestId(`user-row-${TEST_USER.id}`);
+    await myRow.getByRole('button', { name: '비밀번호 재설정' }).click();
+
+    // 현재 비밀번호 입력 필드가 표시되어야 함
+    const currentPasswordInput = page.locator('input#current-password');
+    await expect(currentPasswordInput).toBeVisible();
+    const autocomplete = await currentPasswordInput.getAttribute('autocomplete');
+    expect(autocomplete).toBe('current-password');
+  });
+
+  // 이슈 #31 회귀 방지 — 다른 사용자 비밀번호 재설정 시 현재 비밀번호 필드 미표시
+  test('다른 사용자 비밀번호 재설정 다이얼로그 — 현재 비밀번호 필드 없음', async ({ page }) => {
+    await mockApi(page, 'GET', '/users', baseUsers);
+
+    await page.goto('/users');
+
+    // 다른 사용자(id=2) 행의 비밀번호 재설정 버튼 클릭
+    const otherRow = page.getByTestId('user-row-2');
+    await otherRow.getByRole('button', { name: '비밀번호 재설정' }).click();
+
+    // 현재 비밀번호 필드가 표시되지 않아야 함 (다른 사용자는 검증 불필요)
+    await expect(page.locator('input#current-password')).not.toBeVisible();
+  });
+
+  // 이슈 #31 회귀 방지 — 자기 자신 비밀번호 재설정 시 currentPassword를 API에 전달
+  test('자기 자신 비밀번호 재설정 — currentPassword 포함 API 호출', async ({ page }) => {
+    await mockApi(page, 'GET', '/users', baseUsers);
+
+    let capturedBody: Record<string, unknown> | null = null;
+    await page.route(`**/api/users/${TEST_USER.id}/password`, async (route) => {
+      if (route.request().method() === 'PUT') {
+        capturedBody = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
+        await route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' });
+      } else {
+        return route.fallback();
+      }
+    });
+
+    await page.goto('/users');
+
+    const myRow = page.getByTestId(`user-row-${TEST_USER.id}`);
+    await myRow.getByRole('button', { name: '비밀번호 재설정' }).click();
+
+    // 현재 비밀번호 + 새 비밀번호 입력
+    await page.fill('input#current-password', 'currentpass1');
+    await page.fill('input#reset-password', 'newpassword1234');
+
+    await page.getByRole('button', { name: '재설정', exact: true }).click();
+
+    // API 요청에 currentPassword가 포함되어야 함
+    await expect.poll(() => capturedBody).not.toBeNull();
+    expect(capturedBody!['currentPassword']).toBe('currentpass1');
+    expect(capturedBody!['password']).toBe('newpassword1234');
+  });
+
   // 이슈 #63 회귀 방지 — 비밀번호 재설정 버튼이 제출 중 disabled 처리 안 되는 버그
   test('비밀번호 재설정 — 제출 중 재설정 버튼 disabled', async ({ page }) => {
     await mockApi(page, 'GET', '/users', baseUsers);

@@ -37,8 +37,12 @@ const createSchema = z.object({
 });
 type CreateFormData = z.infer<typeof createSchema>;
 
-// 비밀번호 재설정 폼: 빈 값 입력 시 명확한 안내 메시지 제공
-const passwordSchema = z.object({ password: z.string().min(1, '비밀번호를 입력해주세요.').min(8, '8자 이상 입력해주세요.') });
+// 비밀번호 재설정 폼: isSelf 여부에 따라 currentPassword 필드 조건부 필수 (이슈 #31)
+// superRefine 대신 옵션 필드로 선언하고 핸들러에서 isSelf 체크
+const passwordSchema = z.object({
+  currentPassword: z.string().optional(),
+  password: z.string().min(1, '비밀번호를 입력해주세요.').min(8, '8자 이상 입력해주세요.'),
+});
 type PasswordFormData = z.infer<typeof passwordSchema>;
 
 export function UsersPage() {
@@ -65,13 +69,24 @@ export function UsersPage() {
   });
 
   const passwordMut = useMutation({
-    mutationFn: ({ id, password }: { id: number; password: string }) => updatePassword(id, password),
+    mutationFn: ({ id, password, currentPassword }: { id: number; password: string; currentPassword?: string }) =>
+      updatePassword(id, password, currentPassword),
     // 성공 시에만 다이얼로그 닫기 — 오류 시 입력값 보존을 위해 onSuccess로 이동
     onSuccess: () => {
       toast.success('비밀번호가 재설정되었습니다');
       setPasswordTarget(null);
     },
-    onError: () => toast.error('비밀번호 재설정에 실패했습니다.'),
+    onError: (e) => {
+      // 현재 비밀번호 오류와 일반 오류를 구분하여 안내 메시지 제공 (이슈 #31)
+      const errCode = (e as { response?: { data?: { error?: string } } }).response?.data?.error;
+      if (errCode === 'invalid_current_password') {
+        toast.error('현재 비밀번호가 올바르지 않습니다.');
+      } else if (errCode === 'current_password_required') {
+        toast.error('현재 비밀번호를 입력해주세요.');
+      } else {
+        toast.error('비밀번호 재설정에 실패했습니다.');
+      }
+    },
   });
 
   const disableMut = useMutation({
@@ -219,8 +234,13 @@ export function UsersPage() {
           <form
             onSubmit={passwordForm.handleSubmit((d) => {
               if (!passwordTarget) return;
-              // 다이얼로그 닫기는 onSuccess에서 처리 — 오류 시 입력값 보존
-              passwordMut.mutate({ id: passwordTarget.id, password: d.password });
+              // 자기 자신 변경 시 currentPassword 포함. 다른 사용자 변경 시 생략 (이슈 #31)
+              const isSelf = passwordTarget.id === myId;
+              passwordMut.mutate({
+                id: passwordTarget.id,
+                password: d.password,
+                ...(isSelf ? { currentPassword: d.currentPassword } : {}),
+              });
             })}
             className="space-y-3"
           >
@@ -231,6 +251,18 @@ export function UsersPage() {
               autoComplete="username"
               value={passwordTarget?.username ?? ''}
             />
+            {/* 자기 자신 비밀번호 변경 시에만 현재 비밀번호 입력 필드 표시 (이슈 #31) */}
+            {passwordTarget?.id === myId && (
+              <div>
+                {/* htmlFor/id 연결 — 레이블 클릭 시 입력 필드 포커스·스크린 리더 연동 */}
+                <Label htmlFor="current-password">현재 비밀번호</Label>
+                {/* autocomplete="current-password" — 비밀번호 매니저 연동 (프로젝트 autocomplete 정책 준수) */}
+                <PasswordInput id="current-password" autoComplete="current-password" {...passwordForm.register('currentPassword')} />
+                {passwordForm.formState.errors.currentPassword && (
+                  <p className="text-xs text-destructive">{passwordForm.formState.errors.currentPassword.message}</p>
+                )}
+              </div>
+            )}
             <div>
               {/* htmlFor/id 연결 — 레이블 클릭 시 입력 필드 포커스·스크린 리더 연동 (#79) */}
               <Label htmlFor="reset-password">새 비밀번호</Label>

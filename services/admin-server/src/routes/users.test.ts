@@ -61,16 +61,53 @@ describe('usersRoutes', () => {
     expect(r.statusCode).toBe(409);
   });
 
-  it('PUT /api/users/:id/password — 성공', async () => {
+  // 이슈 #31 — 자기 자신 비밀번호 변경 시 currentPassword 포함 성공
+  it('PUT /api/users/:id/password — 자기 자신: currentPassword 포함 성공', async () => {
     const r = await ctx.app.inject({
       method: 'PUT', url: `/api/users/${ctx.adminId}/password`,
       cookies: ctx.cookies,
-      payload: { password: 'newpass123' },
+      payload: { password: 'newpass123', currentPassword: 'password1' },
     });
     expect(r.statusCode).toBe(200);
     const { verifyPassword } = await import('../auth/password.js');
     const u = ctx.userRepo.findById(ctx.adminId)!;
     expect(await verifyPassword(u.password_hash, 'newpass123')).toBe(true);
+  });
+
+  // 이슈 #31 — 자기 자신 비밀번호 변경 시 currentPassword 누락 → 400
+  it('PUT /api/users/:id/password — 자기 자신: currentPassword 누락 시 400', async () => {
+    const r = await ctx.app.inject({
+      method: 'PUT', url: `/api/users/${ctx.adminId}/password`,
+      cookies: ctx.cookies,
+      payload: { password: 'newpass123' },
+    });
+    expect(r.statusCode).toBe(400);
+    expect(r.json().error).toBe('current_password_required');
+  });
+
+  // 이슈 #31 — 자기 자신 비밀번호 변경 시 currentPassword 틀림 → 400
+  it('PUT /api/users/:id/password — 자기 자신: currentPassword 틀림 시 400', async () => {
+    const r = await ctx.app.inject({
+      method: 'PUT', url: `/api/users/${ctx.adminId}/password`,
+      cookies: ctx.cookies,
+      payload: { password: 'newpass123', currentPassword: 'wrongpassword' },
+    });
+    expect(r.statusCode).toBe(400);
+    expect(r.json().error).toBe('invalid_current_password');
+  });
+
+  // 이슈 #31 — 다른 사용자 비밀번호 변경 시 currentPassword 없이도 성공 (관리자 권한)
+  it('PUT /api/users/:id/password — 다른 사용자: currentPassword 없이 성공', async () => {
+    const other = ctx.userRepo.create('other@x.y', await hashPassword('otherpass1'));
+    const r = await ctx.app.inject({
+      method: 'PUT', url: `/api/users/${other.id}/password`,
+      cookies: ctx.cookies,
+      payload: { password: 'adminreset123' },
+    });
+    expect(r.statusCode).toBe(200);
+    const { verifyPassword } = await import('../auth/password.js');
+    const u = ctx.userRepo.findById(other.id)!;
+    expect(await verifyPassword(u.password_hash, 'adminreset123')).toBe(true);
   });
 
   // 이슈 #106 회귀 방지 — PUT /api/users/:id/enable 엔드포인트 누락

@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import type { UserRepository } from '../db/user-repo.js';
-import { hashPassword } from '../auth/password.js';
+import { hashPassword, verifyPassword } from '../auth/password.js';
 
 // Task 4 와 동일한 permissive email 검증 — z.string().email() 의 strict 정책은
 // 단일 문자 TLD(예: a@b.c)를 거부해 내부망 호환성/테스트가 깨진다.
@@ -12,8 +12,11 @@ const createSchema = z.object({
   password: z.string().min(8).max(256),
 });
 
+// 자기 자신 비밀번호 변경 시: currentPassword 필수. 다른 사용자 변경 시: 불필요.
+// discriminatedUnion 대신 단일 스키마로 받고 핸들러에서 분기한다.
 const passwordSchema = z.object({
   password: z.string().min(8).max(256),
+  currentPassword: z.string().min(1).max(256).optional(),
 });
 
 function publicUser(u: {
@@ -64,9 +67,24 @@ export const usersRoutes: FastifyPluginAsync<{ userRepo: UserRepository }> = asy
       return reply.code(400).send({ error: 'invalid_input' });
     }
     const id = Number(req.params.id);
-    if (!userRepo.findById(id)) {
+    const targetUser = userRepo.findById(id);
+    if (!targetUser) {
       return reply.code(404).send({ error: 'user_not_found' });
     }
+
+    // 자기 자신의 비밀번호를 변경하는 경우: 현재 비밀번호 검증 필수
+    // → 현재 비밀번호 없이 자기 계정 탈취 방지 (이슈 #31)
+    const isSelf = req.user && Number(req.user.sub) === id;
+    if (isSelf) {
+      if (!parsed.data.currentPassword) {
+        return reply.code(400).send({ error: 'current_password_required' });
+      }
+      const valid = await verifyPassword(targetUser.password_hash, parsed.data.currentPassword);
+      if (!valid) {
+        return reply.code(400).send({ error: 'invalid_current_password' });
+      }
+    }
+
     const hash = await hashPassword(parsed.data.password);
     userRepo.updatePassword(id, hash);
     return { ok: true };
