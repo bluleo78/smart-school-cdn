@@ -482,6 +482,28 @@ test.describe('도메인 관리 — 도메인 추가', () => {
     await expect(page.getByTestId('add-domain-error')).toContainText('도메인 추가에 실패했습니다.');
     await expect(page.getByTestId('add-domain-dialog')).toBeVisible();
   });
+
+  /**
+   * 이슈 #127 회귀 방지 — 도메인 추가 다이얼로그 X 닫기 버튼 부재
+   * DialogContent 우상단 X 버튼이 렌더링되어야 하고, 클릭 시 다이얼로그가 닫혀야 한다.
+   */
+  test('X 닫기 버튼 클릭 시 다이얼로그가 닫힌다 (#127)', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', []);
+
+    await page.goto('/domains');
+    await page.getByTestId('toolbar-add-btn').click();
+
+    // X 닫기 버튼이 우상단에 렌더링되어 있어야 한다
+    const dialog = page.getByTestId('add-domain-dialog');
+    await expect(dialog).toBeVisible();
+    const closeBtn = dialog.getByRole('button', { name: '닫기' });
+    await expect(closeBtn).toBeVisible();
+
+    // X 버튼 클릭 시 다이얼로그가 닫혀야 한다
+    await closeBtn.click();
+    await expect(dialog).not.toBeVisible();
+  });
 });
 
 test.describe('도메인 관리 — 도메인 삭제', () => {
