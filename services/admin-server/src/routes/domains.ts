@@ -216,6 +216,13 @@ export async function domainRoutes(
       if (!Array.isArray(domains) || domains.length === 0) {
         return reply.status(400).send({ error: 'domains 배열은 필수 항목입니다.' });
       }
+      // 각 도메인의 origin URL scheme 검증 — http:// 또는 https://만 허용
+      // javascript:, file://, ftp:// 등 비정상 scheme이 DB에 저장되는 것을 방지한다 (#42)
+      for (const d of domains) {
+        if (typeof d.origin !== 'string' || (!d.origin.startsWith('http://') && !d.origin.startsWith('https://'))) {
+          return reply.status(400).send({ error: `origin은 http:// 또는 https://로 시작해야 합니다: "${d.origin}"` });
+        }
+      }
       const result = domainRepo.bulkInsert(domains);
       const synced = await syncToProxy(domainRepo);
       if (!synced) {
@@ -275,6 +282,11 @@ export async function domainRoutes(
       // host 형식 검증 — upsert 전에 수행하여 유효하지 않은 도메인이 DB에 저장되는 것을 방지
       if (!DOMAIN_RE.test(host)) {
         return reply.status(400).send({ error: '유효한 도메인 형식이 아닙니다. (예: example.com, *.sub.com)' });
+      }
+      // origin URL scheme 검증 — http:// 또는 https://만 허용
+      // PUT과 동일한 이중 방어 패턴 적용 — javascript: 등 비정상 scheme 차단 (#42)
+      if (!origin.startsWith('http://') && !origin.startsWith('https://')) {
+        return reply.status(400).send({ error: 'origin은 http:// 또는 https://로 시작해야 합니다.' });
       }
       domainRepo.upsert(host, origin);
       const synced = await syncToProxy(domainRepo);

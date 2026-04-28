@@ -249,6 +249,104 @@ describe('POST /api/domains', () => {
     });
     expect(res.statusCode).toBe(201);
   });
+
+  /** origin scheme 검증 — PUT과 동일한 이중 방어 패턴 (#42) */
+  it('javascript: scheme origin은 400을 반환한다 (#42)', async () => {
+    const repo = makeRepo();
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'POST', url: '/api/domains',
+      payload: { host: 'textbook.com', origin: 'javascript:alert(1)' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).error).toContain('http:// 또는 https://');
+  });
+
+  it('ftp:// scheme origin은 400을 반환한다 (#42)', async () => {
+    const repo = makeRepo();
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'POST', url: '/api/domains',
+      payload: { host: 'textbook.com', origin: 'ftp://textbook.com' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).error).toContain('http:// 또는 https://');
+  });
+
+  it('scheme 없는 origin(textbook.com)은 400을 반환한다 (#42)', async () => {
+    const repo = makeRepo();
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'POST', url: '/api/domains',
+      payload: { host: 'textbook.com', origin: 'textbook.com' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).error).toContain('http:// 또는 https://');
+  });
+});
+
+describe('POST /api/domains/bulk', () => {
+  it('유효한 도메인 목록을 일괄 추가하면 201을 반환한다', async () => {
+    const repo = makeRepo();
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'POST', url: '/api/domains/bulk',
+      payload: { domains: [{ host: 'textbook.com', origin: 'https://textbook.com' }] },
+    });
+    expect(res.statusCode).toBe(201);
+  });
+
+  it('domains 배열이 없으면 400을 반환한다', async () => {
+    const repo = makeRepo();
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'POST', url: '/api/domains/bulk',
+      payload: {},
+    });
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).error).toContain('필수');
+  });
+
+  /** origin scheme 검증 — javascript: 등 비정상 scheme 차단 (#42) */
+  it('javascript: scheme origin을 포함한 bulk 요청은 400을 반환한다 (#42)', async () => {
+    const repo = makeRepo();
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'POST', url: '/api/domains/bulk',
+      payload: { domains: [{ host: 'textbook.com', origin: 'javascript:alert(1)' }] },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).error).toContain('http:// 또는 https://');
+  });
+
+  it('ftp:// scheme origin을 포함한 bulk 요청은 400을 반환한다 (#42)', async () => {
+    const repo = makeRepo();
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'POST', url: '/api/domains/bulk',
+      payload: { domains: [{ host: 'a.com', origin: 'ftp://a.com' }] },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).error).toContain('http:// 또는 https://');
+  });
+
+  it('혼합 목록에서 하나라도 비정상 scheme이 있으면 전체 400 반환한다 (#42)', async () => {
+    const repo = makeRepo();
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'POST', url: '/api/domains/bulk',
+      payload: {
+        domains: [
+          { host: 'good.com', origin: 'https://good.com' },
+          { host: 'bad.com', origin: 'file:///etc/passwd' },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).error).toContain('http:// 또는 https://');
+    // 정상 도메인도 저장되지 않아야 한다 (검증 실패 시 전체 요청을 거부)
+    expect(repo.findByHost('good.com')).toBeUndefined();
+  });
 });
 
 describe('PUT /api/domains/:host', () => {

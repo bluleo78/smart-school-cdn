@@ -29,7 +29,14 @@ export function DomainBulkAddDialog({ open, onOpenChange }: DomainBulkAddDialogP
         setParseError(`잘못된 형식: "${line}" — "host origin" 형식으로 입력해주세요.`);
         return null;
       }
-      result.push({ host: parts[0], origin: parts[1] });
+      // origin URL scheme 검증 — http:// 또는 https://만 허용
+      // javascript:, file://, ftp:// 등 비정상 scheme이 DB에 저장되는 것을 방지한다 (#42)
+      const origin = parts[1];
+      if (!origin.startsWith('http://') && !origin.startsWith('https://')) {
+        setParseError(`잘못된 origin: "${line}" — http:// 또는 https://로 시작해야 합니다.`);
+        return null;
+      }
+      result.push({ host: parts[0], origin });
     }
     return result;
   }

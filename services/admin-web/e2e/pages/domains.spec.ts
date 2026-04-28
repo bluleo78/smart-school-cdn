@@ -599,6 +599,89 @@ test.describe('도메인 관리 — 일괄 추가 (#55)', () => {
     await expect(errorMsg).toBeVisible();
     await expect(errorMsg).toHaveText('추가할 도메인을 입력해주세요.');
   });
+
+  /**
+   * 이슈 #42 회귀 방지 — 일괄 추가 시 origin URL 형식 검증 없음 (javascript: scheme 등 허용)
+   * javascript:, ftp:// 같은 비정상 scheme이 클라이언트에서 차단되어
+   * POST /api/domains/bulk 요청이 전송되지 않아야 한다.
+   *
+   * 모킹 이유: 클라이언트 검증 통과 후 서버 요청이 가지 않아야 함을 확인하기 위해
+   *   POST /domains/bulk를 모킹하고 호출 여부를 검증한다.
+   * mock이 재현하는 조건: parseLines()가 origin scheme 검증에서 parseError를 설정해
+   *   mutateAsync가 호출되지 않는 상황.
+   * 이 mock이 실제 버그 조건과 동일한 이유: useBulkAddDomains 훅이 mutateAsync를 통해
+   *   POST 요청을 전송하므로, 호출 여부로 클라이언트 차단 여부를 확인할 수 있다.
+   */
+  test('javascript: scheme origin 입력 시 인라인 에러가 표시되고 POST 요청이 전송되지 않는다 (#42)', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+
+    // POST가 호출될 경우 201을 반환하도록 모킹 — 실제 호출되면 안 됨
+    let bulkPostCalled = false;
+    await page.route('**/api/domains/bulk', (route) => {
+      if (route.request().method() === 'POST') {
+        bulkPostCalled = true;
+        route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ inserted: [], failed: [] }) });
+      } else {
+        route.continue();
+      }
+    });
+
+    await page.goto('/domains');
+    await page.getByRole('button', { name: '일괄 추가' }).click();
+    await expect(page.getByTestId('bulk-add-dialog')).toBeVisible();
+
+    // javascript: scheme origin 입력 (#42 재현 조건)
+    await page.getByTestId('bulk-add-textarea').fill('test.example.com javascript:alert(1)');
+    await page.getByTestId('bulk-add-submit').click();
+
+    // 인라인 에러가 표시되어야 한다 (#42 핵심)
+    const errorMsg = page.getByTestId('bulk-add-error');
+    await expect(errorMsg).toBeVisible();
+    await expect(errorMsg).toContainText('http:// 또는 https://');
+
+    // 다이얼로그가 닫히지 않아야 한다
+    await expect(page.getByTestId('bulk-add-dialog')).toBeVisible();
+
+    // 클라이언트 검증이 차단하여 서버로 요청이 전송되지 않아야 한다 (#42 핵심)
+    expect(bulkPostCalled).toBe(false);
+  });
+
+  test('ftp:// scheme origin 입력 시 인라인 에러가 표시된다 (#42)', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+
+    await page.goto('/domains');
+    await page.getByRole('button', { name: '일괄 추가' }).click();
+    await expect(page.getByTestId('bulk-add-dialog')).toBeVisible();
+
+    // ftp:// scheme origin 입력
+    await page.getByTestId('bulk-add-textarea').fill('test.example.com ftp://test.example.com');
+    await page.getByTestId('bulk-add-submit').click();
+
+    // 인라인 에러가 표시되어야 한다
+    const errorMsg = page.getByTestId('bulk-add-error');
+    await expect(errorMsg).toBeVisible();
+    await expect(errorMsg).toContainText('http:// 또는 https://');
+  });
+
+  test('scheme 없는 origin 입력 시 인라인 에러가 표시된다 (#42)', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+
+    await page.goto('/domains');
+    await page.getByRole('button', { name: '일괄 추가' }).click();
+    await expect(page.getByTestId('bulk-add-dialog')).toBeVisible();
+
+    // scheme 없는 origin 입력 — "host origin" 형식은 맞지만 origin이 비정상
+    await page.getByTestId('bulk-add-textarea').fill('test.example.com test.example.com');
+    await page.getByTestId('bulk-add-submit').click();
+
+    // 인라인 에러가 표시되어야 한다
+    const errorMsg = page.getByTestId('bulk-add-error');
+    await expect(errorMsg).toBeVisible();
+    await expect(errorMsg).toContainText('http:// 또는 https://');
+  });
 });
 
 /**
