@@ -1,5 +1,6 @@
 /// 도메인 상세 탭 — Overview / Optimizer / Traffic / Settings.
 /// URL searchParam(?tab=...)과 탭 상태를 동기화하여 뒤로가기/북마크/공유 링크가 올바른 탭을 유지한다.
+import { useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../ui/tabs';
 import type { Domain } from '../../../api/domain-types';
@@ -7,6 +8,8 @@ import { DomainOverviewTab } from './DomainOverviewTab';
 import { DomainStatsTab } from './DomainStatsTab';
 import { DomainLogsTab } from './DomainLogsTab';
 import { DomainSettingsTab } from './DomainSettingsTab';
+import type { PeriodValue } from './PeriodSelector';
+import type { RefreshIntervalMs } from './RefreshIntervalSelect';
 
 /** 허용된 탭 값 목록 — 잘못된 파라미터가 들어올 경우 overview로 폴백한다.
  *  value 식별자가 UI 레이블과 일치하도록 stats→optimizer, logs→traffic 으로 변경 (#64) */
@@ -28,6 +31,12 @@ export function DomainDetailTabs({ domain }: Props) {
   const tabParam = searchParams.get('tab');
   const activeTab: TabValue = isValidTab(tabParam) ? tabParam : 'overview';
 
+  // 트래픽 탭의 조회 기간·갱신 주기 상태를 여기서 관리한다.
+  // DomainLogsTab이 비활성 탭 전환 시 언마운트되면 로컬 state가 초기화되기 때문에,
+  // 부모 컴포넌트로 끌어올려 탭 전환과 무관하게 값을 유지한다. (#133)
+  const [trafficPeriod, setTrafficPeriod] = useState<PeriodValue>({ period: '24h' });
+  const [trafficRefresh, setTrafficRefresh] = useState<RefreshIntervalMs>(30_000);
+
   /** 탭 전환 시 ?tab=<value> 를 URL에 반영한다 */
   function handleTabChange(value: string) {
     setSearchParams({ tab: value }, { replace: false });
@@ -48,7 +57,13 @@ export function DomainDetailTabs({ domain }: Props) {
         <DomainStatsTab host={domain.host} />
       </TabsContent>
       <TabsContent value="traffic" className="mt-4">
-        <DomainLogsTab host={domain.host} />
+        <DomainLogsTab
+          host={domain.host}
+          period={trafficPeriod}
+          onPeriodChange={setTrafficPeriod}
+          refresh={trafficRefresh}
+          onRefreshChange={setTrafficRefresh}
+        />
       </TabsContent>
       <TabsContent value="settings" className="mt-4">
         <DomainSettingsTab domain={domain} />

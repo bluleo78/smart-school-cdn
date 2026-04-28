@@ -923,6 +923,26 @@ test.describe('도메인 상세 — Logs 탭', () => {
     await expect(trigger).toHaveAttribute('aria-label', '자동 갱신 간격');
   });
 
+  test('자동 갱신 간격이 탭 전환 후에도 유지된다 (회귀: #133)', async ({ page }) => {
+    // 버그: DomainLogsTab이 비활성 탭 전환 시 언마운트되어 로컬 state가 30초로 리셋됨
+    // 수정: refresh 상태를 DomainDetailTabs로 끌어올려 탭 전환과 무관하게 유지
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com');
+
+    // 트래픽 탭으로 이동 후 갱신 간격을 5분으로 변경
+    await page.getByRole('tab', { name: '트래픽' }).click();
+    await page.getByRole('combobox', { name: '자동 갱신 간격' }).click();
+    await page.getByRole('option', { name: '5분' }).click();
+    await expect(page.getByRole('combobox', { name: '자동 갱신 간격' })).toContainText('5분');
+
+    // 다른 탭으로 이동했다가 트래픽 탭으로 복귀
+    await page.getByRole('tab', { name: '개요' }).click();
+    await page.getByRole('tab', { name: '트래픽' }).click();
+
+    // 갱신 간격이 5분으로 유지되어야 한다 (초기값 30초로 리셋되면 버그)
+    await expect(page.getByRole('combobox', { name: '자동 갱신 간격' })).toContainText('5분');
+  });
+
   test('"에러만" 토글 — 4xx 에러가 목록에 표시된다 (회귀: #46)', async ({ page }) => {
     // 버그: errorsOnly=true 시 status=5xx만 전송 → 4xx 에러(404 등)가 누락됨
     // 수정: status=error(4xx+5xx 통합)로 전송하여 4xx 에러도 포함되어야 한다

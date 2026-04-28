@@ -1,5 +1,4 @@
 /// 도메인 로그 탭 — 기간 토글 + 자동갱신 드롭다운 + 수동 새로고침 + 트래픽 차트 + Top URL + 로그 테이블.
-import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { PeriodSelector, type PeriodValue } from './PeriodSelector';
 import { RefreshIntervalSelect, type RefreshIntervalMs } from './RefreshIntervalSelect';
@@ -13,13 +12,15 @@ import { formatBytes } from '../../../lib/format';
 
 interface Props {
   host: string;
+  /** 조회 기간 — 부모(DomainDetailTabs)에서 관리하여 탭 전환 시에도 값이 유지된다 (#133) */
+  period: PeriodValue;
+  onPeriodChange: (v: PeriodValue) => void;
+  /** 자동 갱신 주기 — 부모(DomainDetailTabs)에서 관리하여 탭 전환 시에도 값이 유지된다 (#133) */
+  refresh: RefreshIntervalMs;
+  onRefreshChange: (v: RefreshIntervalMs) => void;
 }
 
-export function DomainLogsTab({ host }: Props) {
-  /** 조회 기간 상태 — 기본 24시간 */
-  const [period, setPeriod] = useState<PeriodValue>({ period: '24h' });
-  /** 자동 갱신 주기 — 기본 30초 */
-  const [refresh, setRefresh] = useState<RefreshIntervalMs>(30_000);
+export function DomainLogsTab({ host, period, onPeriodChange, refresh, onRefreshChange }: Props) {
   const qc = useQueryClient();
 
   /** custom 기간일 때만 from/to 범위 추출 */
@@ -38,9 +39,9 @@ export function DomainLogsTab({ host }: Props) {
     <div className="space-y-6" data-testid="domain-traffic-tab">
       {/* 기간 선택 + 자동갱신 + 수동 새로고침 컨트롤 바 */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <PeriodSelector value={period} onChange={setPeriod} />
+        <PeriodSelector value={period} onChange={onPeriodChange} />
         <div className="flex items-center gap-2">
-          <RefreshIntervalSelect value={refresh} onChange={setRefresh} />
+          <RefreshIntervalSelect value={refresh} onChange={onRefreshChange} />
           <ManualRefreshButton onClick={handleRefresh} />
         </div>
       </div>
