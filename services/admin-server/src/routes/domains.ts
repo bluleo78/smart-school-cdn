@@ -513,8 +513,13 @@ export async function domainRoutes(
       return reply.status(404).send({ error: '도메인을 찾을 수 없습니다.' });
     }
 
-    const limit = Math.min(Number(request.query.limit) || 100, 1000);
-    const offset = Number(request.query.offset) || 0;
+    // 음수 limit/offset은 SQLite에서 예기치 않은 동작을 유발할 수 있으므로 클램프
+    // limit: 1~1000 범위 강제 (0 이하 → 기본값 100, 1000 초과 → 1000)
+    // offset: 0 이하 → 0으로 클램프
+    const rawLimit = Number(request.query.limit);
+    const limit = Math.min(rawLimit > 0 ? rawLimit : 100, 1000);
+    const rawOffset = Number(request.query.offset);
+    const offset = rawOffset > 0 ? rawOffset : 0;
     const { status, cache, period, q } = request.query;
 
     // period → since/until 변환 (없으면 시간 필터 없음)

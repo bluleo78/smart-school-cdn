@@ -710,6 +710,58 @@ describe('GET /api/domains/:host/logs — period/from/to/q 필터', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].path).toBe('/images/logo.png');
   });
+
+  it('음수 offset은 0으로 클램프된다 — SQLite OFFSET 음수 방어 (#149)', async () => {
+    // offset=-1 전달 시 500 에러가 아닌 정상 응답(offset=0 동작)을 반환해야 한다
+    const repo = makeRepo();
+    repo.upsert('a.test', 'https://a.test');
+    const app = buildApp(repo);
+    const now = Math.floor(Date.now() / 1000);
+    repo.database.prepare(
+      `INSERT INTO access_logs (timestamp, host, method, path, status_code, cache_status, size)
+       VALUES (?, 'a.test', 'GET', '/page', 200, 'HIT', 100)`,
+    ).run(now - 10);
+
+    const res = await app.inject({ method: 'GET', url: '/api/domains/a.test/logs?offset=-1' });
+    expect(res.statusCode).toBe(200);
+    const rows = JSON.parse(res.body);
+    // offset=0 과 동일하게 동작 — 행이 반환되어야 함
+    expect(rows).toHaveLength(1);
+  });
+
+  it('음수 limit은 기본값 100으로 폴백된다 (#149)', async () => {
+    // limit=-5 전달 시 기본값(100)으로 동작해야 한다
+    const repo = makeRepo();
+    repo.upsert('a.test', 'https://a.test');
+    const app = buildApp(repo);
+    const now = Math.floor(Date.now() / 1000);
+    repo.database.prepare(
+      `INSERT INTO access_logs (timestamp, host, method, path, status_code, cache_status, size)
+       VALUES (?, 'a.test', 'GET', '/page', 200, 'HIT', 100)`,
+    ).run(now - 10);
+
+    const res = await app.inject({ method: 'GET', url: '/api/domains/a.test/logs?limit=-5' });
+    expect(res.statusCode).toBe(200);
+    const rows = JSON.parse(res.body);
+    expect(rows).toHaveLength(1);
+  });
+
+  it('limit=0은 기본값 100으로 폴백된다 (#149)', async () => {
+    // limit=0 전달 시도 기본값(100)으로 동작해야 한다
+    const repo = makeRepo();
+    repo.upsert('a.test', 'https://a.test');
+    const app = buildApp(repo);
+    const now = Math.floor(Date.now() / 1000);
+    repo.database.prepare(
+      `INSERT INTO access_logs (timestamp, host, method, path, status_code, cache_status, size)
+       VALUES (?, 'a.test', 'GET', '/page', 200, 'HIT', 100)`,
+    ).run(now - 10);
+
+    const res = await app.inject({ method: 'GET', url: '/api/domains/a.test/logs?limit=0' });
+    expect(res.statusCode).toBe(200);
+    const rows = JSON.parse(res.body);
+    expect(rows).toHaveLength(1);
+  });
 });
 
 describe('GET /api/domains/:host/optimization/url-breakdown', () => {
