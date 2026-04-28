@@ -29,6 +29,31 @@ test.describe('시스템 페이지', () => {
     await expect(page.getByText('캐시 디스크 사용량')).toBeVisible();
     await expect(page.getByTestId('disk-usage-bar')).toBeVisible();
   });
+
+  /// 회귀 방지 #140: diskUsagePercent 100% clamp 없어 progress bar overflow 가능
+  /// used_bytes > max_bytes 시 bar width가 100%를 초과하지 않아야 한다
+  test('used_bytes > max_bytes 이어도 progress bar width가 100% 이하다 — 회귀 방지 #140', async ({ page }) => {
+    // used_bytes(6GB) > max_bytes(5GB) 로 의도적 overflow 조건 설정
+    await mockApi(page, 'GET', '/cache/stats', {
+      requests: 0, l1_hits: 0, l2_hits: 0, miss: 0, bypass_total: 0,
+      bypass: { method: 0, nocache: 0, size: 0, other: 0, total: 0 },
+      l1_hit_rate: 0, edge_hit_rate: 0, bypass_rate: 0,
+      disk: { used_bytes: 6_000_000_000, max_bytes: 5_000_000_000, entry_count: 0 },
+      by_domain: [],
+    });
+    await page.goto('/system');
+
+    await expect(page.getByTestId('disk-usage-bar')).toBeVisible();
+
+    // bar 내부 div의 width 스타일 값이 100%를 초과하지 않아야 한다
+    const barWidth = await page.getByTestId('disk-usage-bar').locator('div').first().evaluate(
+      (el) => parseFloat((el as HTMLElement).style.width),
+    );
+    expect(barWidth).toBeLessThanOrEqual(100);
+
+    // 텍스트 표시도 100%여야 한다 (clamp 결과)
+    await expect(page.getByText(/100% 사용 중/)).toBeVisible();
+  });
 });
 
 test.describe('CA 인증서 섹션', () => {

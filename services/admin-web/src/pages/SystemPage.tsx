@@ -59,7 +59,9 @@ export function SystemPage() {
     cache && cache.disk.max_bytes > 0
       ? cache.disk.used_bytes / cache.disk.max_bytes
       : 0;
-  const diskUsagePercent = Math.round(diskUsageRatio * 100);
+  // Math.min(..., 100): used_bytes > max_bytes 이상 케이스(마이그레이션·설정 변경 등)에서
+  // bar width가 100% 초과하여 컨테이너 밖으로 삐져나오는 overflow 방지 (#140)
+  const diskUsagePercent = Math.min(Math.round(diskUsageRatio * 100), 100);
   const isDiskWarning = diskUsageRatio >= 0.9;
 
   const diskUsedGB = cache ? (cache.disk.used_bytes / 1024 ** 3).toFixed(1) : '-';
