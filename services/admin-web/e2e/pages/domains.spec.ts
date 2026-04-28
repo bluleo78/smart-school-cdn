@@ -1115,6 +1115,91 @@ test.describe('도메인 관리 — DomainAlertBanner 다중 알림 링크 (#101
 });
 
 /**
+ * 이슈 #126 회귀 방지 — DomainTable 빈 상태(검색/필터) CTA 버튼 미제공
+ * 검색 결과 없음 빈 상태에 "검색어 지우기" 버튼, 필터 결과 없음 빈 상태에 "전체 보기" 버튼이
+ * 표시되어 사용자가 바로 상태를 초기화할 수 있어야 한다.
+ *
+ * 모킹 이유: 검색어/필터 적용 시 빈 배열 반환 조건을 확정적으로 재현하기 위함.
+ * mock이 재현하는 조건: 검색/필터 API 응답이 빈 배열인 상황(실제 서버 데이터 무관).
+ * 이 mock이 실제 버그 조건과 동일한 이유: DomainTable은 domains prop이 빈 배열이고
+ * searchQuery 또는 enabledFilter prop이 있을 때 해당 빈 상태를 렌더링하므로,
+ * mock 응답이 실제 렌더링 경로를 그대로 따른다.
+ */
+test.describe('도메인 관리 — 빈 상태 CTA (#126)', () => {
+  test('검색 결과 없음 빈 상태에 "검색어 지우기" CTA 버튼이 표시된다', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+    await mockApi(page, 'GET', '/domains?q=xxxxxxnotexist', []);
+
+    await page.goto('/domains');
+
+    await page.getByTestId('domain-search').fill('xxxxxxnotexist');
+
+    // 검색 결과 없음 빈 상태에 CTA 버튼이 표시되어야 한다 (#126 핵심)
+    await expect(page.getByTestId('domains-empty-search')).toBeVisible();
+    await expect(page.getByTestId('empty-clear-search-btn')).toBeVisible();
+    await expect(page.getByTestId('empty-clear-search-btn')).toContainText('검색어 지우기');
+  });
+
+  test('검색 결과 없음 빈 상태에서 "검색어 지우기" 클릭 시 검색어가 초기화되고 전체 목록이 표시된다', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+    await mockApi(page, 'GET', '/domains?q=xxxxxxnotexist', []);
+
+    await page.goto('/domains');
+
+    // 검색어 입력 → 빈 상태 진입
+    await page.getByTestId('domain-search').fill('xxxxxxnotexist');
+    await expect(page.getByTestId('domains-empty-search')).toBeVisible();
+
+    // CTA 클릭 → 검색 초기화 (#126 핵심 — 입력→처리→출력 파이프라인)
+    await page.getByTestId('empty-clear-search-btn').click();
+
+    // 검색어가 지워지고 전체 도메인 목록이 다시 표시되어야 한다
+    await expect(page.getByTestId('domain-search')).toHaveValue('');
+    await expect(page.getByTestId('domains-table')).toBeVisible();
+    await expect(page.getByTestId('domains-empty-search')).not.toBeVisible();
+  });
+
+  test('필터 결과 없음 빈 상태에 "전체 보기" CTA 버튼이 표시된다', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+    await mockApi(page, 'GET', '/domains?enabled=false', []);
+
+    await page.goto('/domains');
+
+    // 비활성 필터 선택 → 빈 상태 진입
+    await page.getByTestId('domain-enabled-filter').click();
+    await page.getByRole('listbox').getByRole('option', { name: '비활성', exact: true }).click();
+
+    // 필터 결과 없음 빈 상태에 CTA 버튼이 표시되어야 한다 (#126 핵심)
+    await expect(page.getByTestId('domains-empty-filter')).toBeVisible();
+    await expect(page.getByTestId('empty-clear-filter-btn')).toBeVisible();
+    await expect(page.getByTestId('empty-clear-filter-btn')).toContainText('전체 보기');
+  });
+
+  test('필터 결과 없음 빈 상태에서 "전체 보기" 클릭 시 필터가 해제되고 전체 목록이 표시된다', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+    await mockApi(page, 'GET', '/domains?enabled=false', []);
+
+    await page.goto('/domains');
+
+    // 비활성 필터 선택 → 빈 상태 진입
+    await page.getByTestId('domain-enabled-filter').click();
+    await page.getByRole('listbox').getByRole('option', { name: '비활성', exact: true }).click();
+    await expect(page.getByTestId('domains-empty-filter')).toBeVisible();
+
+    // CTA 클릭 → 필터 해제 (#126 핵심 — 입력→처리→출력 파이프라인)
+    await page.getByTestId('empty-clear-filter-btn').click();
+
+    // 필터가 해제되어 전체 도메인 목록이 다시 표시되어야 한다
+    await expect(page.getByTestId('domains-table')).toBeVisible();
+    await expect(page.getByTestId('domains-empty-filter')).not.toBeVisible();
+  });
+});
+
+/**
  * 이슈 #119 회귀 방지 — 필터 변경 시 선택 상태 미초기화로 숨겨진 도메인 일괄 삭제 가능
  * 도메인을 선택한 뒤 검색/필터를 변경하면 선택이 초기화되어
  * 현재 뷰에 표시되지 않는 도메인이 일괄 삭제 대상에 포함되지 않아야 한다.

@@ -38,6 +38,16 @@ interface DomainTableProps {
    * undefined이면 필터 미적용 상태로 간주한다.
    */
   enabledFilter?: boolean;
+  /**
+   * 검색 결과 없음 빈 상태의 CTA — 검색어를 지우고 전체 목록으로 돌아가는 콜백.
+   * 제공하지 않으면 CTA 버튼을 렌더링하지 않는다.
+   */
+  onClearSearch?: () => void;
+  /**
+   * 필터 결과 없음 빈 상태의 CTA — 상태 필터를 해제하고 전체 목록으로 돌아가는 콜백.
+   * 제공하지 않으면 CTA 버튼을 렌더링하지 않는다.
+   */
+  onClearFilter?: () => void;
   /** 토글 뮤테이션 진행 중 여부 — 중복 클릭 방지를 위해 버튼을 disabled 처리한다 */
   isTogglePending?: boolean;
   /** 퍼지 뮤테이션 진행 중 여부 — 중복 클릭 방지를 위해 버튼을 disabled 처리한다 */
@@ -69,6 +79,8 @@ export function DomainTable({
   onAddDomain,
   searchQuery,
   enabledFilter,
+  onClearSearch,
+  onClearFilter,
   isTogglePending = false,
   isPurgePending = false,
   sortKey,
@@ -100,8 +112,8 @@ export function DomainTable({
   }
 
   // 빈 상태 — 검색어·상태 필터 유무로 세 가지 상황을 분기한다
-  // 1) 검색어 있음: "검색 결과 없음" 메시지 표시 (CTA 없음 — 실제 도메인은 존재함)
-  // 2) 상태 필터(활성/비활성) 적용됨: "조건에 맞는 도메인 없음" 메시지 표시 (CTA 없음)
+  // 1) 검색어 있음: "검색 결과 없음" 메시지 + 검색 초기화 CTA (#126)
+  // 2) 상태 필터(활성/비활성) 적용됨: "조건에 맞는 도메인 없음" + 필터 해제 CTA (#126)
   //    → 실제 도메인은 존재하지만 필터 조건에 해당하는 것이 없는 상황이므로
   //      "등록된 도메인이 없습니다" CTA를 표시하면 오해를 준다 (이슈 #95)
   // 3) 필터 없음: 등록된 도메인이 아예 없으므로 추가 유도 CTA 제공
@@ -117,6 +129,17 @@ export function DomainTable({
             <strong>&ldquo;{searchQuery}&rdquo;</strong>에 일치하는 도메인이 없습니다.
           </p>
           <p className="text-xs">검색어를 바꿔 다시 시도해보세요.</p>
+          {/* 검색 초기화 CTA — 클릭 시 검색어를 지워 전체 목록으로 돌아간다 (#126) */}
+          {onClearSearch && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onClearSearch}
+              data-testid="empty-clear-search-btn"
+            >
+              검색어 지우기
+            </Button>
+          )}
         </div>
       );
     }
@@ -133,6 +156,17 @@ export function DomainTable({
             {filterLabel} 상태인 도메인이 없습니다.
           </p>
           <p className="text-xs">필터를 변경하거나 해제해 보세요.</p>
+          {/* 필터 해제 CTA — 클릭 시 상태 필터를 해제하여 전체 목록으로 돌아간다 (#126) */}
+          {onClearFilter && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onClearFilter}
+              data-testid="empty-clear-filter-btn"
+            >
+              전체 보기
+            </Button>
+          )}
         </div>
       );
     }

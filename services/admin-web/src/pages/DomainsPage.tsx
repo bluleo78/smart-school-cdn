@@ -322,6 +322,10 @@ export function DomainsPage() {
               onAddDomain={() => setShowAddDialog(true)}
               searchQuery={filter.q}
               enabledFilter={filter.enabled}
+              // 검색 초기화: q 파라미터만 제거하고 나머지 필터(enabled, sort, order)는 유지 (#126)
+              onClearSearch={() => setFilter({ ...filter, q: undefined })}
+              // 필터 해제: enabled 파라미터만 제거하고 나머지 필터(q, sort, order)는 유지 (#126)
+              onClearFilter={() => setFilter({ ...filter, enabled: undefined })}
               sortKey={filter.sort}
               sortDir={filter.order}
               onSortChange={handleSortChange}
