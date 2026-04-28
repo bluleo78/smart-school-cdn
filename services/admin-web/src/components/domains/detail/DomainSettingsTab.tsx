@@ -138,11 +138,13 @@ function OriginSection({ domain }: { domain: Domain }) {
               <Label htmlFor="description-input" className="text-xs text-muted-foreground">
                 설명
               </Label>
+              {/* maxLength={500} — 서버 제한(500자)과 일치하는 클라이언트 방어선 (#155) */}
               <Input
                 id="description-input"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 className="h-8 text-sm"
+                maxLength={500}
               />
             </div>
 

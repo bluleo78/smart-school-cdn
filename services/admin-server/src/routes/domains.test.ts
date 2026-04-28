@@ -455,6 +455,80 @@ describe('PUT /api/domains/:host', () => {
     expect(res.statusCode).toBe(404);
   });
 
+  it('description이 500자를 초과하면 400 반환한다 (#155)', async () => {
+    // 무제한 저장 방지 — 서버 검증으로 501자 이상의 description을 거부해야 한다
+    const repo = makeRepo();
+    repo.upsert('httpbin.org', 'https://httpbin.org');
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/domains/httpbin.org',
+      payload: { description: 'a'.repeat(501) },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).error).toContain('500자');
+    // DB에 저장되지 않았는지 확인
+    expect(repo.findByHost('httpbin.org')?.description).toBe('');
+  });
+
+  it('description이 정확히 500자이면 200 반환한다 (#155)', async () => {
+    // 경계값: 500자는 허용 상한이므로 저장에 성공해야 한다
+    const repo = makeRepo();
+    repo.upsert('httpbin.org', 'https://httpbin.org');
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/domains/httpbin.org',
+      payload: { description: 'a'.repeat(500) },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body).description).toHaveLength(500);
+  });
+
+  it('enabled가 0 또는 1이 아닌 값이면 400 반환한다 (#156)', async () => {
+    // 임의 정수 저장 방지 — enabled=99 같은 값은 서버에서 거부해야 한다
+    const repo = makeRepo();
+    repo.upsert('httpbin.org', 'https://httpbin.org');
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/domains/httpbin.org',
+      payload: { enabled: 99 },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).error).toContain('0 또는 1');
+    // DB에 반영되지 않았는지 확인
+    expect(repo.findByHost('httpbin.org')?.enabled).toBe(1);
+  });
+
+  it('enabled가 0이면 200 반환한다 (#156)', async () => {
+    // 경계값: 0은 유효한 비활성 상태값이므로 허용되어야 한다
+    const repo = makeRepo();
+    repo.upsert('httpbin.org', 'https://httpbin.org');
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/domains/httpbin.org',
+      payload: { enabled: 0 },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body).enabled).toBe(0);
+  });
+
+  it('enabled가 1이면 200 반환한다 (#156)', async () => {
+    // 경계값: 1은 유효한 활성 상태값이므로 허용되어야 한다
+    const repo = makeRepo();
+    repo.upsert('httpbin.org', 'https://httpbin.org');
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/domains/httpbin.org',
+      payload: { enabled: 1 },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body).enabled).toBe(1);
+  });
+
   it('syncToProxy 실패 시 502를 반환하고 DB를 원래 값으로 롤백한다 (#151)', async () => {
     // Proxy 동기화 실패 시 DB 변경이 원복되어 toggle과 동일한 일관성을 보장한다
     const axiosMod = await import('axios');

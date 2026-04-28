@@ -336,7 +336,8 @@ export async function domainRoutes(
   /** 도메인 편집 (origin, enabled, description) */
   app.put<{
     Params: { host: string };
-    Body: { origin?: string; enabled?: number; description?: string };
+    // enabled는 0|1만 허용 — TypeScript 타입으로 좁혀 런타임 검증과 일관성 유지 (#156)
+    Body: { origin?: string; enabled?: 0 | 1; description?: string };
   }>('/api/domains/:host', async (request, reply) => {
     const host = decodeURIComponent(request.params.host);
     const { origin, enabled, description } = request.body ?? {};
@@ -348,6 +349,14 @@ export async function domainRoutes(
     // 클라이언트·서버 이중 방어 — Proxy가 올바르게 업스트림에 연결하려면 스킴 필수 (#103)
     if (origin !== undefined && !origin.startsWith('http://') && !origin.startsWith('https://')) {
       return reply.status(400).send({ error: 'origin은 http:// 또는 https://로 시작해야 합니다.' });
+    }
+    // enabled는 0 또는 1만 허용 — 임의 정수가 DB에 저장되면 UI가 상태를 오판한다 (#156)
+    if (enabled !== undefined && enabled !== 0 && enabled !== 1) {
+      return reply.status(400).send({ error: 'enabled는 0 또는 1이어야 합니다.' });
+    }
+    // description 최대 500자 — 무제한 저장 방지 (#155)
+    if (description !== undefined && description.length > 500) {
+      return reply.status(400).send({ error: 'description은 500자 이하여야 합니다.' });
     }
     // 롤백을 위해 수정 전 원본 값을 먼저 저장한다
     const original = domainRepo.findByHost(host);
