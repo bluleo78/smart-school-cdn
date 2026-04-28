@@ -195,7 +195,8 @@ function PurgeConfirmDialog({
           이 도메인의 전체 캐시를 삭제합니다. 계속하시겠습니까?
         </p>
         <div className="flex justify-end gap-2 pt-1">
-          <Button variant="outline" onClick={onClose}>
+          {/* isPending 중에는 취소 버튼 비활성화 — 퍼지가 진행 중임을 사용자에게 명시 */}
+          <Button variant="outline" onClick={onClose} disabled={isPending}>
             취소
           </Button>
           <Button
@@ -331,9 +332,10 @@ export function DomainQuickActions({ domain }: Props) {
         onClose={() => setProxyTestOpen(false)}
         domain={domain}
       />
+      {/* isPending 중 ESC/백드롭/X 클릭으로 dialog가 닫히는 것을 방지 */}
       <PurgeConfirmDialog
         open={purgeOpen}
-        onClose={() => setPurgeOpen(false)}
+        onClose={() => { if (!purgeMutation.isPending) setPurgeOpen(false); }}
         onConfirm={handlePurgeConfirm}
         isPending={purgeMutation.isPending}
       />

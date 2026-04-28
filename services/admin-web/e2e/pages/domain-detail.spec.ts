@@ -249,6 +249,46 @@ test.describe('도메인 상세 — Overview 탭', () => {
   });
 
   /**
+   * 이슈 #142 회귀 방지 — 퍼지 진행 중 취소/ESC로 dialog가 닫히는 버그
+   * 수정 후:
+   * - 취소 버튼이 isPending 동안 disabled 처리되어야 한다
+   * - ESC 키를 눌러도 dialog가 닫히지 않아야 한다
+   */
+  test('PurgeConfirmDialog — 퍼지 진행 중 취소 버튼이 disabled되고 ESC로 닫히지 않는다 (회귀: #142)', async ({ page }) => {
+    // 수정 전: 취소 버튼에 disabled 없고 onClose에 isPending 가드 없어 mutation 진행 중 닫힘 가능
+    // 수정 후: disabled={isPending} + onClose에서 !isPending 가드 → 진행 중 닫기 차단
+    await setupDetailMocks(page);
+
+    // purge API를 지연 응답으로 설정하여 isPending 상태를 유지한다
+    let resolveRoute: (() => void) | null = null;
+    await page.route('**/api/domains/textbook.com/purge', async (route) => {
+      // 외부에서 해제할 때까지 응답을 보류한다
+      await new Promise<void>((res) => { resolveRoute = res; });
+      return route.fulfill({ status: 200, json: { ok: true } });
+    });
+
+    await page.goto('/domains/textbook.com');
+
+    // 퍼지 다이얼로그 열기
+    await page.getByTestId('purge-cache-open').click();
+    await expect(page.getByTestId('purge-confirm-dialog')).toBeVisible();
+
+    // 퍼지 실행 → mutation 시작 (응답 지연 중)
+    await page.getByTestId('purge-confirm-submit').click();
+
+    // isPending 동안 취소 버튼이 disabled 상태여야 한다
+    await expect(page.locator('[data-testid="purge-confirm-dialog"] button:has-text("취소")')).toBeDisabled({ timeout: 1000 });
+
+    // ESC 키를 눌러도 dialog가 열린 상태를 유지해야 한다
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('purge-confirm-dialog')).toBeVisible({ timeout: 500 });
+
+    // 응답 해제 → 완료 → 다이얼로그 닫힘
+    resolveRoute!();
+    await expect(page.getByTestId('purge-confirm-dialog')).not.toBeVisible({ timeout: 3000 });
+  });
+
+  /**
    * 이슈 #65 회귀 방지 — 4xx/5xx 응답도 성공(녹색 ✓)으로 표시되던 버그
    * 수정 후: status_code 범위에 따라 색상·아이콘이 구분되어야 한다
    *   2xx → bg-success/10 text-success + ✓
