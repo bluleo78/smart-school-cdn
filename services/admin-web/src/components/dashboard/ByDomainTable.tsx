@@ -3,6 +3,7 @@
 /// 키보드 접근성: tabIndex/role/onKeyDown 추가로 Tab 포커스 및 Enter/Space 활성화 지원 (#108)
 import { useNavigate } from 'react-router';
 import type { KeyboardEvent } from 'react';
+import { Globe } from 'lucide-react';
 import { useCacheStats } from '../../hooks/useCacheStats';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Skeleton } from '../ui/skeleton';
@@ -46,7 +47,12 @@ export function ByDomainTable() {
       <Card>
         <CardHeader><CardTitle>도메인별 캐시 지표</CardTitle></CardHeader>
         <CardContent>
-          <p className="text-sm text-muted-foreground">도메인 데이터가 없습니다.</p>
+          {/* 빈 상태 — 아이콘 + 제목 + 설명 3요소로 사용자가 다음 행동을 알 수 있도록 안내 (Design checklist §2.5) */}
+          <div className="flex flex-col items-center gap-2 py-8 text-muted-foreground">
+            <Globe className="h-8 w-8 opacity-50" />
+            <p className="text-sm font-medium">도메인 데이터가 없습니다</p>
+            <p className="text-xs">도메인을 추가하면 캐시 지표가 표시됩니다</p>
+          </div>
         </CardContent>
       </Card>
     );

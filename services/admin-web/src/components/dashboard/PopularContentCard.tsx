@@ -1,5 +1,6 @@
 /// 인기 콘텐츠 카드 — 히트 수 기준 Top 5 캐시 항목을 테이블로 표시
 /// shadcn Table 컴포넌트 사용으로 ByDomainTable과 헤더·패딩·border 스타일 일관성 유지
+import { BarChart2 } from 'lucide-react';
 import { useCachePopular } from '../../hooks/useCachePopular';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Skeleton } from '../ui/skeleton';
@@ -46,7 +47,12 @@ export function PopularContentCard() {
       <CardHeader><CardTitle>인기 콘텐츠 Top 5</CardTitle></CardHeader>
       <CardContent className="px-0">
         {items.length === 0 ? (
-          <p className="text-sm text-muted-foreground px-4">캐시된 콘텐츠가 없습니다</p>
+          /* 빈 상태 — 아이콘 + 제목 + 설명으로 캐시 결과 분포 차트와 동일한 패턴 적용 (Design checklist §2.5) */
+          <div className="flex flex-col items-center gap-2 py-8 text-muted-foreground">
+            <BarChart2 className="h-8 w-8 opacity-50" />
+            <p className="text-sm font-medium">캐시된 콘텐츠가 없습니다</p>
+            <p className="text-xs">프록시로 요청이 들어오면 자동으로 표시됩니다</p>
+          </div>
         ) : (
           // shadcn Table 컴포넌트로 교체 — ByDomainTable과 동일한 헤더·패딩·border 스타일 적용
           <Table data-testid="popular-content-table">

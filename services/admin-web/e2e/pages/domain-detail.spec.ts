@@ -1309,7 +1309,7 @@ test.describe('도메인 상세 — 설정 탭', () => {
     await expect(page.getByTestId('domain-purge-confirm-btn')).toBeDisabled({ timeout: 1000 });
 
     // 응답 해제 → 완료 → 다이얼로그 닫힘
-    resolveRoute?.();
+    resolveRoute!();
     await expect(page.getByTestId('domain-purge-dialog')).not.toBeVisible({ timeout: 3000 });
   });
 });

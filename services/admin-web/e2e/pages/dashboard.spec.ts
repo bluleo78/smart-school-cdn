@@ -106,6 +106,45 @@ test.describe('대시보드 — 요청 로그 테이블', () => {
   });
 });
 
+test.describe('대시보드 — 빈 상태 카드 (#123)', () => {
+  /// ByDomainTable / PopularContentCard 빈 상태 회귀 테스트
+  /// by_domain=[] 와 /cache/popular=[] 모킹으로 아이콘·설명이 표시되는지 검증한다
+
+  test('도메인 데이터 없을 때 ByDomainTable에 아이콘과 안내 문구가 표시된다', async ({ page }) => {
+    // by_domain 빈 배열로 모킹 — 텍스트만 표시되던 버그(#123) 재현 조건
+    await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
+    await mockApi(page, 'GET', '/proxy/requests', []);
+    await mockApi(page, 'GET', '/cache/stats', createCacheStats({ by_domain: [] }));
+    await mockApi(page, 'GET', '/cache/popular', []);
+    await page.route('**/api/cache/series*', (route) =>
+      route.fulfill({ json: { buckets: createCacheSeriesBuckets() } }),
+    );
+
+    await page.goto('/');
+
+    // 아이콘 포함 빈 상태 영역이 렌더링되는지 확인 (Globe 아이콘은 aria-hidden이므로 텍스트로 검증)
+    await expect(page.getByText('도메인 데이터가 없습니다')).toBeVisible();
+    await expect(page.getByText('도메인을 추가하면 캐시 지표가 표시됩니다')).toBeVisible();
+  });
+
+  test('캐시 콘텐츠 없을 때 PopularContentCard에 아이콘과 안내 문구가 표시된다', async ({ page }) => {
+    // /cache/popular 빈 배열로 모킹 — 텍스트만 표시되던 버그(#123) 재현 조건
+    await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
+    await mockApi(page, 'GET', '/proxy/requests', []);
+    await mockApi(page, 'GET', '/cache/stats', createCacheStats({ by_domain: [] }));
+    await mockApi(page, 'GET', '/cache/popular', []);
+    await page.route('**/api/cache/series*', (route) =>
+      route.fulfill({ json: { buckets: createCacheSeriesBuckets() } }),
+    );
+
+    await page.goto('/');
+
+    // 아이콘 포함 빈 상태 영역이 렌더링되는지 확인
+    await expect(page.getByText('캐시된 콘텐츠가 없습니다')).toBeVisible();
+    await expect(page.getByText('프록시로 요청이 들어오면 자동으로 표시됩니다')).toBeVisible();
+  });
+});
+
 test.describe('대시보드 — 로딩 상태', () => {
   test('API 응답 전 로딩 인디케이터가 표시된다', async ({ page }) => {
     // API 모킹: 1초 지연
