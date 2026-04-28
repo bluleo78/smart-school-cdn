@@ -1,5 +1,5 @@
 /// 도메인 목록 툴바 — 추가/일괄 버튼, 검색 + 상태 필터
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import {
@@ -31,6 +31,13 @@ export function DomainToolbar({
   // debounce 중인지 추적 — debounce 중이면 로컬 입력값 사용, 아니면 filter.q 사용
   const [localInput, setLocalInput] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // unmount 시 pending debounce 타이머를 정리 — stale callback 방지
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, []);
 
   // 표시할 값: debounce 중이면 로컬, 아니면 부모 filter에서 파생
   const searchValue = localInput ?? (filter.q ?? '');

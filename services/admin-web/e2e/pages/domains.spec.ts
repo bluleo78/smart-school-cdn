@@ -1341,3 +1341,41 @@ test.describe('도메인 관리 — 일괄 추가 Textarea 컴포넌트 (#107)',
     expect(bulkAddCalled).toBe(true);
   });
 });
+
+/**
+ * 이슈 #143 회귀 방지 — DomainToolbar 검색 debounce timer unmount 시 cleanup 누락
+ * 검색 입력 중 다른 페이지로 이동하면 debounce 타이머가 정리되어야 한다.
+ * unmount 후 stale onFilterChange 콜백이 실행되어선 안 된다.
+ */
+test.describe('도메인 관리 — 검색 debounce unmount cleanup (#143)', () => {
+  test('검색 입력 중 다른 페이지로 이동해도 stale API 요청이 발생하지 않는다', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+
+    // /dns 페이지 이동 후 발생할 수 있는 stale 검색 요청 감시
+    // — unmount cleanup이 없으면 debounce 300ms 후 이전 쿼리로 API 요청이 발생한다 (#143)
+    let staleSearchCalled = false;
+    await page.route('**/api/domains?q=stale**', () => {
+      staleSearchCalled = true;
+    });
+
+    // DNS 페이지 전환에 필요한 기본 mock
+    await page.route('**/api/dns/**', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }),
+    );
+
+    await page.goto('/domains');
+
+    // 검색 입력 — debounce(300ms) 완료 전에 페이지 이동
+    await page.getByTestId('domain-search').fill('stale');
+
+    // debounce 완료(300ms) 이전에 즉시 다른 페이지로 이동 — unmount 트리거
+    await page.goto('/dns');
+
+    // debounce 300ms 경과 후 stale 콜백 실행 여부 확인
+    // cleanup이 없으면 이 시점에 /api/domains?q=stale 요청이 발생한다 (#143)
+    await page.waitForTimeout(500);
+
+    expect(staleSearchCalled).toBe(false);
+  });
+});
