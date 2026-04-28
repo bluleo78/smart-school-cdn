@@ -115,8 +115,16 @@ app.addHook('preHandler', requireAuth);
 // 와일드카드(`*`) + credentials 조합은 브라우저가 거부하고, 외부 origin이 쿠키 세션을
 // 탈취할 수 있으므로 허용 origin을 허용 목록으로 제한한다.
 // 운영 배포 시 ALLOWED_ORIGINS 환경변수로 admin-web 주소만 허용 (콤마 구분).
+// 프로덕션에서 ALLOWED_ORIGINS 미설정 시 개발용 localhost가 fallback되는 보안 위험 방지 (#160):
+// - NODE_ENV=production 이면 즉시 종료 (운영 배포 설정 누락 방어)
+// - 개발/테스트 환경에서는 localhost fallback 유지 (DX 보존)
+if (!process.env.ALLOWED_ORIGINS && process.env.NODE_ENV === 'production') {
+  console.error('ALLOWED_ORIGINS 환경변수 필수 (production 환경) — 허용할 admin-web origin을 콤마로 구분하여 설정하세요.');
+  process.exit(1);
+}
+const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') ?? ['http://localhost:4173', 'http://localhost:7777'];
 await app.register(cors, {
-  origin: process.env.ALLOWED_ORIGINS?.split(',') ?? ['http://localhost:4173', 'http://localhost:7777'],
+  origin: allowedOrigins,
   credentials: true,  // HttpOnly 쿠키 세션 사용 — credentials 허용 필수
 });
 
