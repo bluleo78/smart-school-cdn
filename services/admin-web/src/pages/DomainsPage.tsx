@@ -315,9 +315,9 @@ export function DomainsPage() {
               selectedHosts={selectedHosts}
               onSelectChange={setSelectedHosts}
               onToggle={(host) => toggleMutation.mutate(host)}
-              isTogglePending={toggleMutation.isPending}
+              pendingToggleHost={toggleMutation.isPending ? (toggleMutation.variables ?? null) : null}
               onPurge={(host) => purgeMutation.mutate(host)}
-              isPurgePending={purgeMutation.isPending}
+              pendingPurgeHost={purgeMutation.isPending ? (purgeMutation.variables ?? null) : null}
               onDelete={(host) => setDeleteTarget(host)}
               onAddDomain={() => setShowAddDialog(true)}
               searchQuery={filter.q}
