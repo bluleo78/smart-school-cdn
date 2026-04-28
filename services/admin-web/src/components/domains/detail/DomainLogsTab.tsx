@@ -154,7 +154,7 @@ function HitMissBarChart({
           return (
             <div
               key={i}
-              className="flex-1 flex flex-col justify-end group relative"
+              className="flex-1 h-full flex flex-col justify-end group relative"
               title={`${label}: HIT ${hits[i]}, MISS ${misses[i]}`}
             >
               <div
