@@ -84,9 +84,9 @@ export function DomainSummaryCards() {
         <CardContent>
           <div className="flex items-end justify-between">
             {/* whitespace-nowrap: "0 B" / "1.2 MB" 등이 공백 기준으로 줄바꿈되지 않도록 */}
+            {/* API 응답에 절감량(todaySaved) 필드가 없으므로 수치 없는 라벨 단독 노출 방지 (#125) */}
             <div>
               <p className="text-3xl font-bold whitespace-nowrap">{formatBytes(data?.todayBandwidth ?? 0)}</p>
-              <span className="text-xs text-muted-foreground">절감량</span>
             </div>
             <BarSparkline values={data?.hourlyBandwidth ?? Array(24).fill(0)} />
           </div>
