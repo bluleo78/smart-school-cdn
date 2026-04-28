@@ -258,6 +258,9 @@ function DangerSection({
         setOpen(false);
         void navigate('/domains');
       },
+      onError: () => {
+        toast.error('도메인 삭제에 실패했습니다.');
+      },
     });
   }
 
