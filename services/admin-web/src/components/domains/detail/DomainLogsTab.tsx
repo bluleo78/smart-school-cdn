@@ -1,5 +1,5 @@
 /// 도메인 로그 탭 — 기간 토글 + 자동갱신 드롭다운 + 수동 새로고침 + 트래픽 차트 + Top URL + 로그 테이블.
-import { useQueryClient } from '@tanstack/react-query';
+import { useIsFetching, useQueryClient } from '@tanstack/react-query';
 import { PeriodSelector, type PeriodValue } from './PeriodSelector';
 import { RefreshIntervalSelect, type RefreshIntervalMs } from './RefreshIntervalSelect';
 import { ManualRefreshButton } from './ManualRefreshButton';
@@ -29,6 +29,12 @@ export function DomainLogsTab({ host, period, onPeriodChange, refresh, onRefresh
       ? { from: period.from, to: period.to }
       : undefined;
 
+  /**
+   * 이 도메인의 logs/top-urls 쿼리 중 하나라도 fetching 중이면 true.
+   * useIsFetching으로 집계하여 ManualRefreshButton.isRefreshing에 전달 — 중복 클릭 방지 (#144).
+   */
+  const isFetching = useIsFetching({ queryKey: ['domain', host] }) > 0;
+
   /** 수동 새로고침 — logs와 top-urls 쿼리 모두 무효화 */
   function handleRefresh() {
     qc.invalidateQueries({ queryKey: ['domain', host, 'logs'] });
@@ -42,7 +48,7 @@ export function DomainLogsTab({ host, period, onPeriodChange, refresh, onRefresh
         <PeriodSelector value={period} onChange={onPeriodChange} />
         <div className="flex items-center gap-2">
           <RefreshIntervalSelect value={refresh} onChange={onRefreshChange} />
-          <ManualRefreshButton onClick={handleRefresh} />
+          <ManualRefreshButton onClick={handleRefresh} isRefreshing={isFetching} />
         </div>
       </div>
 

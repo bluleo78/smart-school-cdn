@@ -1,5 +1,5 @@
 /// 도메인 통계 탭 — 기간 토글 + 수동 새로고침. 캐시/최적화 2섹션.
-import { useQueryClient } from '@tanstack/react-query';
+import { useIsFetching, useQueryClient } from '@tanstack/react-query';
 import { Info } from 'lucide-react';
 import { PeriodSelector, type PeriodValue } from './PeriodSelector';
 import { ManualRefreshButton } from './ManualRefreshButton';
@@ -32,6 +32,12 @@ function isSeriesDegraded(p: PeriodValue): boolean {
 export function DomainStatsTab({ host, period, onPeriodChange }: Props) {
   const qc = useQueryClient();
 
+  /**
+   * 이 도메인과 연관된 쿼리 중 하나라도 fetching 중이면 true.
+   * useIsFetching으로 집계하여 ManualRefreshButton.isRefreshing에 전달 — 중복 클릭 방지 (#144).
+   */
+  const isFetching = useIsFetching({ queryKey: ['domain', host] }) > 0;
+
   /** 수동 새로고침 — 이 도메인과 연관된 모든 쿼리 무효화 */
   function handleRefresh() {
     qc.invalidateQueries({ queryKey: ['domain', host] });
@@ -41,7 +47,7 @@ export function DomainStatsTab({ host, period, onPeriodChange }: Props) {
     <div className="space-y-6" data-testid="domain-optimization-tab">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <PeriodSelector value={period} onChange={onPeriodChange} />
-        <ManualRefreshButton onClick={handleRefresh} />
+        <ManualRefreshButton onClick={handleRefresh} isRefreshing={isFetching} />
       </div>
 
       {/* 캐시 섹션 */}

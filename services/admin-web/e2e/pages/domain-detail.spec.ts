@@ -813,6 +813,67 @@ test.describe('도메인 상세 — 통계 탭', () => {
     await expect(page.getByTestId('manual-refresh-btn')).toBeVisible();
   });
 
+  test('Stats 탭 수동 새로고침 중 버튼이 비활성화되고 스피너가 표시된다 (회귀: #144)', async ({ page }) => {
+    // isRefreshing prop이 전달되지 않아 갱신 중에도 버튼이 활성 상태였던 버그.
+    // 수정 후: isFetching 중에는 버튼이 disabled되고 RefreshCw 아이콘이 animate-spin 클래스를 가진다.
+    // setupDetailMocks 이후 덮어쓰기로 등록 — Playwright LIFO 규칙으로 마지막 핸들러가 우선한다.
+    // url-breakdown 엔드포인트는 ['domain', host, 'url-optimization', ...] queryKey를 사용하므로
+    // invalidateQueries(['domain', host]) 시 refetch되어 isFetching을 증가시킨다.
+    await setupDetailMocks(page);
+    let urlBreakdownCallCount = 0;
+    await page.route('**/api/domains/textbook.com/optimization/url-breakdown*', async (route) => {
+      urlBreakdownCallCount++;
+      if (urlBreakdownCallCount > 1) {
+        // 두 번째 요청(수동 갱신)은 1.5초 지연 → isFetching=true 상태를 충분히 관찰 가능
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+      await route.fulfill({ json: { total: 0, items: [] } });
+    });
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '최적화' }).click();
+    await expect(page.getByTestId('manual-refresh-btn')).toBeVisible();
+
+    // 새로고침 버튼 클릭 → 갱신 시작 (두 번째 url-breakdown 요청, 1.5초 지연)
+    await page.getByTestId('manual-refresh-btn').click();
+
+    // 갱신 중: 버튼이 disabled 상태여야 한다
+    await expect(page.getByTestId('manual-refresh-btn')).toBeDisabled();
+
+    // 갱신 중: RefreshCw 아이콘에 animate-spin 클래스가 있어야 한다
+    const icon = page.getByTestId('manual-refresh-btn').locator('svg');
+    await expect(icon).toHaveClass(/animate-spin/);
+  });
+
+  test('Traffic 탭 수동 새로고침 중 버튼이 비활성화되고 스피너가 표시된다 (회귀: #144)', async ({ page }) => {
+    // 트래픽(로그) 탭의 ManualRefreshButton도 isRefreshing prop 누락이었던 버그.
+    // 수정 후: logs/top-urls 쿼리 fetching 중에는 버튼이 disabled 상태를 유지한다.
+    // setupDetailMocks 이후 덮어쓰기로 등록 — Playwright LIFO 규칙으로 마지막 핸들러가 우선한다.
+    // 초기 로딩은 빠른 응답, 두 번째 이후(갱신)는 지연 응답으로 isFetching 상태를 관찰한다.
+    await setupDetailMocks(page);
+    let logsCallCount = 0;
+    await page.route('**/api/domains/textbook.com/logs*', async (route) => {
+      logsCallCount++;
+      if (logsCallCount > 1) {
+        // 두 번째 요청(수동 갱신)은 1.5초 지연 → isFetching=true 상태를 충분히 관찰 가능
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+      await route.fulfill({ json: createDomainLogs() });
+    });
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '트래픽' }).click();
+    await expect(page.getByTestId('manual-refresh-btn')).toBeVisible();
+
+    // 새로고침 버튼 클릭 → 갱신 시작 (두 번째 logs 요청, 1.5초 지연)
+    await page.getByTestId('manual-refresh-btn').click();
+
+    // 갱신 중: 버튼이 disabled 상태여야 한다
+    await expect(page.getByTestId('manual-refresh-btn')).toBeDisabled();
+
+    // 갱신 중: RefreshCw 아이콘에 animate-spin 클래스가 있어야 한다
+    const icon = page.getByTestId('manual-refresh-btn').locator('svg');
+    await expect(icon).toHaveClass(/animate-spin/);
+  });
+
   test('7d/30d 기간 선택 시 24h degrade 안내 배너가 표시된다 (회귀: #51)', async ({ page }) => {
     // 7d/30d 선택 시 캐시 시계열이 24h로 degrade되는데 안내 없이 표시되던 버그.
     // 수정 후: degrade 조건에서 안내 배너(data-testid=cache-series-degrade-notice)가 나타나야 한다.
