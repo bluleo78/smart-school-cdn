@@ -117,7 +117,8 @@ export function SystemPage() {
           <p className="font-semibold">캐시 디스크 사용량이 {diskUsagePercent}%입니다.</p>
           <p className="mt-1 text-sm">
             오래된 캐시를 퍼지하거나 최대 용량을 늘리세요.{' '}
-            <Link to="/cache" className="underline">
+            {/* /cache는 /domains로 리다이렉트되는 데드 링크 — 실제 캐시 퍼지가 있는 대시보드(/)로 안내 */}
+            <Link to="/" className="underline">
               캐시 관리 페이지로 이동
             </Link>
           </p>

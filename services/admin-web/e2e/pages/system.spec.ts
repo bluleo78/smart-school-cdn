@@ -30,6 +30,27 @@ test.describe('시스템 페이지', () => {
     await expect(page.getByTestId('disk-usage-bar')).toBeVisible();
   });
 
+  /// 회귀 방지 #157: /cache 링크가 /domains로 리다이렉트되는 데드 링크 — 대시보드(/)로 수정
+  /// diskUsageRatio >= 0.9 일 때 경고 배너의 "캐시 관리 페이지로 이동" 링크가 /를 가리켜야 한다
+  test('디스크 경고 배너 "캐시 관리 페이지로 이동" 링크가 / (대시보드)를 가리킨다 — 회귀 방지 #157', async ({ page }) => {
+    // used_bytes(900GB) / max_bytes(1TB) = 90% → isDiskWarning = true
+    await mockApi(page, 'GET', '/cache/stats', {
+      requests: 1000, l1_hits: 900, l2_hits: 10, miss: 90, bypass_total: 0,
+      bypass: { method: 0, nocache: 0, size: 0, other: 0, total: 0 },
+      l1_hit_rate: 0.9, edge_hit_rate: 0.91, bypass_rate: 0,
+      disk: { used_bytes: 966_367_641_600, max_bytes: 1_073_741_824_000, entry_count: 500 },
+      by_domain: [],
+    });
+    await page.goto('/system');
+
+    // 경고 배너가 표시될 때까지 대기
+    const link = page.getByRole('link', { name: '캐시 관리 페이지로 이동' });
+    await expect(link).toBeVisible({ timeout: 10000 });
+
+    // href가 / (대시보드) 이어야 한다 (/cache 또는 /domains 금지)
+    await expect(link).toHaveAttribute('href', '/');
+  });
+
   /// 회귀 방지 #140: diskUsagePercent 100% clamp 없어 progress bar overflow 가능
   /// used_bytes > max_bytes 시 bar width가 100%를 초과하지 않아야 한다
   test('used_bytes > max_bytes 이어도 progress bar width가 100% 이하다 — 회귀 방지 #140', async ({ page }) => {
