@@ -1920,6 +1920,45 @@ test.describe('도메인 상세 — 설정 탭', () => {
   });
 
   /**
+   * 이슈 #179 회귀 방지 — IME 조합 중 Escape 키로 편집 모드가 닫혀 한글 입력값이 손실되는 문제
+   * 수정 전: form onKeyDown이 isComposing을 체크하지 않아 한글 조합 중 Escape도 handleCancel() 트리거
+   * 수정 후: e.nativeEvent.isComposing(또는 keyCode 229)이면 Escape를 IME에 위임하여 편집 모드 유지
+   */
+  test('OriginSection — IME 조합 중 Escape는 편집 취소되지 않고 입력값이 보존된다 (회귀: #179)', async ({ page }) => {
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com');
+
+    // 설정 탭 → 편집 모드 진입 → 설명 필드에 값 입력
+    await page.getByRole('tab', { name: '설정' }).click();
+    await page.getByTestId('edit-domain-btn').click();
+    const descInput = page.locator('#description-input');
+    await descInput.fill('테스트 설');
+
+    // IME 조합 중 Escape 시뮬레이션 — KeyboardEvent에 isComposing=true를 설정하여 dispatch
+    // (실제 Playwright 키 입력으로는 isComposing 트리거가 어려우므로 합성 이벤트로 대체)
+    await descInput.evaluate((el) => {
+      const evt = new KeyboardEvent('keydown', {
+        key: 'Escape',
+        bubbles: true,
+        cancelable: true,
+      });
+      Object.defineProperty(evt, 'isComposing', { value: true });
+      Object.defineProperty(evt, 'keyCode', { value: 229 });
+      el.dispatchEvent(evt);
+    });
+
+    // 편집 모드가 유지되어야 한다 (저장 버튼이 여전히 보임)
+    await expect(page.getByTestId('save-domain-btn')).toBeVisible();
+    // 입력값이 보존되어야 한다
+    await expect(descInput).toHaveValue('테스트 설');
+
+    // 대조: IME 조합이 끝난 일반 Escape는 정상적으로 편집 취소를 트리거해야 한다
+    await descInput.press('Escape');
+    await expect(page.getByTestId('edit-domain-btn')).toBeVisible();
+    await expect(page.getByTestId('save-domain-btn')).not.toBeVisible();
+  });
+
+  /**
    * 이슈 #112 회귀 방지 — 도메인 전체 퍼지 시 purgeCache 직접 호출로 loading 상태·캐시 무효화 누락
    * 수정 후:
    * - 퍼지 진행 중 확인 다이얼로그의 퍼지 버튼이 disabled 처리되어야 한다

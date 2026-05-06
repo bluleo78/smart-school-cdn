@@ -128,11 +128,18 @@ function OriginSection({ domain }: { domain: Domain }) {
         </div>
 
         {editing ? (
-          /* 편집 폼 — form 태그로 감싸 Enter 키 제출 활성화, onKeyDown으로 Esc 취소 처리 */
+          /* 편집 폼 — form 태그로 감싸 Enter 키 제출 활성화, onKeyDown으로 Esc 취소 처리.
+             IME 조합 중(한글/일본어/중국어 등)에는 Escape를 무시하여 사용자가 IME 조합 취소만
+             의도했는데 편집 폼 전체가 닫혀 입력값이 손실되는 문제를 방지한다 (#179).
+             표준 가드: e.nativeEvent.isComposing(모던 브라우저) || e.keyCode === 229(레거시). */
           <form
             className="space-y-3"
             onSubmit={(e) => { e.preventDefault(); handleSave(); }}
-            onKeyDown={(e) => { if (e.key === 'Escape') handleCancel(); }}
+            onKeyDown={(e) => {
+              // IME 조합 중 Escape는 IME에 위임 — 편집 취소로 처리하지 않음
+              if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+              if (e.key === 'Escape') handleCancel();
+            }}
           >
             {/* Origin 입력 */}
             <div className="space-y-1">
