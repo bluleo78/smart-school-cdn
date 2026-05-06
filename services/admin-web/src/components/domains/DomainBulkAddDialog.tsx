@@ -52,18 +52,30 @@ export function DomainBulkAddDialog({ open, onOpenChange }: DomainBulkAddDialogP
     }
     try {
       await bulkAdd.mutateAsync({ domains });
+      // 성공 시에도 입력값/에러 잔존 방지 (#170)
       setText('');
+      setParseError(null);
       onOpenChange(false);
     } catch {
       // 오류 토스트는 훅에서 처리
     }
   }
 
-  const handleClose = () => onOpenChange(false);
+  /**
+   * mutation 진행 중에는 닫기 요청(ESC/백드롭/X/취소)을 모두 무시한다 (#170, #163 패턴).
+   * 외부 Wrapper 컴포넌트는 DomainsPage에서 항상 마운트되어 useState가 보존되므로,
+   * 닫힘 직전에 입력값/에러 메시지를 직접 리셋해 재오픈 시 잔존을 방지한다 (#170, #161 패턴).
+   */
+  const handleClose = () => {
+    if (bulkAdd.isPending) return;
+    setText('');
+    setParseError(null);
+    onOpenChange(false);
+  };
 
   return (
     <Dialog open={open} onClose={handleClose}>
-      <DialogContent data-testid="bulk-add-dialog">
+      <DialogContent data-testid="bulk-add-dialog" disableClose={bulkAdd.isPending}>
         <DialogTitle>도메인 일괄 추가</DialogTitle>
         <p className="text-xs text-muted-foreground mb-2">
           한 줄에 하나씩 <code className="text-xs bg-muted px-1 py-0.5 rounded">host origin</code> 형식으로 입력하세요.
@@ -83,7 +95,7 @@ export function DomainBulkAddDialog({ open, onOpenChange }: DomainBulkAddDialogP
           </p>
         )}
         <div className="flex justify-end gap-2 pt-2">
-          <Button variant="outline" onClick={handleClose}>
+          <Button variant="outline" onClick={handleClose} disabled={bulkAdd.isPending}>
             취소
           </Button>
           <Button

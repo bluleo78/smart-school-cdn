@@ -704,6 +704,83 @@ test.describe('도메인 관리 — 일괄 추가 (#55)', () => {
     await expect(errorMsg).toBeVisible();
     await expect(errorMsg).toContainText('http:// 또는 https://');
   });
+
+  /**
+   * 이슈 #170 회귀 방지 — 닫기 후 재오픈 시 입력값/에러 메시지 잔존
+   * 외부 Wrapper 컴포넌트가 항상 마운트되어 useState가 보존되는 점이 원인.
+   * useEffect로 open=false 전환을 감지해 text/parseError를 리셋한다.
+   */
+  test('닫기 후 재오픈 시 이전 입력값/에러 메시지가 초기화된다 — 회귀 방지 #170', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+
+    await page.goto('/domains');
+
+    // 1. 일괄 추가 다이얼로그 열기 → 잘못된 형식 입력 → 에러 노출
+    await page.getByRole('button', { name: '일괄 추가' }).click();
+    await expect(page.getByTestId('bulk-add-dialog')).toBeVisible();
+    await page.getByTestId('bulk-add-textarea').fill('garbage-no-origin');
+    await page.getByTestId('bulk-add-submit').click();
+    await expect(page.getByTestId('bulk-add-error')).toBeVisible();
+
+    // 2. ESC로 닫기
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('bulk-add-dialog')).not.toBeVisible();
+
+    // 3. 재오픈 — 이전 입력값/에러 메시지가 잔존하지 않아야 함 (#170 핵심)
+    await page.getByRole('button', { name: '일괄 추가' }).click();
+    await expect(page.getByTestId('bulk-add-dialog')).toBeVisible();
+    await expect(page.getByTestId('bulk-add-textarea')).toHaveValue('');
+    await expect(page.getByTestId('bulk-add-error')).not.toBeVisible();
+  });
+
+  /**
+   * 이슈 #170 회귀 방지 — mutation 진행 중 ESC/취소로 닫기 차단
+   * 백엔드 응답을 보류해 isPending 상태를 유지한 뒤 닫기 시도.
+   * 이 mock의 정당성: useBulkAddDomains 훅이 mutateAsync를 거치므로 응답을 보류하면
+   *   실제 네트워크 지연 상황과 동일하게 isPending=true가 지속된다.
+   */
+  test('mutation 진행 중에는 ESC/취소로 닫기가 차단된다 — 회귀 방지 #170', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+
+    let resolveRequest: (value: unknown) => void;
+    const requestPromise = new Promise((resolve) => { resolveRequest = resolve; });
+
+    await page.route('**/api/domains/bulk', async (route) => {
+      if (route.request().method() === 'POST') {
+        // 요청을 의도적으로 보류해 isPending 상태를 유지
+        await requestPromise;
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ added: 1 }) });
+      } else {
+        return route.fallback();
+      }
+    });
+
+    await page.goto('/domains');
+
+    await page.getByRole('button', { name: '일괄 추가' }).click();
+    await expect(page.getByTestId('bulk-add-dialog')).toBeVisible();
+    await page.getByTestId('bulk-add-textarea').fill('test.example.com https://test.example.com');
+    await page.getByTestId('bulk-add-submit').click();
+
+    // isPending 상태 진입 — 제출 버튼 disabled로 진행 중 상태 확인
+    await expect(page.getByTestId('bulk-add-submit')).toBeDisabled();
+
+    // ESC로 닫기 시도 — 차단되어야 함 (#170 핵심)
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('bulk-add-dialog')).toBeVisible();
+
+    // 취소 버튼도 disabled 상태로 닫기 차단 (#170 핵심)
+    await expect(page.getByRole('button', { name: '취소' })).toBeDisabled();
+
+    // 취소 버튼 클릭 시도 — 차단되어야 함 (#170 핵심)
+    await page.getByRole('button', { name: '취소' }).click({ force: true }).catch(() => {});
+    await expect(page.getByTestId('bulk-add-dialog')).toBeVisible();
+
+    // cleanup: 보류 해제로 행잉 방지
+    resolveRequest!(null);
+  });
 });
 
 /**
