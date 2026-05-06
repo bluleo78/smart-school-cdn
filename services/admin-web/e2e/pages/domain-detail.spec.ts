@@ -1817,6 +1817,52 @@ test.describe('도메인 상세 — 설정 탭', () => {
     await expect(tlsCard).toContainText(issuedKo);
   });
 
+  /**
+   * 이슈 #183 회귀 방지 — DangerSection 도메인 삭제 Dialog가 mutation 진행 중에도
+   * ESC/백드롭/X 버튼으로 닫히던 버그 (#165 AlertDialog 패턴을 Dialog 케이스에 적용)
+   * 수정 전: onClose 콜백에 isPending 가드 없음 + DialogContent에 disableClose 미전달
+   *          → 삭제 진행 중 ESC로 닫힘, X 버튼 활성화
+   * 수정 후: onClose에서 !isPending 가드 + disableClose={isPending} → 진행 중 닫기 차단
+   */
+  test('DangerSection 삭제 Dialog — 진행 중 ESC/X로 닫히지 않는다 (회귀: #183)', async ({ page }) => {
+    await setupDetailMocks(page);
+
+    // DELETE API를 외부 신호로 해제 가능한 지연 응답으로 모킹 → isPending 유지
+    let resolveRoute: (() => void) | null = null;
+    await page.route('**/api/domains/textbook.com', async (route) => {
+      if (route.request().method() !== 'DELETE') return route.fallback();
+      await new Promise<void>((res) => {
+        resolveRoute = res;
+      });
+      return route.fulfill({ status: 200, json: null });
+    });
+    await mockApi(page, 'GET', '/domains', []);
+
+    await page.goto('/domains/textbook.com');
+    // 설정 탭으로 전환 (위험 영역은 설정 탭 안에 있다)
+    await page.getByRole('tab', { name: '설정' }).click();
+
+    // 위험 영역의 도메인 삭제 다이얼로그 열기
+    await page.getByTestId('danger-delete-open').click();
+    await expect(page.getByTestId('danger-delete-dialog')).toBeVisible();
+
+    // 삭제 실행 → mutation 시작 (응답 지연 중)
+    await page.getByTestId('danger-delete-confirm').click();
+
+    // isPending 동안 X(닫기) 버튼이 disabled 상태여야 한다
+    await expect(
+      page.locator('[data-testid="danger-delete-dialog"] button[aria-label="닫기"], [data-testid="danger-delete-dialog"] button:has-text("닫기")')
+    ).toBeDisabled({ timeout: 1000 });
+
+    // ESC 키를 눌러도 dialog가 열려 있어야 한다
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('danger-delete-dialog')).toBeVisible({ timeout: 500 });
+
+    // 응답 해제 → 완료 → /domains로 리다이렉트
+    resolveRoute!();
+    await expect(page).toHaveURL(/\/domains$/, { timeout: 3000 });
+  });
+
   test('도메인 삭제 시 목록으로 리다이렉트된다', async ({ page }) => {
     await setupDetailMocks(page);
     await mockApi(page, 'DELETE', '/domains/textbook.com', null);

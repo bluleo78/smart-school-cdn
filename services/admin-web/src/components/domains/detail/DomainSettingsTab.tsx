@@ -329,14 +329,20 @@ function DangerSection({
           variant="destructive"
           onClick={() => setOpen(true)}
           size="sm"
+          data-testid="danger-delete-open"
         >
           도메인 삭제
         </Button>
       </CardContent>
 
-      {/* 삭제 확인 다이얼로그 */}
-      <Dialog open={open} onClose={() => setOpen(false)}>
-        <DialogContent>
+      {/* 삭제 확인 다이얼로그 — pending 중에는 ESC/백드롭/X 닫기 차단 (#183, #165 패턴) */}
+      <Dialog
+        open={open}
+        onClose={() => {
+          if (!deleteMutation.isPending) setOpen(false);
+        }}
+      >
+        <DialogContent disableClose={deleteMutation.isPending} data-testid="danger-delete-dialog">
           <DialogTitle>도메인 삭제</DialogTitle>
           <p className="text-sm text-muted-foreground">
             <strong>{host}</strong> 도메인을 삭제하시겠습니까?
@@ -357,6 +363,7 @@ function DangerSection({
               onClick={handleDelete}
               disabled={deleteMutation.isPending}
               size="sm"
+              data-testid="danger-delete-confirm"
             >
               {deleteMutation.isPending ? '삭제 중...' : '삭제'}
             </Button>
