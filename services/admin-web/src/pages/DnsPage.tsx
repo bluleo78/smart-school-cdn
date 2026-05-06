@@ -249,7 +249,8 @@ function RecordsTab() {
 /** 통계 탭 — 카드 4종 + 범위 토글 + 시계열 차트 + Top 10 */
 function StatsTab() {
   const [range, setRange] = useState<DnsMetricRange>('1h');
-  const { data: status } = useDnsStatus();
+  // status 에러 신호는 Top 10 카드에서 분리 노출해야 함 — !status 만 검사하면 5xx 시 "쿼리가 없습니다" 오표시 (#174)
+  const { data: status, isLoading: statusLoading, error: statusError } = useDnsStatus();
   const { data: metrics, isLoading, error } = useDnsMetrics(range);
 
   const totals = useMemo(() => {
@@ -366,7 +367,16 @@ function StatsTab() {
           <CardTitle>Top 10 쿼리 도메인 (최근 쿼리 스냅샷)</CardTitle>
         </CardHeader>
         <CardContent>
-          {!status || status.top_domains.length === 0 ? (
+          {/* 3-state 분기 (#174): error → ErrorCard, loading → Skeleton, empty → 안내, data → Table.
+              !status 만 검사하면 useDnsStatus 5xx 시 빈 상태 메시지로 오표시되어 사용자가
+              데이터 없음과 장애를 구분할 수 없음. */}
+          {statusError ? (
+            <div data-testid="dns-top10-error">
+              <ErrorCard message={`Top 10을 불러오지 못했습니다: ${String(statusError)}`} />
+            </div>
+          ) : statusLoading || !status ? (
+            <Skeleton className="h-40 w-full" />
+          ) : status.top_domains.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">쿼리가 없습니다.</p>
           ) : (
             <Table>

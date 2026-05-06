@@ -254,6 +254,32 @@ test.describe('DNS — /api/dns/status 에러 처리 (#173)', () => {
   });
 });
 
+// ─── StatsTab Top 10 — useDnsStatus 에러 분기 (#174 회귀) ─────
+test.describe('DNS — StatsTab Top 10 useDnsStatus 에러 처리 (#174)', () => {
+  test('status 5xx 시 Top 10 카드는 ErrorCard 를 노출하고 "쿼리가 없습니다" 오표시가 사라진다', async ({ page }) => {
+    // /api/dns/status 만 5xx로 모킹 → 나머지는 정상 응답으로 채운다
+    // 수정 전: !status 만 검사해 "쿼리가 없습니다." 빈 상태가 그대로 표시됨
+    // 수정 후: statusError 분기로 진입해 ErrorCard 노출
+    await page.route('**/api/dns/status', async (route) => {
+      await route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'dns-service down' }),
+      });
+    });
+    await mockApi(page, 'GET', '/dns/records', createDnsRecords());
+    await mockDnsQuery(page, '/dns/queries', createDnsQueriesMixed());
+    await mockDnsQuery(page, '/dns/metrics', createDnsMetrics());
+
+    await page.goto('/dns?tab=stats');
+
+    // Top 10 ErrorCard 노출
+    await expect(page.getByTestId('dns-top10-error')).toBeVisible({ timeout: 10000 });
+    // 빈 상태 문구는 더 이상 노출되지 않아야 한다
+    await expect(page.getByText('쿼리가 없습니다.')).not.toBeVisible();
+  });
+});
+
 // ─── 빈 데이터 empty state (#21 회귀) ─────────────────────────
 test.describe('DNS — 쿼리 추이 차트 empty state (#21)', () => {
   test('메트릭 데이터가 없으면 차트 대신 empty state 메시지가 표시된다', async ({ page }) => {
