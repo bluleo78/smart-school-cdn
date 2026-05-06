@@ -238,4 +238,46 @@ describe('OptimizationEventsRepository', () => {
       expect(repo.query()).toHaveLength(1);
     });
   });
+
+  // ─── deleteByHost / deleteByHosts (#185) ────────────────────────────────
+  describe('deleteByHost', () => {
+    it('지정 호스트의 이벤트만 삭제하고 삭제 개수를 반환한다', () => {
+      repo.insertBatch([
+        sample({ host: 'a.test' }),
+        sample({ host: 'a.test' }),
+        sample({ host: 'b.test' }),
+      ]);
+      const removed = repo.deleteByHost('a.test');
+      expect(removed).toBe(2);
+      expect(repo.query()).toHaveLength(1);
+      expect(repo.query()[0].host).toBe('b.test');
+    });
+
+    it('일치하는 호스트가 없으면 0을 반환한다', () => {
+      repo.insertBatch([sample({ host: 'a.test' })]);
+      expect(repo.deleteByHost('zzz.test')).toBe(0);
+      expect(repo.query()).toHaveLength(1);
+    });
+  });
+
+  describe('deleteByHosts', () => {
+    it('여러 호스트 이벤트를 일괄 삭제하고 삭제 개수를 반환한다', () => {
+      repo.insertBatch([
+        sample({ host: 'a.test' }),
+        sample({ host: 'b.test' }),
+        sample({ host: 'b.test' }),
+        sample({ host: 'c.test' }),
+      ]);
+      const removed = repo.deleteByHosts(['a.test', 'b.test']);
+      expect(removed).toBe(3);
+      expect(repo.query()).toHaveLength(1);
+      expect(repo.query()[0].host).toBe('c.test');
+    });
+
+    it('빈 배열이면 SQL 실행 없이 0을 반환한다', () => {
+      repo.insertBatch([sample({ host: 'a.test' })]);
+      expect(repo.deleteByHosts([])).toBe(0);
+      expect(repo.query()).toHaveLength(1);
+    });
+  });
 });

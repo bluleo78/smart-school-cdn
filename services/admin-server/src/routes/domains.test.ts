@@ -676,6 +676,86 @@ describe('DELETE /api/domains/:host', () => {
     expect(restored?.origin).toBe('https://httpbin.org');
     expect(restored?.enabled).toBe(0);
   });
+
+  it('도메인 삭제 시 해당 호스트의 optimization_events orphan을 정리한다 (#185)', async () => {
+    // FK 제약이 없는 optimization_events 테이블이 라우트 레벨 cleanup으로 정리되는지 검증.
+    // 도메인 삭제 후 다른 호스트 이벤트는 보존되어야 하고, 삭제된 호스트 이벤트는 0건이어야 한다.
+    const repo = makeRepo();
+    repo.upsert('httpbin.org', 'https://httpbin.org');
+    repo.upsert('keep.test', 'https://keep.test');
+    const eventsRepo = new OptimizationEventsRepository(repo.database);
+    eventsRepo.insertBatch([
+      {
+        event_type: 'media_cache', host: 'httpbin.org',
+        url: 'https://httpbin.org/a', decision: 'served_206', elapsed_ms: 1,
+      },
+      {
+        event_type: 'image_optimize', host: 'httpbin.org',
+        url: 'https://httpbin.org/b.jpg', decision: 'converted', elapsed_ms: 2,
+      },
+      {
+        event_type: 'media_cache', host: 'keep.test',
+        url: 'https://keep.test/c', decision: 'served_206', elapsed_ms: 3,
+      },
+    ]);
+
+    const app = buildApp(repo);
+    const res = await app.inject({ method: 'DELETE', url: '/api/domains/httpbin.org' });
+    expect(res.statusCode).toBe(204);
+    // 삭제된 호스트 이벤트는 모두 제거
+    expect(eventsRepo.query({ host: 'httpbin.org' })).toHaveLength(0);
+    // 다른 호스트 이벤트는 보존
+    expect(eventsRepo.query({ host: 'keep.test' })).toHaveLength(1);
+  });
+
+  it('syncToProxy 실패로 도메인이 복원되는 경우 optimization_events는 보존된다 (#185)', async () => {
+    // proxy 동기화 실패 → 도메인 복원 경로에서는 events cleanup도 실행되지 않아야 한다.
+    // 도메인이 살아있는 상태에서 events만 삭제되면 통계 손실이 발생하므로 보존이 정답.
+    const axiosMod = await import('axios');
+    vi.mocked(axiosMod.default.post).mockRejectedValueOnce(new Error('Network error'));
+
+    const repo = makeRepo();
+    repo.upsert('httpbin.org', 'https://httpbin.org');
+    const eventsRepo = new OptimizationEventsRepository(repo.database);
+    eventsRepo.insert({
+      event_type: 'media_cache', host: 'httpbin.org',
+      url: 'https://httpbin.org/x', decision: 'served_206', elapsed_ms: 1,
+    });
+
+    const app = buildApp(repo);
+    const res = await app.inject({ method: 'DELETE', url: '/api/domains/httpbin.org' });
+    expect(res.statusCode).toBe(502);
+    // 도메인 복원 + events 보존 — 일관성 확인
+    expect(repo.findByHost('httpbin.org')).toBeDefined();
+    expect(eventsRepo.query({ host: 'httpbin.org' })).toHaveLength(1);
+  });
+});
+
+describe('DELETE /api/domains/bulk', () => {
+  it('일괄 삭제 시 해당 호스트들의 optimization_events orphan을 정리한다 (#185)', async () => {
+    // bulkDelete 경로도 단일 DELETE와 동일하게 events cleanup이 동작해야 한다.
+    const repo = makeRepo();
+    repo.upsert('a.test', 'https://a.test');
+    repo.upsert('b.test', 'https://b.test');
+    repo.upsert('keep.test', 'https://keep.test');
+    const eventsRepo = new OptimizationEventsRepository(repo.database);
+    eventsRepo.insertBatch([
+      { event_type: 'media_cache', host: 'a.test',    url: 'https://a.test/1',    decision: 'served_206', elapsed_ms: 1 },
+      { event_type: 'media_cache', host: 'b.test',    url: 'https://b.test/2',    decision: 'served_206', elapsed_ms: 1 },
+      { event_type: 'media_cache', host: 'keep.test', url: 'https://keep.test/3', decision: 'served_206', elapsed_ms: 1 },
+    ]);
+
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'DELETE', url: '/api/domains/bulk',
+      payload: { hosts: ['a.test', 'b.test'] },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body).deleted).toBe(2);
+    expect(eventsRepo.query({ host: 'a.test' })).toHaveLength(0);
+    expect(eventsRepo.query({ host: 'b.test' })).toHaveLength(0);
+    expect(eventsRepo.query({ host: 'keep.test' })).toHaveLength(1);
+  });
 });
 
 describe('GET /api/domains/:host/stats', () => {

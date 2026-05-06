@@ -238,6 +238,28 @@ export class OptimizationEventsRepository {
     return this.db.prepare(`DELETE FROM optimization_events WHERE ts < ?`).run(beforeIso).changes;
   }
 
+  /**
+   * 특정 호스트의 모든 이벤트 삭제. 삭제된 행 수 반환.
+   * 도메인 삭제 시 orphan optimization_events 누적을 방지하기 위해 사용한다 (#185).
+   * `optimization_events` 테이블에는 FK 제약이 없어 CASCADE가 동작하지 않으므로
+   * 라우트 레벨에서 명시적으로 호출해 정리한다.
+   */
+  deleteByHost(host: string): number {
+    return this.db.prepare(`DELETE FROM optimization_events WHERE host = ?`).run(host).changes;
+  }
+
+  /**
+   * 여러 호스트의 이벤트 일괄 삭제. 삭제된 행 수 반환.
+   * 도메인 bulkDelete 경로에서 사용하며, 단일 트랜잭션으로 묶어 원자성을 확보한다 (#185).
+   */
+  deleteByHosts(hosts: string[]): number {
+    if (hosts.length === 0) return 0;
+    const placeholders = hosts.map(() => '?').join(', ');
+    return this.db
+      .prepare(`DELETE FROM optimization_events WHERE host IN (${placeholders})`)
+      .run(...hosts).changes;
+  }
+
   /** Phase 16-3: URL별 최적화 집계.
    *  선택 기간 내 host 이벤트를 URL 기준으로 GROUP BY 하여
    *  이벤트 수·원본 합·최적화 후 합·decision 리스트(쉼표 구분)를 반환한다.

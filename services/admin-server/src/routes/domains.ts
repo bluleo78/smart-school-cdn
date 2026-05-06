@@ -323,6 +323,12 @@ export async function domainRoutes(
         return reply.status(502).send({ error: 'Proxy 동기화 실패' });
       }
       await fanOutGrpc(app, domainRepo);
+      // 도메인 삭제 후 해당 호스트의 optimization_events orphan을 정리한다 (#185).
+      // optimization_events 테이블에는 FK 제약이 없어 CASCADE가 동작하지 않으므로
+      // 라우트에서 명시적으로 cleanup. proxy 동기화 성공 이후(point of no return)에
+      // 호출해 도메인 복원 경로와의 일관성을 유지한다.
+      const optEventsRepo = new OptimizationEventsRepository(domainRepo.database);
+      optEventsRepo.deleteByHosts(hosts);
       return reply.status(200).send({ deleted });
     },
   );
@@ -796,6 +802,12 @@ export async function domainRoutes(
     }
     // gRPC fan-out: tls-service + dns-service 도메인 동기화
     await fanOutGrpc(app, domainRepo);
+    // 도메인 삭제 후 해당 호스트의 optimization_events orphan을 정리한다 (#185).
+    // optimization_events 테이블에는 FK 제약이 없어 CASCADE가 동작하지 않으므로
+    // 라우트에서 명시적으로 cleanup. proxy 동기화 성공 이후(point of no return)에
+    // 호출해 도메인 복원 경로와의 일관성을 유지한다.
+    const optEventsRepo = new OptimizationEventsRepository(domainRepo.database);
+    optEventsRepo.deleteByHost(host);
     return reply.status(204).send();
   });
 }
