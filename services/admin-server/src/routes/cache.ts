@@ -1,6 +1,16 @@
 /// 캐시 관리 API 라우트
 /// storage-service gRPC(50051)를 통해 캐시 통계/인기 콘텐츠/퍼지를 제공한다.
 import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
+
+// 캐시 퍼지 요청 본문 스키마 — type 화이트리스트 검증.
+// discriminatedUnion으로 'all' 외 임의 truthy 값이 purgeAll() 분기로 폴백되는 것을 차단한다 (#168).
+// url/domain은 target 필수, all은 target 무관(optional).
+const purgeBodySchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('url'),    target: z.string().min(1) }),
+  z.object({ type: z.literal('domain'), target: z.string().min(1) }),
+  z.object({ type: z.literal('all') }),
+]);
 
 export async function cacheRoutes(app: FastifyInstance) {
   /** 캐시 통계 — domain_stats에서 L1/L2/bypass 집계 + storage-service에서 disk 정보 */
@@ -154,23 +164,36 @@ export async function cacheRoutes(app: FastifyInstance) {
   });
 
   /** 캐시 퍼지 — URL / 도메인 / 전체 */
-  app.delete<{
-    Body: { type: 'url' | 'domain' | 'all'; target?: string };
-  }>('/api/cache/purge', async (request, reply) => {
-    const { type, target } = request.body;
-    if (!type) {
-      return reply.status(400).send({ error: 'type은 필수입니다.' });
+  app.delete('/api/cache/purge', async (request, reply) => {
+    // zod 화이트리스트 검증 — 'url' | 'domain' | 'all' 외 값은 모두 400 거부.
+    // 검증 전에는 임의 type 값이 마지막 else로 흘러 purgeAll()을 호출하던 결함이 있었다 (#168).
+    const parsed = purgeBodySchema.safeParse(request.body);
+    if (!parsed.success) {
+      // target 누락은 기존 메시지 호환을 위해 별도로 가공
+      const issues = parsed.error.issues;
+      const targetMissing = issues.find(
+        (i) => i.path.length === 1 && i.path[0] === 'target',
+      );
+      if (targetMissing) {
+        // type은 url/domain 중 하나로 좁혀진 뒤 target만 누락된 경우
+        const typeFromBody = (request.body as { type?: unknown } | null)?.type;
+        return reply.status(400).send({
+          error: `type이 "${String(typeFromBody)}"이면 target은 필수입니다.`,
+        });
+      }
+      return reply.status(400).send({
+        error: 'type은 "url" | "domain" | "all" 중 하나여야 합니다.',
+        issues,
+      });
     }
-    if ((type === 'url' || type === 'domain') && !target) {
-      return reply.status(400).send({ error: `type이 "${type}"이면 target은 필수입니다.` });
-    }
+    const body = parsed.data;
 
     // URL 퍼지 시 대상 URL의 hostname이 등록된 도메인에 속하는지 검증한다.
-    // 등록되지 않은 외부 도메인에 대한 크로스 도메인 퍼지를 방지한다.
-    if (type === 'url') {
+    // 등록되지 않은 외부 도메인에 대한 크로스 도메인 퍼지를 방지한다 (#36).
+    if (body.type === 'url') {
       let hostname: string;
       try {
-        hostname = new URL(target!).hostname;
+        hostname = new URL(body.target).hostname;
       } catch {
         return reply.status(400).send({ error: '유효하지 않은 URL 형식입니다.' });
       }
@@ -182,12 +205,24 @@ export async function cacheRoutes(app: FastifyInstance) {
       }
     }
 
+    // 도메인 퍼지 시에도 target host가 등록된 도메인인지 동일하게 검증한다 (#168 부수 결함).
+    if (body.type === 'domain') {
+      const registered = app.db
+        .prepare('SELECT 1 FROM domains WHERE host = ? LIMIT 1')
+        .get(body.target);
+      if (!registered) {
+        return reply
+          .status(400)
+          .send({ error: `${body.target}은(는) 등록된 도메인이 아닙니다.` });
+      }
+    }
+
     try {
       let res;
-      if (type === 'url') {
-        res = await app.storageClient.purgeUrl(target!);
-      } else if (type === 'domain') {
-        res = await app.storageClient.purgeDomain(target!);
+      if (body.type === 'url') {
+        res = await app.storageClient.purgeUrl(body.target);
+      } else if (body.type === 'domain') {
+        res = await app.storageClient.purgeDomain(body.target);
       } else {
         res = await app.storageClient.purgeAll();
       }

@@ -297,11 +297,12 @@ describe('DELETE /api/cache/purge', () => {
     expect(mock.purgeUrl).not.toHaveBeenCalled();
   });
 
-  it('domain 타입 + target 있으면 purgeDomain 호출 후 결과를 반환한다', async () => {
+  it('domain 타입 + 등록된 target이면 purgeDomain 호출 후 결과를 반환한다', async () => {
     const purgeResult = { purged_files: 5, freed_bytes: 2048 };
     const mock = makeStorageMock(async () => ({ used_bytes: 0, total_bytes: 0 }));
     mock.purgeDomain.mockResolvedValueOnce(purgeResult);
-    const { app } = mkApp({ storage: mock });
+    // domain 퍼지도 #168 부수 결함 수정으로 등록 도메인 검증을 거친다
+    const { app } = mkApp({ storage: mock, domains: ['example.com'] });
 
     const res = await app.inject({
       method: 'DELETE', url: '/api/cache/purge',
@@ -311,6 +312,20 @@ describe('DELETE /api/cache/purge', () => {
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual(purgeResult);
     expect(mock.purgeDomain).toHaveBeenCalledWith('example.com');
+  });
+
+  it('domain 타입 + 등록되지 않은 target이면 400을 반환한다 (#168 부수 결함)', async () => {
+    const mock = makeStorageMock(async () => ({ used_bytes: 0, total_bytes: 0 }));
+    const { app } = mkApp({ storage: mock });
+
+    const res = await app.inject({
+      method: 'DELETE', url: '/api/cache/purge',
+      headers: { 'content-type': 'application/json' },
+      payload: { type: 'domain', target: 'unknown.example.com' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toContain('등록된 도메인');
+    expect(mock.purgeDomain).not.toHaveBeenCalled();
   });
 
   it('all 타입은 target 없이도 purgeAll 호출 후 성공한다', async () => {
@@ -327,6 +342,38 @@ describe('DELETE /api/cache/purge', () => {
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual(purgeResult);
     expect(mock.purgeAll).toHaveBeenCalled();
+  });
+
+  // #168: 화이트리스트 외 type 값은 모두 400 (purgeAll 폴백 차단)
+  it.each(['NUKE', 'urls', 'bogus', 'domain_typo', ''])(
+    'type이 화이트리스트 외 문자열("%s")이면 400을 반환하고 purgeAll을 호출하지 않는다 (#168)',
+    async (badType) => {
+      const mock = makeStorageMock(async () => ({ used_bytes: 0, total_bytes: 0 }));
+      const { app } = mkApp({ storage: mock });
+
+      const res = await app.inject({
+        method: 'DELETE', url: '/api/cache/purge',
+        headers: { 'content-type': 'application/json' },
+        payload: { type: badType },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(mock.purgeAll).not.toHaveBeenCalled();
+      expect(mock.purgeUrl).not.toHaveBeenCalled();
+      expect(mock.purgeDomain).not.toHaveBeenCalled();
+    },
+  );
+
+  it('type이 boolean true 같은 truthy 값이어도 400을 반환한다 (#168)', async () => {
+    const mock = makeStorageMock(async () => ({ used_bytes: 0, total_bytes: 0 }));
+    const { app } = mkApp({ storage: mock });
+
+    const res = await app.inject({
+      method: 'DELETE', url: '/api/cache/purge',
+      headers: { 'content-type': 'application/json' },
+      payload: { type: true },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(mock.purgeAll).not.toHaveBeenCalled();
   });
 
   it('storage-service 에러 시 502를 반환한다', async () => {
