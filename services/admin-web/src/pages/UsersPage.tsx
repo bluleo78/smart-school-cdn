@@ -125,13 +125,16 @@ export function UsersPage() {
 
   return (
     <div className="space-y-4">
-      {/* 페이지 헤더 — h2로 통일 (다른 페이지와 일관성), 설명 텍스트 추가 */}
-      <div className="flex justify-between items-center">
+      {/* 페이지 헤더 — h2로 통일 (다른 페이지와 일관성), 설명 텍스트 추가
+       *  모바일(<md)에서 좁은 뷰포트(390px)면 라벨이 글자 단위로 줄바꿈되어
+       *  flex-col로 stack 처리하고 데스크탑에서만 좌우 배치 (#177) */}
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <h2 className="text-2xl font-semibold tracking-tight">사용자 관리</h2>
           <p className="text-sm text-muted-foreground mt-1">관리자 계정을 추가하거나 비밀번호를 재설정합니다.</p>
         </div>
-        <Button onClick={() => { createForm.reset(); setCreateOpen(true); }}>+ 사용자 추가</Button>
+        {/* whitespace-nowrap — 좁은 뷰포트에서 "+ 사용자 추 / 가" 글자 단위 줄바꿈 방지 (#177) */}
+        <Button className="whitespace-nowrap self-start md:self-auto" onClick={() => { createForm.reset(); setCreateOpen(true); }}>+ 사용자 추가</Button>
       </div>
 
       {/* 로딩 상태 — 스켈레톤으로 레이아웃 시프트 방지 */}
@@ -142,16 +145,19 @@ export function UsersPage() {
         <p className="py-8 text-center text-sm text-muted-foreground">사용자 목록을 불러오지 못했습니다.</p>
       )}
 
-      {/* 데이터 로드 완료 후 — shadcn Table 컴포넌트로 다른 페이지와 스타일 통일 */}
+      {/* 데이터 로드 완료 후 — shadcn Table 컴포넌트로 다른 페이지와 스타일 통일
+       *  overflow-x-auto 래퍼 — 모바일(390px) 좁은 뷰포트에서 페이지 전체 가로 스크롤
+       *  대신 테이블만 가로 스크롤되도록 격리 (#177) */}
       {!isLoading && !isError && (
+        <div className="w-full overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>이메일</TableHead>
-              <TableHead>생성일</TableHead>
-              <TableHead>마지막 로그인</TableHead>
-              <TableHead>상태</TableHead>
-              <TableHead>액션</TableHead>
+              <TableHead className="whitespace-nowrap">이메일</TableHead>
+              <TableHead className="whitespace-nowrap">생성일</TableHead>
+              <TableHead className="whitespace-nowrap">마지막 로그인</TableHead>
+              <TableHead className="whitespace-nowrap">상태</TableHead>
+              <TableHead className="whitespace-nowrap">액션</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -165,12 +171,13 @@ export function UsersPage() {
             ) : users.map((u) => (
               // hover:bg-muted/50 — 클릭 가능한 행임을 시각적으로 전달 (ByDomainTable 패턴과 일관성)
               <TableRow key={u.id} className="hover:bg-muted/50 transition-colors" data-testid={`user-row-${u.id}`}>
-                <TableCell>{u.username}</TableCell>
-                {/* formatDate/formatDateTime — ko-KR 로케일 명시, 앱 전역 포맷 통일 */}
-                <TableCell className="text-muted-foreground">{formatDate(u.created_at)}</TableCell>
-                <TableCell className="text-muted-foreground">{u.last_login_at ? formatDateTime(u.last_login_at) : '—'}</TableCell>
-                <TableCell>{u.disabled_at ? <Badge variant="outline">비활성</Badge> : <Badge variant="success">활성</Badge>}</TableCell>
-                <TableCell className="space-x-2">
+                <TableCell className="whitespace-nowrap">{u.username}</TableCell>
+                {/* formatDate/formatDateTime — ko-KR 로케일 명시, 앱 전역 포맷 통일.
+                 *  whitespace-nowrap — 좁은 뷰포트에서 timestamp가 글자 단위로 5줄 분할되는 현상 차단 (#177) */}
+                <TableCell className="text-muted-foreground whitespace-nowrap">{formatDate(u.created_at)}</TableCell>
+                <TableCell className="text-muted-foreground whitespace-nowrap">{u.last_login_at ? formatDateTime(u.last_login_at) : '—'}</TableCell>
+                <TableCell className="whitespace-nowrap">{u.disabled_at ? <Badge variant="outline">비활성</Badge> : <Badge variant="success">활성</Badge>}</TableCell>
+                <TableCell className="space-x-2 whitespace-nowrap">
                   <Button
                     variant="outline"
                     size="xs"
@@ -203,6 +210,7 @@ export function UsersPage() {
             ))}
           </TableBody>
         </Table>
+        </div>
       )}
 
       {/* 사용자 추가 다이얼로그 */}

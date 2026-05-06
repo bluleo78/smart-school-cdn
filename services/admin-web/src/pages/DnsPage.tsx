@@ -202,8 +202,11 @@ function RecordsTab() {
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between gap-4">
-        <CardTitle>DNS 레코드 ({filtered.length})</CardTitle>
+      {/* 모바일(<sm) 좁은 뷰포트에서 헤더가 단어 중간 줄바꿈되는 것을 방지하기 위해
+       *  flex-col로 stack 처리하고 sm 이상에서 좌우 배치 (#177) */}
+      <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        {/* whitespace-nowrap — "DNS 레코 / 드 (7)" 단어 중간 줄바꿈 차단 (#177) */}
+        <CardTitle className="whitespace-nowrap">DNS 레코드 ({filtered.length})</CardTitle>
         <Input
           placeholder="호스트 검색…"
           value={q}
@@ -219,27 +222,30 @@ function RecordsTab() {
             {q ? `"${q}"에 일치하는 레코드가 없습니다.` : '등록된 레코드가 없습니다.'}
           </p>
         ) : (
+          // overflow-x-auto 래퍼 — 좁은 뷰포트에서 페이지 전체 가로 스크롤 대신 테이블만 스크롤 (#177)
+          <div className="w-full overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
-                {/* 한국어 UI 통일 — 이슈 #19 */}
-                <TableHead>호스트</TableHead>
-                <TableHead>대상 IP</TableHead>
-                <TableHead>유형</TableHead>
-                <TableHead>출처</TableHead>
+                {/* 한국어 UI 통일 — 이슈 #19. whitespace-nowrap — "유 / 형" 글자 단위 분할 차단 (#177) */}
+                <TableHead className="whitespace-nowrap">호스트</TableHead>
+                <TableHead className="whitespace-nowrap">대상 IP</TableHead>
+                <TableHead className="whitespace-nowrap">유형</TableHead>
+                <TableHead className="whitespace-nowrap">출처</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filtered.map(r => (
                 <TableRow key={r.host} className="hover:bg-muted/50">
-                  <TableCell className="font-mono">{r.host}</TableCell>
-                  <TableCell className="font-mono text-muted-foreground">{r.target}</TableCell>
-                  <TableCell>{r.rtype}</TableCell>
-                  <TableCell><Badge variant="outline">{r.source}</Badge></TableCell>
+                  <TableCell className="font-mono whitespace-nowrap">{r.host}</TableCell>
+                  <TableCell className="font-mono text-muted-foreground whitespace-nowrap">{r.target}</TableCell>
+                  <TableCell className="whitespace-nowrap">{r.rtype}</TableCell>
+                  <TableCell className="whitespace-nowrap"><Badge variant="outline">{r.source}</Badge></TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
+          </div>
         )}
       </CardContent>
     </Card>
@@ -283,8 +289,9 @@ function StatsTab() {
 
       {/* 시계열 차트 — CacheHitRateChart 패턴(CSS 변수 stroke) */}
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between gap-4">
-          <CardTitle>쿼리 추이</CardTitle>
+        {/* 모바일 stack 처리 — 좁은 뷰포트에서 헤더와 토글 버튼이 가로 오버플로 발생하지 않도록 (#177) */}
+        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <CardTitle className="whitespace-nowrap">쿼리 추이</CardTitle>
           <div className="flex gap-2">
             {/* aria-pressed: 스크린 리더가 현재 선택된 기간을 인식할 수 있도록 토글 상태 노출 */}
             <Button
@@ -364,7 +371,8 @@ function StatsTab() {
       {/* Top 10 — 랭크 컬럼은 monospace + muted */}
       <Card>
         <CardHeader>
-          <CardTitle>Top 10 쿼리 도메인 (최근 쿼리 스냅샷)</CardTitle>
+          {/* break-keep — 한국어 단어 단위 줄바꿈 (글자 단위 분할 차단) (#177) */}
+          <CardTitle className="break-keep">Top 10 쿼리 도메인 (최근 쿼리 스냅샷)</CardTitle>
         </CardHeader>
         <CardContent>
           {/* 3-state 분기 (#174): error → ErrorCard, loading → Skeleton, empty → 안내, data → Table.
@@ -379,13 +387,15 @@ function StatsTab() {
           ) : status.top_domains.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">쿼리가 없습니다.</p>
           ) : (
+            // overflow-x-auto 래퍼 — 좁은 뷰포트에서 페이지 전체 가로 스크롤 차단 (#177)
+            <div className="w-full overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
                   {/* 한국어 UI 통일 — 이슈 #19 */}
                   <TableHead className="w-12">#</TableHead>
-                  <TableHead>도메인</TableHead>
-                  <TableHead className="text-right">횟수</TableHead>
+                  <TableHead className="whitespace-nowrap">도메인</TableHead>
+                  <TableHead className="text-right whitespace-nowrap">횟수</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -394,14 +404,15 @@ function StatsTab() {
                     <TableCell className="font-mono text-xs text-muted-foreground">
                       {i + 1}
                     </TableCell>
-                    <TableCell className="font-mono">{d.qname}</TableCell>
-                    <TableCell className="text-right tabular-nums font-medium">
+                    <TableCell className="font-mono whitespace-nowrap">{d.qname}</TableCell>
+                    <TableCell className="text-right tabular-nums font-medium whitespace-nowrap">
                       {d.count.toLocaleString()}
                     </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
+            </div>
           )}
         </CardContent>
       </Card>
@@ -434,8 +445,9 @@ function QueriesTab() {
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between gap-4">
-        <CardTitle>최근 쿼리 ({visible.length} / {queries?.length ?? 0})</CardTitle>
+      {/* 모바일 stack — 헤더+필터 버튼이 좁은 뷰포트에서 가로 오버플로 발생 차단 (#177) */}
+      <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <CardTitle className="whitespace-nowrap">최근 쿼리 ({visible.length} / {queries?.length ?? 0})</CardTitle>
         <div className="flex gap-2">
           {(['matched', 'forwarded', 'nxdomain'] as DnsQueryResultLabel[]).map(r => (
             // aria-pressed: 스크린 리더가 필터 활성 상태를 인식할 수 있도록 ARIA 상태 추가
@@ -457,16 +469,18 @@ function QueriesTab() {
         {visible.length === 0 ? (
           <p className="py-8 text-center text-sm text-muted-foreground">표시할 쿼리가 없습니다.</p>
         ) : (
+          // overflow-x-auto 래퍼 — 좁은 뷰포트에서 페이지 가로 스크롤 차단 (#177)
+          <div className="w-full overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
-                {/* 한국어 UI 통일 — 이슈 #19 */}
-                <TableHead>시각</TableHead>
-                <TableHead>클라이언트</TableHead>
-                <TableHead>도메인</TableHead>
-                <TableHead>유형</TableHead>
-                <TableHead>결과</TableHead>
-                <TableHead className="text-right">지연</TableHead>
+                {/* 한국어 UI 통일 — 이슈 #19. whitespace-nowrap — 컬럼 헤더 글자 단위 분할 차단 (#177) */}
+                <TableHead className="whitespace-nowrap">시각</TableHead>
+                <TableHead className="whitespace-nowrap">클라이언트</TableHead>
+                <TableHead className="whitespace-nowrap">도메인</TableHead>
+                <TableHead className="whitespace-nowrap">유형</TableHead>
+                <TableHead className="whitespace-nowrap">결과</TableHead>
+                <TableHead className="text-right whitespace-nowrap">지연</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -487,6 +501,7 @@ function QueriesTab() {
               ))}
             </TableBody>
           </Table>
+          </div>
         )}
       </CardContent>
     </Card>
