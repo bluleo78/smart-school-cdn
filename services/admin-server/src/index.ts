@@ -29,6 +29,7 @@ import { usersRoutes } from './routes/users.js';
 import { internalRoutes } from './routes/internal.js';
 import { requireAuth } from './auth/require-auth.js';
 import { requireInternalToken } from './auth/require-internal-token.js';
+import { registerErrorHandlers } from './error-handlers.js';
 
 // 보안 기동 가드 — JWT_SECRET / INTERNAL_API_TOKEN 미설정 시 즉시 종료.
 // 32자 미만이면 HMAC 충돌·brute-force 위험이 무시 못 할 수준이라 거부한다.
@@ -195,6 +196,9 @@ await app.register(usersRoutes, { userRepo });
 
 /** 서비스간 내부 호출 라우트 — requireInternalToken 보호 */
 await app.register(internalRoutes, { domainRepo });
+
+// 에러 응답 envelope 통일 (#175) — not-found / schema validation / 미잡힌 throw 정규화
+registerErrorHandlers(app);
 
 const port = Number(process.env.PORT) || 4001;
 
