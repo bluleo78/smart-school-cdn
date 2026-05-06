@@ -744,6 +744,40 @@ test.describe('도메인 관리 — 일괄 추가 (#55)', () => {
   });
 
   /**
+   * 이슈 #178 회귀 방지 — host/origin 외 3번째 토큰 이상 silent drop
+   * parts.length > 2인 경우 명시적 에러를 띄워 silent drop을 방지한다.
+   * 잘못된 붙여넣기/오타로 의도와 다른 데이터가 등록되는 것을 차단.
+   */
+  test('한 줄에 토큰이 3개 이상이면 명시적 에러를 표시한다 (#178)', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+
+    let bulkAddCalled = false;
+    await page.route('**/api/domains/bulk', async (route) => {
+      bulkAddCalled = true;
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '{"added":0}' });
+    });
+
+    await page.goto('/domains');
+    await page.getByRole('button', { name: '일괄 추가' }).click();
+    await expect(page.getByTestId('bulk-add-dialog')).toBeVisible();
+
+    // 3번째 이상 토큰이 포함된 입력 — 이전엔 silent drop으로 첫 두 토큰만 전송됨
+    await page
+      .getByTestId('bulk-add-textarea')
+      .fill('test-extra.invalid https://origin.example.com extra-junk-token');
+    await page.getByTestId('bulk-add-submit').click();
+
+    // 인라인 에러가 표시되어야 한다
+    const errorMsg = page.getByTestId('bulk-add-error');
+    await expect(errorMsg).toBeVisible();
+    await expect(errorMsg).toContainText('host와 origin 두 값');
+
+    // 서버 호출이 발생하지 않았음을 확인 (silent drop 방지)
+    expect(bulkAddCalled).toBe(false);
+  });
+
+  /**
    * 이슈 #170 회귀 방지 — 닫기 후 재오픈 시 입력값/에러 메시지 잔존
    * 외부 Wrapper 컴포넌트가 항상 마운트되어 useState가 보존되는 점이 원인.
    * useEffect로 open=false 전환을 감지해 text/parseError를 리셋한다.

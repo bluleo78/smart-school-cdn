@@ -29,6 +29,14 @@ export function DomainBulkAddDialog({ open, onOpenChange }: DomainBulkAddDialogP
         setParseError(`잘못된 형식: "${line}" — "host origin" 형식으로 입력해주세요.`);
         return null;
       }
+      // 3번째 이상 토큰 silent drop 방지 (#178)
+      // host/origin 외 추가 토큰이 있으면 사용자가 의도한 입력과 다르게 등록될 위험이 있어 명시적으로 차단한다.
+      if (parts.length > 2) {
+        setParseError(
+          `잘못된 형식: "${line}" — 한 줄에는 host와 origin 두 값만 입력해주세요 (공백으로 구분).`,
+        );
+        return null;
+      }
       // origin URL scheme 검증 — http:// 또는 https://만 허용
       // javascript:, file://, ftp:// 등 비정상 scheme이 DB에 저장되는 것을 방지한다 (#42)
       const origin = parts[1];
