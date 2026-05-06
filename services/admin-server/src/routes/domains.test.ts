@@ -259,7 +259,7 @@ describe('POST /api/domains', () => {
       payload: { host: 'textbook.com', origin: 'javascript:alert(1)' },
     });
     expect(res.statusCode).toBe(400);
-    expect(JSON.parse(res.body).error).toContain('http:// 또는 https://');
+    expect(JSON.parse(res.body).error).toContain('유효한 origin URL이 아닙니다');
   });
 
   it('ftp:// scheme origin은 400을 반환한다 (#42)', async () => {
@@ -270,7 +270,7 @@ describe('POST /api/domains', () => {
       payload: { host: 'textbook.com', origin: 'ftp://textbook.com' },
     });
     expect(res.statusCode).toBe(400);
-    expect(JSON.parse(res.body).error).toContain('http:// 또는 https://');
+    expect(JSON.parse(res.body).error).toContain('유효한 origin URL이 아닙니다');
   });
 
   it('scheme 없는 origin(textbook.com)은 400을 반환한다 (#42)', async () => {
@@ -281,7 +281,7 @@ describe('POST /api/domains', () => {
       payload: { host: 'textbook.com', origin: 'textbook.com' },
     });
     expect(res.statusCode).toBe(400);
-    expect(JSON.parse(res.body).error).toContain('http:// 또는 https://');
+    expect(JSON.parse(res.body).error).toContain('유효한 origin URL이 아닙니다');
   });
 });
 
@@ -316,7 +316,7 @@ describe('POST /api/domains/bulk', () => {
       payload: { domains: [{ host: 'textbook.com', origin: 'javascript:alert(1)' }] },
     });
     expect(res.statusCode).toBe(400);
-    expect(JSON.parse(res.body).error).toContain('http:// 또는 https://');
+    expect(JSON.parse(res.body).error).toContain('유효한 origin URL이 아닙니다');
   });
 
   it('ftp:// scheme origin을 포함한 bulk 요청은 400을 반환한다 (#42)', async () => {
@@ -327,7 +327,7 @@ describe('POST /api/domains/bulk', () => {
       payload: { domains: [{ host: 'a.com', origin: 'ftp://a.com' }] },
     });
     expect(res.statusCode).toBe(400);
-    expect(JSON.parse(res.body).error).toContain('http:// 또는 https://');
+    expect(JSON.parse(res.body).error).toContain('유효한 origin URL이 아닙니다');
   });
 
   it('혼합 목록에서 하나라도 비정상 scheme이 있으면 전체 400 반환한다 (#42)', async () => {
@@ -343,7 +343,7 @@ describe('POST /api/domains/bulk', () => {
       },
     });
     expect(res.statusCode).toBe(400);
-    expect(JSON.parse(res.body).error).toContain('http:// 또는 https://');
+    expect(JSON.parse(res.body).error).toContain('유효한 origin URL이 아닙니다');
     // 정상 도메인도 저장되지 않아야 한다 (검증 실패 시 전체 요청을 거부)
     expect(repo.findByHost('good.com')).toBeUndefined();
   });
@@ -442,6 +442,87 @@ describe('PUT /api/domains/:host', () => {
     expect(res.statusCode).toBe(200);
     // origin은 그대로 유지된다
     expect(repo.findByHost('httpbin.org')?.origin).toBe('https://httpbin.org');
+  });
+
+  /** origin URL 종합 검증 — host/공백/길이 (#167) */
+  it('PUT origin이 "http://"(빈 host)이면 400 반환한다 (#167)', async () => {
+    const repo = makeRepo();
+    repo.upsert('httpbin.org', 'https://httpbin.org');
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/domains/httpbin.org',
+      payload: { origin: 'http://' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).error).toContain('유효한 origin URL이 아닙니다');
+    // 원래 origin이 그대로 유지되어야 한다 (검증 실패 시 DB 변경 금지)
+    expect(repo.findByHost('httpbin.org')?.origin).toBe('https://httpbin.org');
+  });
+
+  it('PUT origin이 "http:///"(슬래시만 있는 빈 host)이면 400 반환한다 (#167)', async () => {
+    const repo = makeRepo();
+    repo.upsert('httpbin.org', 'https://httpbin.org');
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/domains/httpbin.org',
+      payload: { origin: 'http:///' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(repo.findByHost('httpbin.org')?.origin).toBe('https://httpbin.org');
+  });
+
+  it('PUT origin host 중간에 공백이 있으면 400 반환한다 (#167)', async () => {
+    const repo = makeRepo();
+    repo.upsert('httpbin.org', 'https://httpbin.org');
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/domains/httpbin.org',
+      payload: { origin: 'http://exa mple.com' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(repo.findByHost('httpbin.org')?.origin).toBe('https://httpbin.org');
+  });
+
+  it('PUT origin 길이가 2083자를 초과하면 400 반환한다 (#167)', async () => {
+    // browser de facto URL 한도 초과 방지 — 5000자 origin이 그대로 저장되던 버그
+    const repo = makeRepo();
+    repo.upsert('httpbin.org', 'https://httpbin.org');
+    const app = buildApp(repo);
+    const longHost = 'a'.repeat(2100); // 'http://' + 2100 + '.com' = 2111자
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/domains/httpbin.org',
+      payload: { origin: `http://${longHost}.com` },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(repo.findByHost('httpbin.org')?.origin).toBe('https://httpbin.org');
+  });
+
+  it('POST origin이 "http://"(빈 host)이면 400 반환한다 (#167)', async () => {
+    const repo = makeRepo();
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/domains',
+      payload: { host: 'textbook.com', origin: 'http://' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(repo.findByHost('textbook.com')).toBeUndefined();
+  });
+
+  it('bulk origin host 중간 공백이면 전체 400 반환한다 (#167)', async () => {
+    const repo = makeRepo();
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/domains/bulk',
+      payload: { domains: [{ host: 'a.com', origin: 'http://exa mple.com' }] },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(repo.findByHost('a.com')).toBeUndefined();
   });
 
   it('없는 도메인 PUT 시 404 반환한다', async () => {

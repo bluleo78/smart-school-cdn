@@ -225,6 +225,43 @@ export async function domainRoutes(
    */
   const DOMAIN_RE = /^(\*\.)?[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/i;
 
+  /**
+   * origin URL 최대 길이 — browser de facto URL 한도(2083)보다 짧게 잡아
+   * UI 노출/로그 폭주를 방지한다. 일반적인 origin은 수십 바이트 수준.
+   */
+  const ORIGIN_MAX_LENGTH = 2083;
+
+  /**
+   * origin URL 형식 검증 — POST(/api/domains), POST(/api/domains/bulk),
+   * PUT(/api/domains/:host) 세 곳에서 공유 (#167).
+   *
+   * 검증 항목:
+   * - 문자열이고 ORIGIN_MAX_LENGTH 이하 길이
+   * - URL 생성자로 파싱 가능 (공백·잘못된 인코딩 거부)
+   * - protocol이 `http:` 또는 `https:` (javascript:/file:/ftp: 차단 — #42)
+   * - hostname이 비어 있지 않음 (`http://`, `http:///` 같은 빈 host 거부)
+   * - 입력 문자열에 공백/탭/개행이 없음 (URL 파서가 일부 공백을 관대하게 처리해
+   *   `http://exa mple.com` 같이 host 중간 공백이 통과하는 케이스 방지)
+   */
+  function isValidOrigin(origin: unknown): origin is string {
+    if (typeof origin !== 'string') return false;
+    if (origin.length === 0 || origin.length > ORIGIN_MAX_LENGTH) return false;
+    // 공백/탭/개행이 origin 어디에 있든 즉시 거부 — `http://exa mple.com`, `http://   ` 등 차단
+    if (/\s/.test(origin)) return false;
+    let url: URL;
+    try {
+      url = new URL(origin);
+    } catch {
+      return false;
+    }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+    if (!url.hostname) return false;
+    return true;
+  }
+
+  /** origin 검증 실패 시 표시할 공통 에러 메시지 — POST/PUT/bulk 공유 */
+  const ORIGIN_INVALID_MSG = '유효한 origin URL이 아닙니다. (예: https://example.com, 최대 2083자)';
+
   /** 도메인 일괄 추가 — 성공한 각 도메인에 기본 최적화 프로파일 자동 생성 */
   app.post<{ Body: { domains?: Array<{ host: string; origin: string }> } }>(
     '/api/domains/bulk',
@@ -240,11 +277,14 @@ export async function domainRoutes(
           return reply.status(400).send({ error: `유효한 도메인 형식이 아닙니다: "${d.host}"` });
         }
       }
-      // 각 도메인의 origin URL scheme 검증 — http:// 또는 https://만 허용
-      // javascript:, file://, ftp:// 등 비정상 scheme이 DB에 저장되는 것을 방지한다 (#42)
+      // 각 도메인의 origin URL 형식 검증 — scheme/host/길이/공백 종합 검증 (#167)
+      // javascript:, file://, ftp:// 등 비정상 scheme + `http://`(빈 host) + 5000자 + 공백 포함 host 모두 차단
       for (const d of domains) {
-        if (typeof d.origin !== 'string' || (!d.origin.startsWith('http://') && !d.origin.startsWith('https://'))) {
-          return reply.status(400).send({ error: `origin은 http:// 또는 https://로 시작해야 합니다: "${d.origin}"` });
+        if (!isValidOrigin(d.origin)) {
+          // 에러 메시지에 입력값 일부를 포함 — 5000자 폭주 방지 위해 80자로 잘라낸다
+          const raw: unknown = d.origin;
+          const preview = typeof raw === 'string' ? raw.slice(0, 80) : String(raw);
+          return reply.status(400).send({ error: `${ORIGIN_INVALID_MSG} (입력: "${preview}")` });
         }
       }
       const result = domainRepo.bulkInsert(domains);
@@ -299,10 +339,10 @@ export async function domainRoutes(
       if (!DOMAIN_RE.test(host)) {
         return reply.status(400).send({ error: '유효한 도메인 형식이 아닙니다. (예: example.com, *.sub.com)' });
       }
-      // origin URL scheme 검증 — http:// 또는 https://만 허용
-      // PUT과 동일한 이중 방어 패턴 적용 — javascript: 등 비정상 scheme 차단 (#42)
-      if (!origin.startsWith('http://') && !origin.startsWith('https://')) {
-        return reply.status(400).send({ error: 'origin은 http:// 또는 https://로 시작해야 합니다.' });
+      // origin URL 종합 검증 — scheme/host/길이/공백 (#167)
+      // PUT과 동일한 이중 방어 패턴 — javascript: 등 비정상 scheme + 빈 host + 과도 길이 + 공백 모두 차단
+      if (!isValidOrigin(origin)) {
+        return reply.status(400).send({ error: ORIGIN_INVALID_MSG });
       }
       domainRepo.upsert(host, origin);
       const synced = await syncToProxy(domainRepo);
@@ -345,10 +385,10 @@ export async function domainRoutes(
     if (origin !== undefined && origin.trim() === '') {
       return reply.status(400).send({ error: 'origin은 빈 문자열로 저장할 수 없습니다.' });
     }
-    // origin이 전달되었는데 http:// 또는 https://로 시작하지 않으면 400
-    // 클라이언트·서버 이중 방어 — Proxy가 올바르게 업스트림에 연결하려면 스킴 필수 (#103)
-    if (origin !== undefined && !origin.startsWith('http://') && !origin.startsWith('https://')) {
-      return reply.status(400).send({ error: 'origin은 http:// 또는 https://로 시작해야 합니다.' });
+    // origin이 전달되었으면 종합 검증 — scheme/host/길이/공백 (#167)
+    // 클라이언트·서버 이중 방어 — Proxy가 올바르게 업스트림에 연결하려면 hostname/scheme 모두 유효해야 함 (#103, #167)
+    if (origin !== undefined && !isValidOrigin(origin)) {
+      return reply.status(400).send({ error: ORIGIN_INVALID_MSG });
     }
     // enabled는 0 또는 1만 허용 — 임의 정수가 DB에 저장되면 UI가 상태를 오판한다 (#156)
     if (enabled !== undefined && enabled !== 0 && enabled !== 1) {
