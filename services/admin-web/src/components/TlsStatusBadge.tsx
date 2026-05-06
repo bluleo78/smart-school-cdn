@@ -5,7 +5,7 @@
  * 상태 판별 기준:
  *   - null / undefined → 미발급 (muted)
  *   - 만료일 ≤ 오늘   → 만료됨 (destructive)
- *   - 만료일 ≤ 30일   → 만료 N일 전 (warning)
+ *   - 만료일 ≤ 30일   → N일 후 만료 (warning)
  *   - 그 외           → 유효 (success)
  */
 import { Badge } from './ui/badge';
@@ -33,7 +33,9 @@ export function TlsStatusBadge({ expiresAt }: Props) {
 
   // 30일 이내 만료 임박
   if (daysUntilExpiry <= 30) {
-    return <Badge variant="warning">만료 {daysUntilExpiry}일 전</Badge>;
+    // "만료 N일 전"은 한국어에서 '이미 N일 전에 만료'로 오독될 수 있어
+    // "N일 후 만료"로 표현해 '아직 유효, N일 뒤에 만료될 예정'임을 명확히 한다.
+    return <Badge variant="warning">{daysUntilExpiry}일 후 만료</Badge>;
   }
 
   // 정상 유효

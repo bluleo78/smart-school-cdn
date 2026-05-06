@@ -121,13 +121,13 @@ test.describe('발급된 인증서 목록', () => {
     await expect(row.getByText('유효')).toBeVisible({ timeout: 10000 });
   });
 
-  test('만료 임박 인증서에 만료 N일 전 배지가 표시된다', async ({ page }) => {
-    // cdn.edunet.net 행은 3일 후 만료 → 만료 3일 전 배지 (TlsStatusBadge: 1~30일)
+  test('만료 임박 인증서에 N일 후 만료 배지가 표시된다', async ({ page }) => {
+    // cdn.edunet.net 행은 3일 후 만료 → '3일 후 만료' 배지 (TlsStatusBadge: 1~30일)
     await mockApi(page, 'GET', '/tls/certificates', createCertList());
     await page.goto('/system');
 
     const row = page.locator('tr', { hasText: 'cdn.edunet.net' });
-    await expect(row.getByText(/만료 \d+일 전/)).toBeVisible({ timeout: 10000 });
+    await expect(row.getByText(/\d+일 후 만료/)).toBeVisible({ timeout: 10000 });
   });
 
   test('만료 인증서에 만료됨 배지가 표시된다', async ({ page }) => {

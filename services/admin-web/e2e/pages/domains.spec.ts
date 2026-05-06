@@ -1082,7 +1082,7 @@ test.describe('도메인 관리 — TLS 상태 표시 (#99)', () => {
     const now = new Date();
     // textbook.com: 60일 후 만료 → '유효' 배지
     const future60 = new Date(now.getTime() + 60 * 24 * 60 * 60 * 1000).toISOString();
-    // cdn.school.kr: 3일 후 만료 → '만료 3일 전' 배지
+    // cdn.school.kr: 3일 후 만료 → '3일 후 만료' 배지
     const future3 = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000).toISOString();
 
     await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
@@ -1101,9 +1101,9 @@ test.describe('도메인 관리 — TLS 상태 표시 (#99)', () => {
     const textbookRow = page.getByTestId('domain-row-textbook.com');
     await expect(textbookRow.getByText('유효')).toBeVisible();
 
-    // cdn.school.kr 행에 '만료 N일 전' 배지가 표시되어야 한다
+    // cdn.school.kr 행에 'N일 후 만료' 배지가 표시되어야 한다
     const cdnRow = page.getByTestId('domain-row-cdn.school.kr');
-    await expect(cdnRow.getByText(/만료 \d+일 전/)).toBeVisible();
+    await expect(cdnRow.getByText(/\d+일 후 만료/)).toBeVisible();
   });
 
   test('TLS 인증서 미발급 도메인은 "미발급" 배지가 표시된다 (#99 회귀 방지)', async ({ page }) => {
