@@ -226,7 +226,9 @@ export async function cacheRoutes(app: FastifyInstance) {
       } else {
         res = await app.storageClient.purgeAll();
       }
-      return res;
+      // gRPC 응답 필드명(purged_files)을 클라이언트 계약(purged_count)으로 정규화한다 (#182).
+      // storage-service의 .proto는 purged_files를 사용하지만 admin-web은 purged_count를 기대한다.
+      return { purged_count: res.purged_files, freed_bytes: res.freed_bytes };
     } catch {
       return reply.status(502).send({ error: 'storage-service에 연결할 수 없습니다.' });
     }

@@ -250,7 +250,7 @@ describe('DELETE /api/cache/purge', () => {
     expect(res.statusCode).toBe(400);
   });
 
-  it('url 타입 + target 있으면 purgeUrl 호출 후 결과를 반환한다', async () => {
+  it('url 타입 + target 있으면 purgeUrl 호출 후 클라이언트 계약(purged_count)으로 정규화해 반환한다 (#182)', async () => {
     // example.com을 등록된 도메인으로 시드해야 검증 통과 후 purgeUrl이 호출된다
     const purgeResult = { purged_files: 1, freed_bytes: 512 };
     const mock = makeStorageMock(async () => ({ used_bytes: 0, total_bytes: 0 }));
@@ -263,7 +263,8 @@ describe('DELETE /api/cache/purge', () => {
       payload: { type: 'url', target: 'https://example.com/video.mp4' },
     });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual(purgeResult);
+    // gRPC purged_files → admin-web purged_count 정규화 검증 (#182)
+    expect(res.json()).toEqual({ purged_count: 1, freed_bytes: 512 });
     expect(mock.purgeUrl).toHaveBeenCalledWith('https://example.com/video.mp4');
   });
 
@@ -310,7 +311,8 @@ describe('DELETE /api/cache/purge', () => {
       payload: { type: 'domain', target: 'example.com' },
     });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual(purgeResult);
+    // gRPC purged_files → admin-web purged_count 정규화 검증 (#182)
+    expect(res.json()).toEqual({ purged_count: 5, freed_bytes: 2048 });
     expect(mock.purgeDomain).toHaveBeenCalledWith('example.com');
   });
 
@@ -340,7 +342,8 @@ describe('DELETE /api/cache/purge', () => {
       payload: { type: 'all' },
     });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual(purgeResult);
+    // gRPC purged_files → admin-web purged_count 정규화 검증 (#182)
+    expect(res.json()).toEqual({ purged_count: 100, freed_bytes: 1048576 });
     expect(mock.purgeAll).toHaveBeenCalled();
   });
 
