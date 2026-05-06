@@ -47,16 +47,25 @@ export function AppLayout() {
 
   // 페이지 이동 시 document.title 업데이트 — WCAG 2.4.2 Page Titled 준수
   // navItems에서 현재 pathname에 매핑되는 레이블을 찾아 "레이블 | Smart School CDN" 형태로 설정
-  const currentPageLabel =
-    navItems.find(({ to }) =>
-      to === '/' ? location.pathname === '/' : location.pathname.startsWith(to),
-    )?.label ?? '';
+  const matchedNavLabel = navItems.find(({ to }) =>
+    to === '/' ? location.pathname === '/' : location.pathname.startsWith(to),
+  )?.label;
 
   // /domains/:host 같은 서브 라우트는 자식 컴포넌트(DomainDetailPageInner)가
   // 호스트명을 포함한 title을 직접 설정하므로 AppLayout은 덮어쓰지 않는다.
   // React effects는 자식 → 부모 순으로 실행되므로 이 가드 없이는 부모 effect가
   // 자식이 설정한 title을 덮어쓰게 된다.
   const isDomainDetail = /^\/domains\/[^/]+/.test(location.pathname);
+
+  // 어떤 navItem 에도 매칭되지 않고 자식이 title을 직접 세팅하는 서브 라우트도 아니면
+  // NotFoundPage가 표시되는 상태(react-router의 catch-all `*`).
+  // 헤더 라벨과 document.title 모두 빈 값으로 떨어져 사용자가 404 상태를 인지할 수 없는
+  // 문제(WCAG 2.4.2 위반)를 막기 위해 명시적인 fallback 라벨을 사용한다. (#180)
+  const isUnknownRoute = matchedNavLabel === undefined && !isDomainDetail;
+  const currentPageLabel = isUnknownRoute
+    ? '페이지를 찾을 수 없음'
+    : (matchedNavLabel ?? '');
+
   useEffect(() => {
     if (isDomainDetail) return;
     document.title = currentPageLabel
@@ -135,13 +144,10 @@ export function AppLayout() {
               <MenuIcon size={18} />
             </button>
             {/* 현재 페이지 제목 — navItems에서 pathname 매핑,
-                서브 라우트(예: /domains/123)는 상위 경로로 fallback */}
+                서브 라우트(예: /domains/123)는 상위 경로로 fallback,
+                알 수 없는 경로(NotFoundPage)는 "페이지를 찾을 수 없음" 표시 (#180) */}
             <span className="text-sm font-medium text-foreground truncate">
-              {navItems.find(({ to }) =>
-                to === '/'
-                  ? location.pathname === '/'
-                  : location.pathname.startsWith(to),
-              )?.label ?? ''}
+              {currentPageLabel}
             </span>
           </header>
         )}

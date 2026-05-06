@@ -21,12 +21,18 @@ function ThrowOnRender(): null {
   throw new Error('E2E 테스트용 강제 렌더 오류');
 }
 
-/** 404 — 존재하지 않는 경로 접근 시 표시. 대시보드 복귀 CTA 포함. */
+/** 404 — 존재하지 않는 경로 접근 시 표시. 대시보드 복귀 CTA 포함.
+ *  스크린리더 사용자가 페이지 구조를 인지할 수 있도록 시맨틱 <h2> 헤딩을 노출하고,
+ *  큰 "404" 숫자는 시각적 보조용으로 aria-hidden 처리한다. (#180) */
 function NotFoundPage() {
   return (
     <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
-      <p className="text-4xl font-bold">404</p>
-      <p className="text-sm">페이지를 찾을 수 없습니다.</p>
+      <p aria-hidden="true" className="text-4xl font-bold">
+        404
+      </p>
+      <h2 className="text-sm font-medium text-foreground">
+        페이지를 찾을 수 없습니다.
+      </h2>
       {/* 사용자가 직접 사이드바를 찾지 않아도 홈으로 돌아갈 수 있도록 CTA 제공 */}
       <Link
         to="/"

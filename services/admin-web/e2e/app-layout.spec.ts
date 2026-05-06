@@ -93,6 +93,29 @@ test.describe('AppLayout', () => {
     await expect(page).toHaveURL('/domains');
   });
 
+  test('NotFoundPage — 헤더 제목·document.title·시맨틱 헤딩이 404 상태를 명시한다 (#180)', async ({ page }) => {
+    // 존재하지 않는 경로에 직접 접근했을 때 사용자가 404 상태를 인지할 수 있는지 검증.
+    // 회귀 방지: 헤더가 빈 문자열로 떨어지거나 document.title이 "Smart School CDN"으로
+    // 떨어져 페이지 식별 불가하던 버그 재발 방지.
+    await page.goto('/totally-bogus-page-xyz');
+
+    // document.title — WCAG 2.4.2 Page Titled
+    await expect(page).toHaveTitle('페이지를 찾을 수 없음 | Smart School CDN');
+
+    // 헤더(banner) 페이지 제목 영역
+    await expect(
+      page.getByRole('banner').getByText('페이지를 찾을 수 없음'),
+    ).toBeVisible();
+
+    // 본문 시맨틱 헤딩 — 스크린리더 사용자가 페이지 구조 인지 가능
+    await expect(
+      page.getByRole('heading', { name: '페이지를 찾을 수 없습니다.' }),
+    ).toBeVisible();
+
+    // 대시보드 복귀 CTA가 정상 노출되는지
+    await expect(page.getByRole('link', { name: '대시보드로 돌아가기' })).toBeVisible();
+  });
+
   test('페이지 이동 시 메인 콘텐츠 스크롤이 상단으로 초기화된다 (#146)', async ({ page }) => {
     // 시스템 페이지(긴 콘텐츠)에서 스크롤 후 다른 페이지로 이동하면
     // 이전 스크롤 위치가 유지되는 버그 회귀 방지
