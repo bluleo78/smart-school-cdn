@@ -1655,6 +1655,99 @@ test.describe('도메인 상세 — 설정 탭', () => {
     await expect(page.getByTestId('optimizer-save-btn')).toBeEnabled();
   });
 
+  /**
+   * 이슈 #172 회귀 방지 — DomainOptimizerSection 편집 중 페이지 이탈 시 미저장 변경 경고 없음
+   *
+   * 수정 전: dirty 가드가 없어 사이드바·뒤로가기·탭 닫기로 이동 시 입력값이 소실됨.
+   * 수정 후: useUnsavedChangesPrompt 훅이 SPA 이동을 차단하고 AlertDialog로 확인을 받는다.
+   * 추가로 저장 onSuccess에서 localQuality/localMaxWidth/localEnabled를 null로 리셋해
+   * 서버 재동기화를 보장한다 (#137 패턴).
+   *
+   * 검증 파이프라인: 설정 탭 진입 → quality 변경 → 사이드바 링크 클릭 →
+   * (1) URL이 그대로 유지되어야 함, (2) AlertDialog 표시,
+   * (3) "취소" 시 페이지 유지 + 입력값 보존, (4) "떠나기" 시 실제 이동.
+   */
+  test('DomainOptimizerSection — 편집 중 페이지 이탈 시 확인 다이얼로그 표시 (회귀: #172)', async ({ page }) => {
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com');
+
+    // 설정 탭으로 전환
+    await page.getByRole('tab', { name: '설정' }).click();
+    await expect(page.getByTestId('domain-settings-tab')).toBeVisible();
+
+    // quality 값 변경 (저장하지 않음) — 서버값 85에서 60으로
+    await page.getByTestId('optimizer-quality-input').fill('60');
+
+    // 사이드바 "대시보드" 링크 클릭 — 이탈 시도
+    await page.getByRole('link', { name: '대시보드' }).click();
+
+    // 다이얼로그가 표시되고 URL은 그대로 유지되어야 함
+    await expect(page.getByTestId('optimizer-unsaved-changes-dialog')).toBeVisible();
+    expect(page.url()).toContain('/domains/textbook.com');
+
+    // "취소" 클릭 시 다이얼로그 닫히고 페이지 유지 + 입력값 보존
+    await page.getByTestId('optimizer-unsaved-cancel-btn').click();
+    await expect(page.getByTestId('optimizer-unsaved-changes-dialog')).not.toBeVisible();
+    expect(page.url()).toContain('/domains/textbook.com');
+    await expect(page.getByTestId('optimizer-quality-input')).toHaveValue('60');
+
+    // 다시 사이드바 클릭 → "떠나기" 시 실제 이동
+    await page.getByRole('link', { name: '대시보드' }).click();
+    await expect(page.getByTestId('optimizer-unsaved-changes-dialog')).toBeVisible();
+    await page.getByTestId('optimizer-unsaved-leave-btn').click();
+    await expect(page).toHaveURL(/\/$/);
+  });
+
+  /**
+   * 이슈 #172 회귀 방지 — 저장 후 로컬 state 리셋 (서버 재동기화 보장)
+   *
+   * 수정 전: 저장 후 localQuality/localMaxWidth/localEnabled가 null로 리셋되지 않아,
+   * 외부에서 profile이 갱신되어도 stale한 로컬 state가 화면에 우선 표시될 수 있음.
+   * 수정 후: onSuccess에서 세 로컬 state 모두 null로 리셋 → 서버 응답값이 즉시 반영.
+   *
+   * 검증: quality=60 저장 → 서버가 quality=70으로 응답(정규화 시뮬레이션) →
+   * 화면에는 사용자 입력값(60)이 아닌 서버 응답값(70)이 표시되어야 한다.
+   */
+  test('DomainOptimizerSection — 저장 후 로컬 state 리셋으로 서버 정규화 값 반영 (회귀: #172)', async ({ page }) => {
+    await setupDetailMocks(page);
+
+    // 서버가 quality=70으로 정규화한 응답을 돌려주는 시나리오
+    await page.route('**/api/optimizer/profiles/textbook.com', async (route) => {
+      if (route.request().method() === 'PUT') {
+        // PUT 응답 후 다음 GET이 정규화된 값을 돌려주도록 GET 모킹을 갱신
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ domain: 'textbook.com', quality: 70, max_width: 0, enabled: true }),
+        });
+      }
+      return route.fallback();
+    });
+    // 저장 후 GET이 다시 호출될 때 quality=70을 돌려주도록 갱신
+    await page.route('**/api/optimizer/profiles', async (route) => {
+      if (route.request().method() === 'GET') {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            profiles: [{ domain: 'textbook.com', quality: 70, max_width: 0, enabled: true }],
+          }),
+        });
+      }
+      return route.fallback();
+    });
+
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '설정' }).click();
+
+    // 사용자 입력값 60으로 저장
+    await page.getByTestId('optimizer-quality-input').fill('60');
+    await page.getByTestId('optimizer-save-btn').click();
+
+    // 저장 후 화면이 사용자 입력값(60)이 아닌 서버 응답값(70)으로 표시되어야 한다
+    await expect(page.getByTestId('optimizer-quality-input')).toHaveValue('70');
+  });
+
   test('최적화 프로파일 — quality=0 저장 시 클라이언트 검증 에러가 표시되고 PUT이 호출되지 않는다 (회귀: #48)', async ({ page }) => {
     // 수정 전: 서버에 quality=0을 전송 후 400 응답을 받고 고정 메시지 "저장에 실패했습니다."를 표시
     // 수정 후: 클라이언트 검증이 서버 전송을 막고 범위 오류 메시지를 표시해야 한다

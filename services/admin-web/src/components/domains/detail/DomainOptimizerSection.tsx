@@ -3,11 +3,13 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 import { useOptimizerProfile } from '../../../hooks/useOptimizerProfile';
 import { useUpdateOptimizerProfile } from '../../../hooks/useUpdateOptimizerProfile';
+import { useUnsavedChangesPrompt } from '../../../hooks/useUnsavedChangesPrompt';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
 import { Label } from '../../ui/label';
 import { Switch } from '../../ui/switch';
+import { AlertDialog, AlertDialogContent, AlertDialogTitle } from '../../ui/alert-dialog';
 
 interface Props {
   host: string;
@@ -26,6 +28,23 @@ export function DomainOptimizerSection({ host }: Props) {
   const maxWidth = localMaxWidth ?? profile?.max_width ?? 0;
   const enabled = localEnabled ?? profile?.enabled ?? true;
 
+  /**
+   * 미저장 dirty 여부 — 로컬 편집 state가 서버값과 다른지 비교.
+   * 최적화 프로파일은 잘못 저장되면 이미지 품질 저하·과도한 최대 너비로 트래픽 폭주를
+   * 유발할 수 있는 민감 항목이라 페이지 이탈 전 명시적 확인이 필요하다 (#172).
+   * — OriginSection(#171)과 동일 패턴.
+   */
+  const isDirty =
+    !!profile &&
+    ((localQuality !== null && localQuality !== profile.quality) ||
+      (localMaxWidth !== null && localMaxWidth !== profile.max_width) ||
+      (localEnabled !== null && localEnabled !== profile.enabled));
+
+  // 페이지 이탈 가드 — SPA 내 이동(사이드바/뒤로가기/도메인 행 클릭)은 AlertDialog,
+  // 외부 이탈(탭 닫기/새로고침)은 브라우저 표준 beforeunload로 가드.
+  const { pendingNavigation, confirmNavigation, cancelNavigation } =
+    useUnsavedChangesPrompt({ isDirty });
+
   /** 저장 — 서버 전송 전 클라이언트 범위 검증으로 불필요한 API 호출을 방지한다 */
   function handleSave() {
     if (quality < 1 || quality > 100) {
@@ -36,7 +55,18 @@ export function DomainOptimizerSection({ host }: Props) {
       toast.error('최대 너비는 0 이상이어야 합니다.');
       return;
     }
-    updateMutation.mutate({ domain: host, quality, max_width: maxWidth, enabled });
+    updateMutation.mutate(
+      { domain: host, quality, max_width: maxWidth, enabled },
+      {
+        onSuccess: () => {
+          // 저장 후 로컬 state를 null로 리셋해 서버 재동기화를 보장한다.
+          // — 외부에서 profile이 갱신되어도 stale한 로컬 state가 우선되는 결함 방지 (#137·#172).
+          setQuality(null);
+          setMaxWidth(null);
+          setEnabled(null);
+        },
+      },
+    );
   }
 
   /** 기본값으로 활성화 */
@@ -129,6 +159,39 @@ export function DomainOptimizerSection({ host }: Props) {
           </div>
         )}
       </CardContent>
+
+      {/* 미저장 변경 확인 다이얼로그 — useUnsavedChangesPrompt가 SPA 이동을 차단하면 표시.
+          OriginSection의 unsaved-changes-dialog와 testid가 겹치지 않도록 별도 testid 사용. */}
+      <AlertDialog open={pendingNavigation !== null} onClose={cancelNavigation}>
+        <AlertDialogContent
+          className="max-w-sm"
+          data-testid="optimizer-unsaved-changes-dialog"
+        >
+          <AlertDialogTitle>저장하지 않은 변경 사항이 있습니다</AlertDialogTitle>
+          <p className="text-sm text-muted-foreground">
+            최적화 프로파일에 저장하지 않은 변경 사항이 있습니다. 페이지를 떠나면
+            입력한 내용이 사라집니다. 정말 떠나시겠습니까?
+          </p>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button
+              variant="outline"
+              onClick={cancelNavigation}
+              size="sm"
+              data-testid="optimizer-unsaved-cancel-btn"
+            >
+              취소
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmNavigation}
+              size="sm"
+              data-testid="optimizer-unsaved-leave-btn"
+            >
+              떠나기
+            </Button>
+          </div>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 }
