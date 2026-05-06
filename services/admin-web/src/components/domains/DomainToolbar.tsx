@@ -63,14 +63,24 @@ export function DomainToolbar({
     });
   }
 
+  // 모바일(<md)에선 세로 스택, 데스크톱(md+)에선 가로 정렬 — 좁은 화면에서
+  // 버튼 라벨이 글자 단위로 줄바꿈되는 현상을 방지한다.
   return (
-    <div className="flex items-center justify-between gap-3">
-      {/* 왼쪽: 액션 버튼 */}
-      <div className="flex items-center gap-2">
-        <Button onClick={onAddClick} data-testid="toolbar-add-btn">
+    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+      {/* 왼쪽: 액션 버튼 — 모바일에선 wrap 허용, 라벨은 nowrap 유지 */}
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          onClick={onAddClick}
+          data-testid="toolbar-add-btn"
+          className="whitespace-nowrap"
+        >
           + 도메인 추가
         </Button>
-        <Button variant="outline" onClick={onBulkAddClick}>
+        <Button
+          variant="outline"
+          onClick={onBulkAddClick}
+          className="whitespace-nowrap"
+        >
           일괄 추가
         </Button>
         <Button
@@ -78,25 +88,29 @@ export function DomainToolbar({
           onClick={onBulkDeleteClick}
           disabled={selectedCount === 0}
           data-testid="toolbar-bulk-delete-btn"
+          className="whitespace-nowrap"
         >
           일괄 삭제{selectedCount > 0 && ` (${selectedCount})`}
         </Button>
       </div>
 
-      {/* 오른쪽: 검색 + 필터 */}
+      {/* 오른쪽: 검색 + 필터 — 모바일에선 가용 너비, 데스크톱에선 고정 폭 */}
       <div className="flex items-center gap-2">
         <Input
           placeholder="도메인 검색..."
           value={searchValue}
           onChange={handleSearchChange}
-          className="w-52"
+          className="w-full md:w-52"
           data-testid="domain-search"
         />
         <Select
           value={filter.enabled === undefined ? 'all' : String(filter.enabled)}
           onValueChange={handleEnabledChange}
         >
-          <SelectTrigger className="w-28" data-testid="domain-enabled-filter">
+          <SelectTrigger
+            className="w-28 shrink-0"
+            data-testid="domain-enabled-filter"
+          >
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

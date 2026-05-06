@@ -199,6 +199,44 @@ test.describe('도메인 관리 — 요약 카드', () => {
       expect(w).toBeGreaterThan(300);
     }
   });
+
+  /**
+   * 이슈 #176 회귀 방지 — 모바일 뷰포트(390px)에서 DomainToolbar 액션 버튼이
+   * 글자 단위로 세로 줄바꿈되던 문제. 컨테이너를 모바일에서 flex-col로 전환하고
+   * 라벨에 whitespace-nowrap을 적용하여 버튼 폭이 자연 너비로 유지되어야 한다.
+   */
+  test('390px 뷰포트에서 툴바 한글 버튼 라벨이 글자 단위로 줄바꿈되지 않는다 (#176 회귀 방지)', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+
+    // iPhone 14 가로 폭 기준으로 모바일 환경 재현
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/domains');
+
+    const addBtn = page.getByTestId('toolbar-add-btn');
+    await expect(addBtn).toBeVisible();
+
+    // 버튼 폭이 압축되지 않았는지 확인 — 한 줄 자연 너비여야 한다.
+    // 압축 시 ~46px(글자 단위 줄바꿈), 정상 시 80px 이상.
+    const dims = await page.evaluate(() => {
+      const btns = Array.from(document.querySelectorAll('button')).filter((b) =>
+        /일괄 추가|일괄 삭제/.test(b.textContent ?? ''),
+      );
+      return btns.map((b) => ({
+        text: b.textContent,
+        width: (b as HTMLElement).offsetWidth,
+        height: (b as HTMLElement).offsetHeight,
+      }));
+    });
+
+    expect(dims.length).toBeGreaterThanOrEqual(2);
+    for (const d of dims) {
+      // 글자 단위 줄바꿈 시 너비가 50px 미만으로 떨어짐 → 80px 이상이어야 정상
+      expect(d.width).toBeGreaterThan(70);
+      // 한 줄 높이(36~40px) 유지 — 줄바꿈 시 높이가 두 배 이상으로 증가
+      expect(d.height).toBeLessThan(60);
+    }
+  });
 });
 
 test.describe('도메인 관리 — 도메인 목록', () => {
