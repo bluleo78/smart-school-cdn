@@ -11,6 +11,8 @@ import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
 import { Label } from '../../ui/label';
 import { Dialog, DialogContent, DialogTitle } from '../../ui/dialog';
+import { AlertDialog, AlertDialogContent, AlertDialogTitle } from '../../ui/alert-dialog';
+import { useUnsavedChangesPrompt } from '../../../hooks/useUnsavedChangesPrompt';
 import { DomainCacheSection } from './DomainCacheSection';
 import { DomainOptimizerSection } from './DomainOptimizerSection';
 import { TlsStatusBadge } from '../../TlsStatusBadge';
@@ -53,6 +55,19 @@ function OriginSection({ domain }: { domain: Domain }) {
   const [description, setDescription] = useState(domain.description);
 
   const updateMutation = useUpdateDomain();
+
+  /**
+   * 미저장 dirty 여부 — 편집 모드 + (origin 또는 description이 원본과 다름).
+   * CDN의 origin 설정은 한 번 잘못 저장되면 캐시 미스/오리진 폭주를 유발할 수 있는
+   * 민감 항목이라 페이지 이탈 전 명시적 확인이 필요하다 (#171).
+   */
+  const isDirty =
+    editing && (origin !== domain.origin || description !== domain.description);
+
+  // 페이지 이탈 가드 — SPA 내 이동(사이드바/뒤로가기/도메인 행 클릭)은 AlertDialog,
+  // 외부 이탈(탭 닫기/새로고침)은 브라우저 표준 beforeunload로 가드.
+  const { pendingNavigation, confirmNavigation, cancelNavigation } =
+    useUnsavedChangesPrompt({ isDirty });
 
   /** 편집 취소 — 원래 값으로 복원 */
   function handleCancel() {
@@ -183,6 +198,36 @@ function OriginSection({ domain }: { domain: Domain }) {
           </>
         )}
       </CardContent>
+
+      {/* 미저장 변경 확인 다이얼로그 — useUnsavedChangesPrompt가 SPA 이동을 차단하면 표시.
+          "취소"는 현재 페이지 유지, "떠나기"는 차단된 이동을 재개. */}
+      <AlertDialog open={pendingNavigation !== null} onClose={cancelNavigation}>
+        <AlertDialogContent className="max-w-sm" data-testid="unsaved-changes-dialog">
+          <AlertDialogTitle>저장하지 않은 변경 사항이 있습니다</AlertDialogTitle>
+          <p className="text-sm text-muted-foreground">
+            오리진 설정에 저장하지 않은 변경 사항이 있습니다. 페이지를 떠나면
+            입력한 내용이 사라집니다. 정말 떠나시겠습니까?
+          </p>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button
+              variant="outline"
+              onClick={cancelNavigation}
+              size="sm"
+              data-testid="unsaved-cancel-btn"
+            >
+              취소
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmNavigation}
+              size="sm"
+              data-testid="unsaved-leave-btn"
+            >
+              떠나기
+            </Button>
+          </div>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 }

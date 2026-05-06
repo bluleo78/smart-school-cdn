@@ -1594,6 +1594,50 @@ test.describe('도메인 상세 — 설정 탭', () => {
     await expect(page.getByTestId('origin-input')).toHaveValue('https://normalized-origin.com');
   });
 
+  /**
+   * 이슈 #171 회귀 방지 — OriginSection 편집 중 페이지 이탈 시 미저장 변경 경고 없음
+   *
+   * 수정 전: dirty 가드가 없어 사이드바·뒤로가기·탭 닫기로 이동 시 입력값이 소실됨.
+   * 수정 후: useUnsavedChangesPrompt 훅이 SPA 이동을 차단하고 AlertDialog로 확인을 받는다.
+   *
+   * 검증 파이프라인: 편집 모드 진입 → origin 변경 → 사이드바 링크 클릭 →
+   * (1) URL이 그대로 유지되어야 함, (2) AlertDialog가 표시되어야 함,
+   * (3) "취소" 시 페이지 유지 + 입력값 보존, (4) "떠나기" 시 실제 이동.
+   */
+  test('OriginSection — 편집 중 페이지 이탈 시 확인 다이얼로그 표시 (회귀: #171)', async ({ page }) => {
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com');
+
+    // 설정 탭으로 전환
+    await page.getByRole('tab', { name: '설정' }).click();
+    await expect(page.getByTestId('domain-settings-tab')).toBeVisible();
+
+    // 편집 모드 진입 → origin 변경 (저장하지 않음)
+    await page.getByTestId('edit-domain-btn').click();
+    await page.getByTestId('origin-input').fill('https://changed-but-not-saved.example');
+
+    // 사이드바 "대시보드" 링크 클릭 — 이탈 시도
+    await page.getByRole('link', { name: '대시보드' }).click();
+
+    // 다이얼로그가 표시되고 URL은 그대로 유지되어야 함
+    await expect(page.getByTestId('unsaved-changes-dialog')).toBeVisible();
+    expect(page.url()).toContain('/domains/textbook.com');
+
+    // "취소" 클릭 시 다이얼로그 닫히고 페이지 유지 + 입력값 보존
+    await page.getByTestId('unsaved-cancel-btn').click();
+    await expect(page.getByTestId('unsaved-changes-dialog')).not.toBeVisible();
+    expect(page.url()).toContain('/domains/textbook.com');
+    await expect(page.getByTestId('origin-input')).toHaveValue(
+      'https://changed-but-not-saved.example',
+    );
+
+    // 다시 사이드바 클릭 → "떠나기" 시 실제 이동
+    await page.getByRole('link', { name: '대시보드' }).click();
+    await expect(page.getByTestId('unsaved-changes-dialog')).toBeVisible();
+    await page.getByTestId('unsaved-leave-btn').click();
+    await expect(page).toHaveURL(/\/$/);
+  });
+
   test('최적화 프로파일 편집이 동작한다', async ({ page }) => {
     await setupDetailMocks(page);
     await mockApi(page, 'PUT', '/optimizer/profiles/textbook.com', {});
