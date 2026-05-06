@@ -61,9 +61,12 @@ function isValidTab(value: string | null): value is TabValue {
 
 /** DNS 관리 페이지 루트 — 헤더 + 오프라인 배너 + 상태 스트립 + 3탭 */
 export function DnsPage() {
-  const { data: status } = useDnsStatus();
+  const { data: status, error: statusError } = useDnsStatus();
   // status 가 undefined(초기 로드 중)일 땐 배너 표시 금지 — 깜빡임 방지
-  const offline = status?.online === false;
+  // /api/dns/status 자체가 실패(네트워크/5xx)한 경우도 offline 배너로 노출해
+  // "상태 확인 불가" 사실을 사용자에게 알린다 (#173).
+  const offline = status?.online === false || !!statusError;
+  const statusUnavailable = !!statusError;
 
   // URL searchParam ?tab=... 으로 탭 상태를 영속화한다 (#114).
   // 뒤로가기·북마크·공유 링크로 특정 탭에 직접 접근할 수 있게 한다.
@@ -86,7 +89,9 @@ export function DnsPage() {
         </p>
       </div>
 
-      {/* 오프라인 배너 — SystemPage 의 destructive 배너와 동일 스타일 */}
+      {/* 오프라인 배너 — SystemPage 의 destructive 배너와 동일 스타일.
+       *  status 응답 실패(statusError) 시 "상태 확인 불가"로 메시지를 분기해
+       *  서비스 오프라인(online=false)과 연결 실패(5xx/네트워크)를 구분 표기 (#173). */}
       {offline && (
         <div
           className="flex gap-3 rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-destructive"
@@ -94,8 +99,16 @@ export function DnsPage() {
         >
           <AlertTriangle size={20} className="mt-0.5 shrink-0" />
           <div>
-            <p className="font-semibold">DNS 서비스가 오프라인 상태입니다.</p>
-            <p className="mt-1 text-sm">서비스 상태를 확인하세요.</p>
+            <p className="font-semibold">
+              {statusUnavailable
+                ? 'DNS 상태를 불러오지 못했습니다.'
+                : 'DNS 서비스가 오프라인 상태입니다.'}
+            </p>
+            <p className="mt-1 text-sm">
+              {statusUnavailable
+                ? '관리자 서버 또는 dns-service 연결을 확인하세요.'
+                : '서비스 상태를 확인하세요.'}
+            </p>
           </div>
         </div>
       )}
@@ -116,10 +129,24 @@ export function DnsPage() {
   );
 }
 
-/** 상단 상태 스트립 — 누적 Total 은 dns-service 기동 이후 기준, QPS 는 직전 1분 기준 */
+/** 상단 상태 스트립 — 누적 Total 은 dns-service 기동 이후 기준, QPS 는 직전 1분 기준.
+ *  3-state 처리: loading → Skeleton, error → ErrorCard, success → 칩 노출 (#173).
+ *  error 분기가 누락되면 isLoading=false + status=undefined 상태에서 Skeleton 무한 노출. */
 function StatusStrip() {
-  const { data: status, isLoading } = useDnsStatus();
+  const { data: status, isLoading, error } = useDnsStatus();
   const { data: metrics } = useDnsMetrics('1h');
+  if (error) {
+    return (
+      <Card
+        className="border-destructive/50 bg-destructive/5"
+        data-testid="dns-status-error"
+      >
+        <CardContent className="py-4 text-sm text-destructive">
+          DNS 상태를 불러오지 못했습니다: {String(error)}
+        </CardContent>
+      </Card>
+    );
+  }
   if (isLoading || !status) return <Skeleton className="h-16 w-full" />;
 
   // 직전 분 버킷의 total / 60 으로 QPS 근사 (현재 분은 누적 중이라 저평가되므로 제외)

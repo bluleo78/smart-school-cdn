@@ -228,6 +228,32 @@ test.describe('DNS — 탭 URL searchParam 동기화 (#114)', () => {
   });
 });
 
+// ─── /api/dns/status 에러 처리 (#173 회귀) ───────────────────
+test.describe('DNS — /api/dns/status 에러 처리 (#173)', () => {
+  test('status 5xx 시 StatusStrip 에러 카드 + 오프라인 배너(상태 확인 불가)가 표시된다', async ({ page }) => {
+    // /api/dns/status 만 5xx로 모킹 → 나머지는 정상 응답으로 채운다
+    // 5xx 분기가 빠지면 StatusStrip 이 Skeleton 무한 + 배너 누락이 된다
+    await page.route('**/api/dns/status', async (route) => {
+      await route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'dns-service down' }),
+      });
+    });
+    await mockApi(page, 'GET', '/dns/records', createDnsRecords());
+    await mockDnsQuery(page, '/dns/queries', createDnsQueriesMixed());
+    await mockDnsQuery(page, '/dns/metrics', createDnsMetrics());
+
+    await page.goto('/dns');
+
+    // StatusStrip 자리에 ErrorCard (Skeleton 아님) 노출
+    await expect(page.getByTestId('dns-status-error')).toBeVisible({ timeout: 10000 });
+    // offline 배너 — "상태 확인 불가" 문구 (online=false 시의 "오프라인" 문구와 분리)
+    await expect(page.getByTestId('dns-offline-banner')).toBeVisible();
+    await expect(page.getByText('DNS 상태를 불러오지 못했습니다.')).toBeVisible();
+  });
+});
+
 // ─── 빈 데이터 empty state (#21 회귀) ─────────────────────────
 test.describe('DNS — 쿼리 추이 차트 empty state (#21)', () => {
   test('메트릭 데이터가 없으면 차트 대신 empty state 메시지가 표시된다', async ({ page }) => {
