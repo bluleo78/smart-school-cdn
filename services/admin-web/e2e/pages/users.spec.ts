@@ -103,7 +103,9 @@ test.describe('사용자 관리', () => {
 
     const newEmail = 'new-user@test.local';
     await page.fill('input[type=email]', newEmail);
-    await page.fill('input[type=password]', 'password-1234');
+    // #217 confirm 필드 도입으로 input[type=password] 다중 매치 → id 기반 단일 선택자
+    await page.fill('input#add-user-password', 'password-1234');
+    await page.fill('input#add-user-password-confirm', 'password-1234');
 
     // 다이얼로그 내부 "추가" 버튼 클릭 (헤더의 "+ 사용자 추가" 와 구분)
     await page.getByRole('button', { name: '추가', exact: true }).click();
@@ -126,6 +128,8 @@ test.describe('사용자 관리', () => {
     // 빈 입력 에러: 포맷/길이 에러가 아닌 "입력해주세요" 메시지가 표시되어야 함
     await expect(page.getByText('이메일을 입력해주세요.')).toBeVisible();
     await expect(page.getByText('비밀번호를 입력해주세요.')).toBeVisible();
+    // #217 confirm 필드 도입 — 빈 입력 시 재입력 안내 문구도 동시 표시
+    await expect(page.getByText('비밀번호를 한 번 더 입력해주세요.')).toBeVisible();
   });
 
   test('자기 자신 비활성화 버튼 disabled', async ({ page }) => {
@@ -250,7 +254,8 @@ test.describe('사용자 관리', () => {
     await page.getByRole('button', { name: '+ 사용자 추가' }).click();
 
     // 비밀번호 입력 필드에 autocomplete="new-password" 속성이 있어야 함
-    const passwordInput = page.locator('input[type=password]');
+    // #217 confirm 필드 도입으로 input[type=password] 다중 매치 → id 기반 단일 선택자로 한정
+    const passwordInput = page.locator('input#add-user-password');
     await expect(passwordInput).toBeVisible();
     const autocomplete = await passwordInput.getAttribute('autocomplete');
     expect(autocomplete).toBe('new-password');
@@ -427,15 +432,17 @@ test.describe('사용자 관리', () => {
     await page.getByRole('button', { name: '+ 사용자 추가' }).click();
 
     // 기본값: type=password (숨김 상태)
-    const passwordInput = page.locator('input[name=password]');
+    // #217 confirm 필드 도입으로 input[name=password] 다중 매치 → id 기반 단일 선택자로 한정
+    const passwordInput = page.locator('input#add-user-password');
     await expect(passwordInput).toHaveAttribute('type', 'password');
 
-    // 토글 버튼 클릭 → type=text (표시 상태)
-    await page.getByRole('button', { name: '비밀번호 표시' }).click();
+    // 새 비밀번호 필드의 토글 버튼만 한정 — #217 confirm 필드 도입으로 토글이 2개 존재
+    const toggleBtn = passwordInput.locator('..').getByRole('button', { name: /비밀번호 (표시|숨기기)/ });
+    await toggleBtn.click();
     await expect(passwordInput).toHaveAttribute('type', 'text');
 
     // 다시 클릭 → type=password (숨김 상태로 복귀)
-    await page.getByRole('button', { name: '비밀번호 숨기기' }).click();
+    await toggleBtn.click();
     await expect(passwordInput).toHaveAttribute('type', 'password');
   });
 
@@ -487,7 +494,9 @@ test.describe('사용자 관리', () => {
 
     const testEmail = 'existing@example.com';
     await page.fill('input[type=email]', testEmail);
-    await page.fill('input[type=password]', 'password1234');
+    // #217 confirm 필드 도입 — id 기반 단일 선택자로 한정 + 일치 입력
+    await page.fill('input#add-user-password', 'password1234');
+    await page.fill('input#add-user-password-confirm', 'password1234');
 
     await page.getByRole('button', { name: '추가', exact: true }).click();
 
@@ -517,7 +526,9 @@ test.describe('사용자 관리', () => {
     await page.getByRole('button', { name: '+ 사용자 추가' }).click();
 
     await page.fill('input[type=email]', 'new@example.com');
-    await page.fill('input[type=password]', 'password1234');
+    // #217 confirm 필드 도입 — id 기반 단일 선택자로 한정 + 일치 입력
+    await page.fill('input#add-user-password', 'password1234');
+    await page.fill('input#add-user-password-confirm', 'password1234');
 
     await page.getByRole('button', { name: '추가', exact: true }).click();
 
@@ -1001,7 +1012,9 @@ test.describe('사용자 관리', () => {
     await page.goto('/users');
     await page.getByRole('button', { name: '+ 사용자 추가' }).click();
     await page.fill('input[type=email]', 'pending@example.com');
-    await page.fill('input[type=password]', 'password1234');
+    // #217 confirm 필드 도입 — id 기반 단일 선택자로 한정 + 일치 입력
+    await page.fill('input#add-user-password', 'password1234');
+    await page.fill('input#add-user-password-confirm', 'password1234');
     await page.getByRole('button', { name: '추가', exact: true }).click();
 
     // 제출 중임을 확인
@@ -1075,5 +1088,60 @@ test.describe('사용자 관리', () => {
     // 요청 완료 — 정상 닫기 검증
     resolveRequest!(null);
     await expect(dialog).not.toBeVisible();
+  });
+
+  /**
+   * 이슈 #217 회귀 방지 — 사용자 추가 폼 비밀번호 재입력(confirmPassword) 필드 누락
+   * 수정 전: password 단일 필드 → 토글 미사용 시 plaintext 미확인 오타가 그대로 해시 저장 → 새 계정 잠금
+   * 수정 후: confirmPassword 필드 + zod refine 일치 검증 → 불일치 시 인라인 에러로 mutation 차단
+   */
+  test('사용자 추가 — 비밀번호 불일치 시 인라인 에러 + mutation 차단 — 회귀 방지 #217', async ({ page }) => {
+    let postCalled = false;
+    await page.route('**/api/users', async (route) => {
+      if (route.request().method() === 'POST') {
+        postCalled = true;
+        await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify(baseUsers[0]) });
+      } else {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(baseUsers) });
+      }
+    });
+
+    await page.goto('/users');
+    await page.getByRole('button', { name: '+ 사용자 추가' }).click();
+
+    // 1. 비밀번호 두 입력값을 다르게 입력
+    await page.fill('input[type=email]', 'mismatch@example.com');
+    await page.fill('input#add-user-password', 'password1234');
+    await page.fill('input#add-user-password-confirm', 'password0000');
+
+    // 2. 추가 버튼 클릭 → zod refine 차단 → 인라인 에러 표시
+    await page.getByRole('button', { name: '추가', exact: true }).click();
+    await expect(page.getByText('비밀번호가 일치하지 않습니다.')).toBeVisible();
+
+    // 3. mutation 호출되지 않았는지 검증 (서버 왕복 차단)
+    expect(postCalled).toBe(false);
+
+    // 4. 다이얼로그 유지 확인
+    await expect(page.getByRole('dialog', { name: '사용자 추가' })).toBeVisible();
+
+    // 5. 일치하도록 수정 후 제출 → mutation 정상 진행
+    await page.fill('input#add-user-password-confirm', 'password1234');
+    await page.getByRole('button', { name: '추가', exact: true }).click();
+    expect(postCalled).toBe(true);
+  });
+
+  /**
+   * 이슈 #217 회귀 방지 — confirmPassword 입력에 autocomplete="new-password" 속성 존재
+   * 비밀번호 매니저가 자동완성 후보로 제안하지 않도록 신규 비밀번호 힌트 명시
+   */
+  test('사용자 추가 다이얼로그 — 비밀번호 확인 입력 autocomplete="new-password" — 회귀 방지 #217', async ({ page }) => {
+    await mockApi(page, 'GET', '/users', baseUsers);
+
+    await page.goto('/users');
+    await page.getByRole('button', { name: '+ 사용자 추가' }).click();
+
+    const confirmInput = page.locator('input#add-user-password-confirm');
+    await expect(confirmInput).toBeVisible();
+    expect(await confirmInput.getAttribute('autocomplete')).toBe('new-password');
   });
 });

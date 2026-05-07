@@ -27,6 +27,7 @@ import {
 import { Skeleton } from '../components/ui/skeleton';
 
 // 빈 입력 우선 체크 → 포맷/길이 검증 순서로 단계적으로 에러 메시지 표시
+// confirmPassword: 신규 사용자 추가 시 재입력 — 단일 필드 + 토글 미사용 시 plaintext 미확인 오타 저장 방지 (#217, #211 패턴)
 const createSchema = z.object({
   username: z.string()
     .min(1, '이메일을 입력해주세요.')
@@ -34,6 +35,10 @@ const createSchema = z.object({
   password: z.string()
     .min(1, '비밀번호를 입력해주세요.')
     .min(8, '8자 이상 입력해주세요.'),
+  confirmPassword: z.string().min(1, '비밀번호를 한 번 더 입력해주세요.'),
+}).refine((d) => d.password === d.confirmPassword, {
+  path: ['confirmPassword'],
+  message: '비밀번호가 일치하지 않습니다.',
 });
 type CreateFormData = z.infer<typeof createSchema>;
 
@@ -236,8 +241,17 @@ export function UsersPage() {
               {/* htmlFor/id 연결 — 레이블 클릭 시 입력 필드 포커스·스크린 리더 연동 (#79) */}
               <Label htmlFor="add-user-password">비밀번호</Label>
               {/* PasswordInput — 표시/숨기기 토글 포함, autocomplete="new-password"로 자동완성 힌트 유지 (#76) */}
-              <PasswordInput id="add-user-password" autoComplete="new-password" {...createForm.register('password')} />
+              <PasswordInput id="add-user-password" autoComplete="new-password" placeholder="8자 이상" {...createForm.register('password')} />
               {createForm.formState.errors.password && <p className="text-xs text-destructive">{createForm.formState.errors.password.message}</p>}
+            </div>
+            <div>
+              {/* htmlFor/id 연결 — 레이블 클릭 시 입력 필드 포커스·스크린 리더 연동 (#79)
+               *  비밀번호 확인 — 단일 필드 + 토글 미사용 시 plaintext 미확인 오타 저장 방지 (#217, #211 패턴).
+               *  zod refine 에서 password 와 일치 검증, 불일치 시 인라인 에러 표시 → mutation 차단 */}
+              <Label htmlFor="add-user-password-confirm">비밀번호 확인</Label>
+              {/* PasswordInput — 표시/숨기기 토글 포함, autocomplete="new-password" 동일 적용 */}
+              <PasswordInput id="add-user-password-confirm" autoComplete="new-password" placeholder="비밀번호 재입력" {...createForm.register('confirmPassword')} />
+              {createForm.formState.errors.confirmPassword && <p className="text-xs text-destructive">{createForm.formState.errors.confirmPassword.message}</p>}
             </div>
             <div className="flex justify-end gap-2 pt-2">
               {/* 취소 버튼 — mutation 진행 중 disabled (#188, #165 패턴) */}
