@@ -32,8 +32,27 @@ test.describe('대시보드 — 프록시 상태 카드', () => {
     // 업타임 "1시간 0분" 표시 확인 — 차트 축 레이블 충돌 방지 위해 testid 로 스코프
     await expect(page.getByTestId('proxy-uptime')).toHaveText('1시간 0분');
 
-    // 총 요청 수 표시 확인
-    await expect(page.getByText('총 요청 42건')).toBeVisible();
+    // 부팅 후 누적 요청 수 표시 확인 — 24h 카드와 라벨 차별화 (#238)
+    await expect(page.getByTestId('proxy-request-count')).toHaveText('부팅 후 요청 42건');
+  });
+
+  test('프록시 부팅 후 카운터와 24h 누적 카드가 라벨로 구분된다 (#238)', async ({ page }) => {
+    // 두 카드가 같은 화면에서 시점이 다른 값을 노출하는 회귀 케이스.
+    // proxy.request_count=0 (부팅 직후) + cache.requests=46905 (24h)
+    await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline({ request_count: 0 }));
+    await mockApi(page, 'GET', '/proxy/requests', []);
+    await mockApi(page, 'GET', '/cache/stats', createCacheStats({ requests: 46905 }));
+    await mockCacheSeries(page);
+
+    await page.goto('/');
+
+    // ProxyStatusCard: "부팅 후 요청 0건" — '총 요청'으로 시작하지 않아야 함
+    const proxyCounter = page.getByTestId('proxy-request-count');
+    await expect(proxyCounter).toHaveText('부팅 후 요청 0건');
+
+    // BandwidthSavedCard: "총 요청 (24h)" 카드에 46,905
+    await expect(page.getByTestId('total-requests-card')).toContainText('총 요청 (24h)');
+    await expect(page.getByTestId('dashboard-total-requests')).toHaveText('46,905');
   });
 
   test('프록시 오프라인 시 빨간 배지가 표시된다', async ({ page }) => {

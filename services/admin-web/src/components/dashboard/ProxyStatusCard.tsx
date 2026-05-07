@@ -42,8 +42,9 @@ export function ProxyStatusCard() {
           {isOnline ? '온라인' : '오프라인'}
         </Badge>
         <p data-testid="proxy-uptime" className="text-xl font-bold mt-3 leading-tight">{formatUptime(data?.uptime ?? 0)}</p>
-        <p className="text-xs text-muted-foreground mt-1">
-          총 요청 {(data?.request_count ?? 0).toLocaleString()}건
+        {/* 프록시 부팅 후 누적 카운터 — BandwidthSavedCard 의 24h 윈도우와 시점이 다르므로 라벨로 명확히 구분한다 (#238). */}
+        <p className="text-xs text-muted-foreground mt-1" data-testid="proxy-request-count">
+          부팅 후 요청 {(data?.request_count ?? 0).toLocaleString()}건
         </p>
       </CardContent>
     </Card>
