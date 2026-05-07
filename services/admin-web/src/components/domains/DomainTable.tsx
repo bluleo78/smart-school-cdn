@@ -251,9 +251,11 @@ export function DomainTable({
           {/* 이슈 #24: "Origin" 영문 → "오리진"으로 한국어 통일 (도메인 상세의 "오리진" 표기와 일관성) */}
           <TableHead>오리진</TableHead>
           <TableHead>상태</TableHead>
-          <TableHead className="text-right">요청(24h)</TableHead>
-          <TableHead className="text-right">캐시 히트</TableHead>
-          <TableHead>TLS</TableHead>
+          {/* whitespace-nowrap — iPad portrait(810×1080) 등 좁은 viewport에서 헤더 텍스트가
+           *  음절 단위로 세로 wrap되어 헤더 높이가 폭주하는 현상 차단 (#266, #257 동일 패턴) */}
+          <TableHead className="text-right whitespace-nowrap">요청(24h)</TableHead>
+          <TableHead className="text-right whitespace-nowrap">캐시 히트</TableHead>
+          <TableHead className="whitespace-nowrap">TLS</TableHead>
           <TableHead className="text-right">액션</TableHead>
         </TableRow>
       </TableHeader>
@@ -312,8 +314,10 @@ export function DomainTable({
               <TableCell className="text-right text-xs text-muted-foreground">—</TableCell>
 
               {/* TLS — tlsExpiryByHost에서 도메인별 만료일을 조회해 TlsStatusBadge로 표시한다.
-                   맵에 없으면 null(미발급)으로 처리 */}
-              <TableCell>
+                   맵에 없으면 null(미발급)으로 처리.
+                   whitespace-nowrap — 좁은 viewport(iPad portrait)에서 '19일 후 만료' 같은
+                   배지 텍스트가 글자 단위로 wrap되어 행 높이가 폭주하는 현상 차단 (#266, #257 동일 패턴) */}
+              <TableCell className="whitespace-nowrap">
                 <TlsStatusBadge expiresAt={tlsExpiryByHost?.get(domain.host) ?? null} />
               </TableCell>
 
