@@ -1468,6 +1468,78 @@ test.describe('도메인 상세 — Logs 탭', () => {
   });
 
   /**
+   * 이슈 #227 — 빈 상태 메시지 분기
+   * 진짜 로그 0건과 "검색/에러필터로 0건" 두 상황을 구분해야 한다.
+   * - 필터 비활성 → "로그가 없습니다" (data-testid="domain-logs-empty")
+   * - 필터 활성 → 검색어/필터 정보가 포함된 메시지 + 초기화 버튼
+   */
+  test('빈 상태 — 필터 미적용 시 "로그가 없습니다" 메시지가 표시된다 (#227)', async ({ page }) => {
+    await setupDetailMocks(page);
+    // 로그 mock을 빈 배열로 오버라이드
+    await page.route('**/api/domains/textbook.com/logs*', (route) =>
+      route.fulfill({ json: [] }),
+    );
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '트래픽' }).click();
+
+    await expect(page.getByTestId('domain-logs-empty')).toBeVisible();
+    // 필터 활성 분기는 노출되지 않아야 한다
+    await expect(page.getByTestId('domain-logs-empty-filter')).toHaveCount(0);
+  });
+
+  test('빈 상태 — 검색어로 0건 매칭 시 검색어 정보 + 초기화 버튼이 표시된다 (#227)', async ({ page }) => {
+    await setupDetailMocks(page);
+    // 검색어가 있을 때(서버 q 파라미터 포함) 빈 응답 반환
+    await page.route('**/api/domains/textbook.com/logs*', (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get('q')) {
+        return route.fulfill({ json: [] });
+      }
+      return route.fulfill({ json: createDomainLogs() });
+    });
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '트래픽' }).click();
+
+    // 검색어 입력 → 매칭 0건
+    await page.getByPlaceholder('경로 검색...').fill('ZZZZNOMATCH');
+
+    const emptyFilter = page.getByTestId('domain-logs-empty-filter');
+    await expect(emptyFilter).toBeVisible();
+    await expect(emptyFilter).toContainText('ZZZZNOMATCH');
+    // 일반 빈 상태(필터 미적용)는 노출되지 않아야 한다
+    await expect(page.getByTestId('domain-logs-empty')).toHaveCount(0);
+
+    // 초기화 버튼 클릭 → 검색 입력이 비고 일반 빈 상태로 전환된다
+    await page.getByTestId('domain-logs-clear-filters-btn').click();
+    await expect(page.getByPlaceholder('경로 검색...')).toHaveValue('');
+  });
+
+  test('빈 상태 — "에러만" 필터로 0건 매칭 시 필터 안내 + 초기화 버튼이 표시된다 (#227)', async ({ page }) => {
+    await setupDetailMocks(page);
+    // status=error 일 때 빈 응답 반환
+    await page.route('**/api/domains/textbook.com/logs*', (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get('status') === 'error') {
+        return route.fulfill({ json: [] });
+      }
+      return route.fulfill({ json: createDomainLogs() });
+    });
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '트래픽' }).click();
+
+    // "에러만" 토글 활성화 → 0건
+    await page.getByRole('button', { name: '에러만' }).click();
+
+    const emptyFilter = page.getByTestId('domain-logs-empty-filter');
+    await expect(emptyFilter).toBeVisible();
+    await expect(emptyFilter).toContainText('에러만');
+
+    // 초기화 버튼 클릭 → 에러만 토글 해제
+    await page.getByTestId('domain-logs-clear-filters-btn').click();
+    await expect(page.getByRole('button', { name: '에러만' })).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  /**
    * 이슈 #158 회귀 방지 — period/errorsOnly 변경 시 limit 리셋 누락
    * 수정 전: "더 보기"로 limit=100 증가 후 period를 변경해도 limit=100이 유지됨
    * 수정 후: period 또는 errorsOnly 변경 시 limit이 50(기본값)으로 리셋되어야 한다
