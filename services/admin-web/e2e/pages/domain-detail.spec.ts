@@ -697,6 +697,54 @@ test.describe('도메인 상세 — Overview 탭', () => {
     expect(cardText).toMatch(/25\.0%/);
   });
 
+  /**
+   * 이슈 #262 회귀 방지 — '오늘 대역폭' 카드 숫자가 2줄로 wrap
+   * formatBytes("688.4 MB")의 number+space+unit이 좁은 좌측 컬럼에서 공백 wrap되는 문제.
+   * whitespace-nowrap이 적용되어 한 줄 높이로 렌더링되어야 한다.
+   */
+  test("Overview — '오늘 대역폭' 카드 숫자가 1줄로 표시된다 (#262 회귀 방지)", async ({ page }) => {
+    await setupDetailMocks(page);
+    // bandwidth 값이 MB 단위(공백 포함)로 표시되도록 충분한 양의 바이트 mock
+    await page.route('**/api/domains/textbook.com/stats*', (route) =>
+      route.request().method() === 'GET'
+        ? route.fulfill({
+            json: {
+              host: 'textbook.com',
+              period: '24h',
+              summary: {
+                totalRequests: 17440,
+                requestsDelta: 0,
+                cacheHitRate: 0.7,
+                cacheHitRateDelta: 0,
+                bandwidth: 721_420_288, // ≈ 688.0 MB — 공백 포함 단위 표기 유발
+                avgResponseTime: 89,
+                responseTimeDelta: 0,
+              },
+              timeseries: {
+                labels: ['00:00'],
+                hits: [10],
+                misses: [2],
+                bandwidth: [721_420_288],
+                responseTime: [89],
+              },
+            },
+          })
+        : route.fallback(),
+    );
+    // 1280x800 viewport — 이슈에서 wrap이 재현된 환경
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto('/domains/textbook.com');
+
+    const numberEl = page.locator('[data-testid="stat-card-bandwidth"] p.text-3xl');
+    await expect(numberEl).toBeVisible();
+    // text-3xl = line-height ~36px. wrap 발생 시 약 72px이 되므로 50px 이하면 1줄 보장
+    const box = await numberEl.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.height).toBeLessThan(50);
+    // 텍스트는 number + space + unit 형태 그대로 유지(다른 사용처 호환 위해 NBSP 미사용)
+    await expect(numberEl).toHaveText(/\d+\.\d+ (KB|MB|GB)/);
+  });
+
   test('Overview — Quick Actions 4개 버튼이 동일 y 오프셋에 정렬된다', async ({ page }) => {
     await setupDetailMocks(page);
     await page.goto('/domains/textbook.com');

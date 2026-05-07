@@ -75,7 +75,10 @@ function SummaryCards({ host }: { host: string }) {
         <CardContent>
           <div className="flex items-end justify-between">
             <div>
-              <p className="text-3xl font-bold">{formatBytes(s?.bandwidth ?? 0)}</p>
+              {/* whitespace-nowrap: formatBytes 결과 "688.4 MB"의 number+space+unit이
+                  4-카드 grid의 좁은 좌측 컬럼에서 공백 wrap되어 2줄로 분리되는 문제 방지 (#262).
+                  DomainSummaryCards의 동일 카드와 패턴 통일. */}
+              <p className="text-3xl font-bold whitespace-nowrap">{formatBytes(s?.bandwidth ?? 0)}</p>
               <span className="text-xs text-muted-foreground">누적</span>
             </div>
             <BarSparkline values={ts?.bandwidth ?? Array(24).fill(0)} />
