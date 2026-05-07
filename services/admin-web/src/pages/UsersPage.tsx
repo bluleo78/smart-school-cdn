@@ -133,6 +133,26 @@ export function UsersPage() {
   const createForm = useForm<CreateFormData>({ resolver: zodResolver(createSchema) });
   const passwordForm = useForm<PasswordFormData>({ resolver: zodResolver(passwordSchema) });
 
+  // 빈 입력 가드 — 필수 필드가 비었으면 제출 버튼을 disabled 처리해 잘못된 affordance 차단 (#248, #232 패턴).
+  // formState.isValid 대신 watch + trim 조합 — onChange 모드 미적용 폼에서도 실시간 반영되고
+  // AddDomainDialog/DomainBulkAddDialog와 동일한 패턴으로 일관성 유지. zod refine은 의도적 입력 후 형식 검증용.
+  const createUsername = createForm.watch('username') ?? '';
+  const createPassword = createForm.watch('password') ?? '';
+  const createConfirmPassword = createForm.watch('confirmPassword') ?? '';
+  const createSubmitDisabled =
+    createMut.isPending || !createUsername.trim() || !createPassword || !createConfirmPassword;
+
+  // 비밀번호 재설정 폼 — 자기 자신 변경 시 currentPassword 도 빈 입력 가드에 포함 (#248).
+  const isSelfPassword = passwordTarget?.id === myId;
+  const resetCurrentPassword = passwordForm.watch('currentPassword') ?? '';
+  const resetPassword = passwordForm.watch('password') ?? '';
+  const resetConfirmPassword = passwordForm.watch('confirmPassword') ?? '';
+  const passwordSubmitDisabled =
+    passwordMut.isPending ||
+    !resetPassword ||
+    !resetConfirmPassword ||
+    (isSelfPassword && !resetCurrentPassword);
+
   return (
     <div className="space-y-4">
       {/* 페이지 헤더 — h2로 통일 (다른 페이지와 일관성), 설명 텍스트 추가
@@ -264,8 +284,9 @@ export function UsersPage() {
             <div className="flex justify-end gap-2 pt-2">
               {/* 취소 버튼 — mutation 진행 중 disabled (#188, #165 패턴) */}
               <Button type="button" variant="outline" onClick={() => setCreateOpen(false)} disabled={createMut.isPending}>취소</Button>
-              {/* isPending 중 disabled + 로딩 텍스트 — 중복 제출 방지 */}
-              <Button type="submit" disabled={createMut.isPending}>{createMut.isPending ? '추가 중…' : '추가'}</Button>
+              {/* isPending 중 disabled + 로딩 텍스트 — 중복 제출 방지.
+               *  빈 입력 가드 — 필수 필드 미입력 시 disabled 로 잘못된 affordance 차단 (#248, #232 패턴) */}
+              <Button type="submit" disabled={createSubmitDisabled}>{createMut.isPending ? '추가 중…' : '추가'}</Button>
             </div>
           </form>
         </DialogContent>
@@ -337,8 +358,9 @@ export function UsersPage() {
               {/* 취소 버튼 — 닫기 시 폼 초기화 (dirty state 잔존 방지 #161),
                *              mutation 진행 중 disabled (#188, #165 패턴) */}
               <Button type="button" variant="outline" onClick={() => { setPasswordTarget(null); passwordForm.reset(); }} disabled={passwordMut.isPending}>취소</Button>
-              {/* isPending 중 disabled + 로딩 텍스트 — 중복 제출 방지 */}
-              <Button type="submit" disabled={passwordMut.isPending}>{passwordMut.isPending ? '재설정 중…' : '재설정'}</Button>
+              {/* isPending 중 disabled + 로딩 텍스트 — 중복 제출 방지.
+               *  빈 입력 가드 — 필수 필드 미입력 시 disabled. 자기 자신 변경 시 currentPassword 도 포함 (#248, #232 패턴) */}
+              <Button type="submit" disabled={passwordSubmitDisabled}>{passwordMut.isPending ? '재설정 중…' : '재설정'}</Button>
             </div>
           </form>
         </DialogContent>

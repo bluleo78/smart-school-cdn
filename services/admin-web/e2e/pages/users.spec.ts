@@ -114,22 +114,52 @@ test.describe('사용자 관리', () => {
     await expect(page.getByText(newEmail)).toBeVisible();
   });
 
-  // 이슈 #34 회귀 방지 — 사용자 추가 다이얼로그 빈 입력 시 "입력해주세요" 메시지 표시
-  test('사용자 추가 다이얼로그 — 빈 입력 시 "입력해주세요" 메시지 표시', async ({ page }) => {
+  // 이슈 #248 회귀 방지 — 사용자 추가 다이얼로그 필수 입력값이 비어 있으면 제출 버튼 disabled (#232 패턴).
+  // 모든 필수 필드 채우면 활성화되고, 일부만 채우면 여전히 disabled 상태여야 함.
+  test('사용자 추가 다이얼로그 — 빈 입력 시 "추가" 버튼 disabled', async ({ page }) => {
     await mockApi(page, 'GET', '/users', baseUsers);
     await page.goto('/users');
 
-    // 추가 버튼 클릭 → 다이얼로그
     await page.getByRole('button', { name: '+ 사용자 추가' }).click();
 
-    // 다이얼로그 내부 "추가" 버튼을 빈 입력으로 클릭
-    await page.getByRole('button', { name: '추가', exact: true }).click();
+    const submit = page.getByRole('button', { name: '추가', exact: true });
+    // 초기: 모든 필드 빈 상태 → disabled
+    await expect(submit).toBeDisabled();
 
-    // 빈 입력 에러: 포맷/길이 에러가 아닌 "입력해주세요" 메시지가 표시되어야 함
-    await expect(page.getByText('이메일을 입력해주세요.')).toBeVisible();
-    await expect(page.getByText('비밀번호를 입력해주세요.')).toBeVisible();
-    // #217 confirm 필드 도입 — 빈 입력 시 재입력 안내 문구도 동시 표시
-    await expect(page.getByText('비밀번호를 한 번 더 입력해주세요.')).toBeVisible();
+    // 이메일만 입력 → 여전히 disabled (비밀번호/확인 미입력)
+    await page.fill('input#add-user-email', 'new@example.com');
+    await expect(submit).toBeDisabled();
+
+    // 비밀번호 추가 입력 → 여전히 disabled (확인 필드 미입력)
+    await page.fill('input#add-user-password', 'password-1234');
+    await expect(submit).toBeDisabled();
+
+    // 확인 필드까지 입력 → 활성화
+    await page.fill('input#add-user-password-confirm', 'password-1234');
+    await expect(submit).toBeEnabled();
+  });
+
+  // 이슈 #248 회귀 방지 — 비밀번호 재설정 다이얼로그 필수 입력값이 비어 있으면 제출 버튼 disabled (#232 패턴).
+  // 다른 사용자 비밀번호 재설정 케이스: currentPassword 필드가 노출되지 않으므로 password/confirmPassword만 검사.
+  test('비밀번호 재설정 다이얼로그 — 빈 입력 시 "재설정" 버튼 disabled', async ({ page }) => {
+    await mockApi(page, 'GET', '/users', baseUsers);
+    await page.goto('/users');
+
+    // 다른 사용자(id=2) 행의 "비밀번호 재설정" 클릭 — currentPassword 필드 미노출
+    const otherRow = page.getByTestId('user-row-2');
+    await otherRow.getByRole('button', { name: '비밀번호 재설정' }).click();
+
+    const submit = page.getByRole('button', { name: '재설정', exact: true });
+    // 초기: 모든 필드 빈 상태 → disabled
+    await expect(submit).toBeDisabled();
+
+    // 새 비밀번호만 입력 → 여전히 disabled (확인 필드 미입력)
+    await page.fill('input#reset-password', 'new-pass-1234');
+    await expect(submit).toBeDisabled();
+
+    // 확인 필드까지 입력 → 활성화
+    await page.fill('input#reset-password-confirm', 'new-pass-1234');
+    await expect(submit).toBeEnabled();
   });
 
   test('자기 자신 비활성화 버튼 disabled', async ({ page }) => {
@@ -806,14 +836,17 @@ test.describe('사용자 관리', () => {
     await page.fill('input#reset-password', 'newpassword1234');
     await page.fill('input#reset-password-confirm', 'newpassword1234');
 
-    // 제출 — currentPassword 빈값
-    await page.getByRole('button', { name: '재설정', exact: true }).click();
+    // #248 적용 후: isSelf && !currentPassword → 제출 버튼 자체가 disabled 상태
+    // (이전 #159 동작인 인라인 에러 표시는 disabled 가드로 흡수됨)
+    const submit = page.getByRole('button', { name: '재설정', exact: true });
+    await expect(submit).toBeDisabled();
 
-    // 인라인 에러 메시지가 즉시 표시되어야 한다 (서버 왕복 없이)
-    await expect(page.getByText('현재 비밀번호를 입력해주세요.')).toBeVisible();
-
-    // 서버 API가 호출되지 않아야 한다 (클라이언트 검증에서 막혀야 함)
+    // 서버 API가 호출되지 않아야 한다 (클라이언트 가드에서 막혀야 함)
     expect(passwordApiCalled).toBe(false);
+
+    // currentPassword 입력 시 다시 활성화되는지도 확인 — 가드가 정확한 조건만 막음을 검증
+    await page.fill('input#current-password', 'whatever');
+    await expect(submit).toBeEnabled();
   });
 
   /**
@@ -978,9 +1011,12 @@ test.describe('사용자 관리', () => {
 
     // confirm 빈값
     await page.fill('input#reset-password', 'newpassword1234');
-    await page.getByRole('button', { name: '재설정', exact: true }).click();
 
-    await expect(page.getByText('비밀번호를 한 번 더 입력해주세요.')).toBeVisible();
+    // #248 적용 후: confirmPassword 빈값 → 제출 버튼 자체가 disabled (이전 인라인 에러 동작 흡수)
+    const submit = page.getByRole('button', { name: '재설정', exact: true });
+    await expect(submit).toBeDisabled();
+
+    // 서버 API 미호출
     expect(passwordApiCalled).toBe(false);
   });
 
