@@ -7,8 +7,15 @@ import { hashPassword, verifyPassword } from '../auth/password.js';
 // 단일 문자 TLD(예: a@b.c)를 거부해 내부망 호환성/테스트가 깨진다.
 const EMAIL_LIKE_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// username 입력 정규화 — 이메일 RFC 5321 도메인부 case-insensitive + 실무 관행상
+// local-part 까지 lower-casing. 같은 사람이 대소문자만 다른 별도 계정을 만들 수
+// 없도록 모든 입력 경계에서 동일 규칙을 적용한다 (#190).
+function normalizeUsername(input: string): string {
+  return input.trim().toLowerCase();
+}
+
 const createSchema = z.object({
-  username: z.string().regex(EMAIL_LIKE_RE).max(254),
+  username: z.string().regex(EMAIL_LIKE_RE).max(254).transform(normalizeUsername),
   password: z.string().min(8).max(256),
 });
 

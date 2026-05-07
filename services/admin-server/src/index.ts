@@ -87,6 +87,58 @@ db.exec(OPTIMIZATION_EVENTS_SCHEMA);
 // 관리자 사용자 테이블 생성 — Task 1/6 인증 인프라
 db.exec(USER_SCHEMA);
 
+// username 정규화 마이그레이션 — 이슈 #190
+// 과거에 case-sensitive 로 저장된 username 들을 모두 lower-case 로 변환한다.
+// lower 형태로 변환했을 때 충돌이 발생하면(이미 같은 lower 값이 다른 행에 존재),
+// 활성 계정(disabled_at IS NULL) 우선, 그다음 id 작은 쪽을 keeper 로 두고
+// 나머지는 disabled_at 을 채운 채 그대로 남긴다(데이터 보존). keeper 의 username
+// 만 lower 로 update.
+{
+  type DupRow = { id: number; username: string; disabled_at: string | null };
+  const rows = db.prepare('SELECT id, username, disabled_at FROM users').all() as DupRow[];
+  // lower 키 → 후보 행 그룹
+  const groups = new Map<string, DupRow[]>();
+  for (const r of rows) {
+    const k = r.username.trim().toLowerCase();
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k)!.push(r);
+  }
+  const now = new Date().toISOString();
+  const tx = db.transaction(() => {
+    for (const [lower, list] of groups) {
+      // 모두 이미 lower 와 동일하면 스킵
+      if (list.length === 1 && list[0].username === lower) continue;
+      // keeper 선정: 활성 행 우선, 그다음 id 작은 쪽
+      list.sort((a, b) => {
+        const aActive = a.disabled_at === null ? 0 : 1;
+        const bActive = b.disabled_at === null ? 0 : 1;
+        if (aActive !== bActive) return aActive - bActive;
+        return a.id - b.id;
+      });
+      const [keeper, ...losers] = list;
+      // losers 는 username 충돌이 발생하지 않도록 prefix 를 붙여 보존하고 disable 처리
+      for (const loser of losers) {
+        if (loser.disabled_at === null) {
+          db.prepare('UPDATE users SET disabled_at = ?, updated_at = ? WHERE id = ?')
+            .run(now, now, loser.id);
+        }
+        // username 에 disabled prefix 를 붙여 lower 형태와 충돌하지 않게 한다.
+        // 예: BLULEO78@gmail.com → __dup_3__BLULEO78@gmail.com (id=3 보존)
+        if (!loser.username.startsWith('__dup_')) {
+          db.prepare('UPDATE users SET username = ? WHERE id = ?')
+            .run(`__dup_${loser.id}__${loser.username}`, loser.id);
+        }
+      }
+      // keeper 를 lower 로 갱신 (이미 lower 면 skip)
+      if (keeper.username !== lower) {
+        db.prepare('UPDATE users SET username = ?, updated_at = ? WHERE id = ?')
+          .run(lower, now, keeper.id);
+      }
+    }
+  });
+  tx();
+}
+
 // 외래 키 제약 활성화 — 도메인 삭제 시 cascade 동작에 필요
 db.pragma('foreign_keys = ON');
 

@@ -13,8 +13,15 @@ import {
 // 거부하므로 내부망 운영자 username 호환성을 위해 최소 형태만 강제한다.
 const EMAIL_LIKE_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// username 정규화 — setup/login 모두 동일 규칙(trim + lower-case)을 적용해야
+// 같은 사람이 대소문자만 다른 별도 계정으로 분리되거나, 케이스 차이로 로그인
+// 매칭이 어긋나는 것을 막는다 (#190).
+function normalizeUsername(input: string): string {
+  return input.trim().toLowerCase();
+}
+
 const credentialSchema = z.object({
-  username: z.string().min(3).max(254).regex(EMAIL_LIKE_RE),
+  username: z.string().min(3).max(254).regex(EMAIL_LIKE_RE).transform(normalizeUsername),
   password: z.string().min(8).max(256),
 });
 

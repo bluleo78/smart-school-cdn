@@ -69,6 +69,17 @@ describe('authRoutes', () => {
       expect(userRepo.count()).toBe(1);
     });
 
+    // 이슈 #190 — setup 단계에서도 username 은 lower-case 로 저장된다
+    it('username 대문자 입력은 lower-case 로 저장된다', async () => {
+      const r = await app.inject({
+        method: 'POST', url: '/api/auth/setup',
+        payload: { username: 'Admin@SCHOOL.local', password: 'password1' },
+      });
+      expect(r.statusCode).toBe(201);
+      expect(userRepo.findByUsername('admin@school.local')).not.toBeNull();
+      expect(userRepo.findByUsername('Admin@SCHOOL.local')).toBeNull();
+    });
+
     it('이미 사용자 존재하면 409', async () => {
       userRepo.create('x@y.z', await hashPassword('p'));
       const r = await app.inject({
@@ -131,6 +142,16 @@ describe('authRoutes', () => {
         payload: { username: 'a@b.c', password: 'p1234567' },
       });
       expect(r.statusCode).toBe(401);
+    });
+
+    // 이슈 #190 — 대소문자 다른 입력으로도 동일 계정에 로그인된다
+    it('대문자 입력 username 으로도 로그인 성공 (case-insensitive)', async () => {
+      userRepo.create('a@b.c', await hashPassword('p1234567'));
+      const r = await app.inject({
+        method: 'POST', url: '/api/auth/login',
+        payload: { username: 'A@B.C', password: 'p1234567' },
+      });
+      expect(r.statusCode).toBe(200);
     });
 
     it('로그인 성공 시 last_login_at 갱신', async () => {

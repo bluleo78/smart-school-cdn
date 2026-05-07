@@ -61,6 +61,28 @@ describe('usersRoutes', () => {
     expect(r.statusCode).toBe(409);
   });
 
+  // 이슈 #190 — username 대소문자만 다른 입력은 동일 계정으로 취급되어 중복 차단
+  it('POST /api/users — 대소문자만 다른 username 은 중복으로 409', async () => {
+    const r = await ctx.app.inject({
+      method: 'POST', url: '/api/users',
+      cookies: ctx.cookies,
+      payload: { username: 'ADMIN@school.local', password: 'password2' },
+    });
+    expect(r.statusCode).toBe(409);
+  });
+
+  // 이슈 #190 — 신규 생성 시 username 은 lower-case 로 정규화되어 저장된다
+  it('POST /api/users — 대문자 입력은 lower-case 로 저장된다', async () => {
+    const r = await ctx.app.inject({
+      method: 'POST', url: '/api/users',
+      cookies: ctx.cookies,
+      payload: { username: 'NewUser@SCHOOL.local', password: 'password2' },
+    });
+    expect(r.statusCode).toBe(201);
+    expect(ctx.userRepo.findByUsername('newuser@school.local')).not.toBeNull();
+    expect(ctx.userRepo.findByUsername('NewUser@SCHOOL.local')).toBeNull();
+  });
+
   // 이슈 #31 — 자기 자신 비밀번호 변경 시 currentPassword 포함 성공
   it('PUT /api/users/:id/password — 자기 자신: currentPassword 포함 성공', async () => {
     const r = await ctx.app.inject({
