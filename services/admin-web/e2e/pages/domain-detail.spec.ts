@@ -2877,11 +2877,15 @@ test.describe('도메인 상세 — DomainStackedChart empty state (#21)', () =>
     // DomainDetailTabs의 stats 탭은 '최적화' 텍스트로 접근 (testid 없음)
     await page.getByRole('tab', { name: '최적화' }).click();
 
-    // DomainStackedChart 안에 empty state 문구가 노출되어야 한다
-    const chart = page.getByTestId('domain-overview-stacked-chart');
-    await expect(chart).toBeVisible();
-    await expect(chart.getByText('아직 데이터가 없습니다')).toBeVisible();
-    await expect(chart.getByText('프록시로 요청이 들어오면 자동으로 표시됩니다')).toBeVisible();
+    // #267 통합 빈 상태 — 캐시 섹션 단일 빈 상태 박스로 메시지가 노출되어야 한다.
+    // (이전엔 DomainStackedChart 자체에 빈 상태가 있었으나, 부모(DomainStatsTab)가
+    // 통합 처리하면서 자식 차트는 빈 데이터일 때 렌더되지 않는다.)
+    const empty = page.getByTestId('stats-cache-empty');
+    await expect(empty).toBeVisible();
+    await expect(empty.getByText('아직 데이터가 없습니다')).toBeVisible();
+    await expect(empty.getByText('프록시로 요청이 들어오면 자동으로 표시됩니다')).toBeVisible();
+    // 자식 차트는 빈 상태에서 렌더되지 않아야 한다 (#267 회귀 가드)
+    await expect(page.getByTestId('domain-overview-stacked-chart')).toHaveCount(0);
   });
 });
 
@@ -3334,19 +3338,72 @@ test.describe('도메인 상세 — DomainCacheCards 빈 상태 (#250)', () => {
     await page.goto('/domains/textbook.com');
     await page.getByRole('tab', { name: '최적화' }).click();
 
-    // 카드 3개가 사라지고 빈 상태 컨테이너가 노출된다
-    await expect(page.getByTestId('domain-overview-cache-cards-empty')).toBeVisible();
+    // 카드 3개가 사라지고 통합 빈 상태 컨테이너가 노출된다 (#267에서 부모 통합으로 이전).
+    const empty = page.getByTestId('stats-cache-empty');
+    await expect(empty).toBeVisible();
     await expect(page.getByTestId('domain-overview-l1-hit-rate')).toHaveCount(0);
     await expect(page.getByTestId('domain-overview-edge-hit-rate')).toHaveCount(0);
     await expect(page.getByTestId('domain-overview-bypass-rate')).toHaveCount(0);
     // 0.0% 거짓 표시 잔존 금지 (회귀 가드)
-    await expect(
-      page.getByTestId('domain-overview-cache-cards-empty').getByText('0.0%'),
-    ).toHaveCount(0);
+    await expect(empty.getByText('0.0%')).toHaveCount(0);
     // 빈 상태 안내 문구 노출
-    await expect(
-      page.getByTestId('domain-overview-cache-cards-empty').getByText('아직 데이터가 없습니다'),
-    ).toBeVisible();
+    await expect(empty.getByText('아직 데이터가 없습니다')).toBeVisible();
+  });
+});
+
+test.describe('도메인 상세 — 캐시 섹션 빈 상태 메시지 중복 방지 (#267)', () => {
+  /**
+   * cache/series 응답이 빈 버킷일 때 — 캐시 카드 안에 동일한
+   * "아직 데이터가 없습니다" 메시지가 두 번 출력되지 않아야 한다.
+   * 수정 전: DomainCacheCards (dashed border 박스) + DomainStackedChart (border 없는 가운데 정렬)
+   *   두 자식이 각각 자체 빈 상태를 그려 메시지가 중복 노출됨.
+   * 수정 후: 부모 DomainStatsTab이 통합 빈 상태 1개만 렌더하고 두 자식을 모두 숨김.
+   */
+  test('cache/series 빈 버킷일 때 캐시 카드 내 "아직 데이터가 없습니다" 메시지가 정확히 1번만 노출된다 (#267)', async ({
+    page,
+  }) => {
+    await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
+    await mockApi(page, 'GET', '/proxy/requests', []);
+    await mockApi(page, 'GET', '/domains/summary', createDomainSummary());
+    await mockApi(page, 'GET', '/domains/textbook.com', createDomain());
+    await page.route('**/api/domains/textbook.com/stats*', (route) =>
+      route.request().method() === 'GET'
+        ? route.fulfill({ json: createDomainStats() })
+        : route.fallback(),
+    );
+    await mockApi(page, 'GET', '/domains/textbook.com/logs', createDomainLogs());
+    await mockApi(page, 'GET', '/domains/textbook.com/summary', createDomainHostSummary());
+    await mockApi(page, 'GET', '/tls/certificates', createCertificates());
+    await mockApi(page, 'GET', '/cache/popular', createPopularContent());
+    await mockApi(page, 'GET', '/stats/optimization', createOptimizationStats());
+    await mockApi(page, 'GET', '/optimizer/profiles', createOptimizerProfile());
+    await page.route('**/api/cache/series*', (route) =>
+      route.fulfill({ json: { buckets: [] } }),
+    );
+    await page.route('**/api/optimization/stats*', (route) =>
+      route.fulfill({ json: createTextCompressStats() }),
+    );
+    await page.route('**/api/domains/textbook.com/top-urls*', (route) =>
+      route.fulfill({ json: { urls: [] } }),
+    );
+    await page.route('**/api/domains/textbook.com/optimization/url-breakdown*', (route) =>
+      route.fulfill({ json: { total: 0, items: [] } }),
+    );
+
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '최적화' }).click();
+
+    const cacheSection = page.getByTestId('stats-cache-section');
+    await expect(cacheSection).toBeVisible();
+
+    // 핵심 회귀 가드 — "아직 데이터가 없습니다" 메시지가 캐시 카드 내에 1번만 노출되어야 한다.
+    await expect(cacheSection.getByText('아직 데이터가 없습니다')).toHaveCount(1);
+    await expect(cacheSection.getByText('프록시로 요청이 들어오면 자동으로 표시됩니다')).toHaveCount(1);
+
+    // 통합 빈 상태 컨테이너만 존재하고 자식들의 자체 빈/렌더 컨테이너는 노출되지 않는다.
+    await expect(page.getByTestId('stats-cache-empty')).toHaveCount(1);
+    await expect(page.getByTestId('domain-overview-cache-cards-empty')).toHaveCount(0);
+    await expect(page.getByTestId('domain-overview-stacked-chart')).toHaveCount(0);
   });
 });
 

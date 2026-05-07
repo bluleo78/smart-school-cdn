@@ -1,6 +1,6 @@
 /// 도메인 통계 탭 — 기간 토글 + 수동 새로고침. 캐시/최적화 2섹션.
 import { useIsFetching, useQueryClient } from '@tanstack/react-query';
-import { Info } from 'lucide-react';
+import { BarChart2, Info } from 'lucide-react';
 import { PeriodSelector, type PeriodValue } from './PeriodSelector';
 import { ManualRefreshButton } from './ManualRefreshButton';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
@@ -9,6 +9,7 @@ import { DomainStackedChart } from './DomainStackedChart';
 import { DomainOptimizationStats } from './DomainOptimizationStats';
 import { DomainTextCompressStats } from './DomainTextCompressStats';
 import { DomainUrlOptimizationTable } from './DomainUrlOptimizationTable';
+import { useCacheSeries } from '../../../hooks/useCacheSeries';
 
 interface Props {
   host: string;
@@ -50,6 +51,22 @@ export function DomainStatsTab({ host, period, onPeriodChange }: Props) {
   // 텍스트 압축/URL 최적화 섹션에 실제로 전달되는 표시 기간 (custom은 24h로 폴백).
   const effectiveStatsPeriod: '1h' | '24h' | '7d' | '30d' = isCustom ? '24h' : period.period;
 
+  // 캐시 섹션 통합 빈 상태 판정 (#267) —
+  // DomainCacheCards / DomainStackedChart 두 자식이 동일 useCacheSeries(range, host) 키를 공유하므로
+  // 부모에서 한 번 더 호출해도 TanStack Query가 dedupe → 추가 네트워크 비용 없음.
+  // total === 0 또는 빈 버킷이면 자식 두 개를 모두 숨기고 단일 빈 상태 박스만 노출하여
+  // "아직 데이터가 없습니다" 메시지가 한 카드 내에서 두 번 출력되던 중복 표시를 제거한다.
+  const cacheRange = toSeriesRange(period);
+  const { data: cacheBuckets, isLoading: cacheLoading, isError: cacheError } =
+    useCacheSeries(cacheRange, host);
+  const cacheTotal = (cacheBuckets ?? []).reduce(
+    (a, b) => a + b.l1_hits + b.l2_hits + b.miss + b.bypass,
+    0,
+  );
+  // 로딩/에러는 자식 컴포넌트 각자 처리 → 그 시점엔 자식이 자체 UI를 보여주므로 통합 빈 상태로 가지 않는다.
+  const cacheIsEmpty =
+    !cacheLoading && !cacheError && (!cacheBuckets || cacheBuckets.length === 0 || cacheTotal === 0);
+
   return (
     <div className="space-y-6" data-testid="domain-optimization-tab">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -73,12 +90,29 @@ export function DomainStatsTab({ host, period, onPeriodChange }: Props) {
         </div>
       )}
 
-      {/* 캐시 섹션 */}
+      {/* 캐시 섹션 — 데이터가 없을 때 두 자식이 각각 빈 상태를 출력해
+          한 카드 안에서 동일 메시지가 중복 노출되던 문제를 부모에서 통합 처리 (#267). */}
       <Card data-testid="stats-cache-section">
         <CardHeader><CardTitle className="text-base font-semibold">캐시</CardTitle></CardHeader>
         <CardContent className="space-y-4">
-          <DomainCacheCards host={host} range={toSeriesRange(period)} />
-          <DomainStackedChart host={host} range={toSeriesRange(period)} />
+          {cacheIsEmpty ? (
+            // 통합 빈 상태 — DomainCacheCards / DomainStackedChart 의 빈 상태 UI를 한 번으로 합친다.
+            // 컨테이너 스타일은 기존 DomainCacheCards 의 dashed 박스 패턴을 채택하여 카드 내 다른
+            // 빈 상태(텍스트 압축 등)와 시각적 일관성을 유지한다.
+            <div
+              className="flex flex-col items-center justify-center gap-2 rounded-md border border-dashed py-10 text-muted-foreground"
+              data-testid="stats-cache-empty"
+            >
+              <BarChart2 size={32} className="opacity-30" />
+              <p className="text-sm">아직 데이터가 없습니다</p>
+              <p className="text-xs">프록시로 요청이 들어오면 자동으로 표시됩니다</p>
+            </div>
+          ) : (
+            <>
+              <DomainCacheCards host={host} range={cacheRange} />
+              <DomainStackedChart host={host} range={cacheRange} />
+            </>
+          )}
         </CardContent>
       </Card>
 
