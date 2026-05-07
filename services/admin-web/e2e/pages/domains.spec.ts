@@ -853,6 +853,60 @@ test.describe('도메인 관리 — 일괄 추가 (#55)', () => {
     // cleanup: 보류 해제로 행잉 방지
     resolveRequest!(null);
   });
+
+  /**
+   * 이슈 #197 회귀 방지 — 기존 host 가 포함된 일괄 추가 시 skipped 안내
+   *
+   * 과거: 서버가 기존 host 의 origin 을 silently upsert 했고, 토스트는 "N건이 추가되었습니다"
+   *      로만 표시되어 사용자가 origin 변경 사실을 인지하지 못했다.
+   * 수정 후: 서버가 added/skipped/failed 로 분리 응답하며, 클라이언트는 skipped 가 있으면
+   *         warning 토스트로 "이미 존재함 (덮어쓰기 안 됨)" 안내를 노출한다.
+   *
+   * mock 사용 이유: 서버 응답을 added=1, skipped=[exists.com] 로 강제하여 클라이언트가 분기 안내를 띄우는지 검증.
+   * mock 정당성: useBulkAddDomains 훅이 BulkAddResult 를 그대로 받아 토스트 분기를 결정하므로,
+   *             응답 형태만 모킹하면 실제 서버와 동등한 클라이언트 분기 동작을 재현할 수 있다.
+   */
+  test('기존 host 가 포함된 응답이면 "이미 존재함" 경고 토스트가 노출된다 (#197)', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+
+    await page.route('**/api/domains/bulk', async (route) => {
+      if (route.request().method() === 'POST') {
+        await route.fulfill({
+          status: 201,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            added: 1,
+            skipped: [{ host: 'exists.com', existingOrigin: 'https://exists.original' }],
+            failed: [],
+          }),
+        });
+      } else {
+        return route.fallback();
+      }
+    });
+
+    await page.goto('/domains');
+    await page.getByRole('button', { name: '일괄 추가' }).click();
+    await expect(page.getByTestId('bulk-add-dialog')).toBeVisible();
+
+    // 기존 host + 신규 host 혼합 입력
+    await page.getByTestId('bulk-add-textarea').fill(
+      'exists.com https://exists.changed\nnewfresh.com https://newfresh.com',
+    );
+    await page.getByTestId('bulk-add-submit').click();
+
+    // 토스트 본문 — "1건 추가" 와 "이미 존재함 (덮어쓰기 안 됨)" 모두 노출되어야 함 (#197 핵심)
+    // sonner 의 토스트는 [data-sonner-toast] 컨테이너에 렌더링된다.
+    const toast = page.locator('[data-sonner-toast]').first();
+    await expect(toast).toBeVisible();
+    await expect(toast).toContainText('1건 추가');
+    await expect(toast).toContainText('이미 존재함');
+    await expect(toast).toContainText('덮어쓰기 안 됨');
+    // skipped host 와 보존된 origin 이 description 에 포함 — 사용자가 어느 host 가 무시됐는지 확인 가능
+    await expect(toast).toContainText('exists.com');
+    await expect(toast).toContainText('https://exists.original');
+  });
 });
 
 /**

@@ -335,17 +335,23 @@ export async function domainRoutes(
       // origin 정규화 — trailing slash/host 대소문자/path 자동 추가가 동일 origin 을
       // 다른 문자열로 저장하지 않도록 표준형(`URL.origin`)으로 통일한다 (#191).
       const normalizedDomains = domains.map((d) => ({ host: d.host, origin: normalizeOrigin(d.origin) }));
+      // (#197) bulkInsert 는 added/skipped/failed 를 분리 반환한다.
+      // skipped: 이미 존재하는 host (origin 보존), failed: SQL 실패. 클라이언트는 added 만 신규 추가로 안내.
       const result = domainRepo.bulkInsert(normalizedDomains);
       const synced = await syncToProxy(domainRepo);
       if (!synced) {
         return reply.status(502).send({ error: 'Proxy 동기화 실패', result });
       }
       await fanOutGrpc(app, domainRepo);
-      // 성공한 각 도메인에 기본 최적화 프로파일 생성 — 실패해도 전체 응답은 성공 처리
-      const failedHosts = new Set(result.failed.map((f) => f.host));
-      const successHosts = domains.map((d) => d.host).filter((h) => !failedHosts.has(h));
+      // 신규 추가된 host 에만 기본 최적화 프로파일 생성 — skipped(기존 host) 는 이미 프로파일이 있다고 가정 (#197).
+      // failed/skipped 를 제외한 added 도메인 host 만 추출.
+      const skippedOrFailed = new Set<string>([
+        ...result.failed.map((f) => f.host),
+        ...result.skipped.map((s) => s.host),
+      ]);
+      const addedHosts = domains.map((d) => d.host).filter((h) => !skippedOrFailed.has(h));
       await Promise.allSettled(
-        successHosts.map(async (host) => {
+        addedHosts.map(async (host) => {
           try {
             await app.optimizerClient.setProfile({ domain: host, quality: 85, max_width: 0, enabled: true });
           } catch (err) {

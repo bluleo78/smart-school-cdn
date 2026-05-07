@@ -187,28 +187,45 @@ export class DomainRepository {
   }
 
   /**
-   * 도메인 일괄 등록
-   * - 트랜잭션 내에서 각각 INSERT ON CONFLICT upsert
-   * - 개별 실패 시 에러 수집하고 나머지 계속 처리
+   * 도메인 일괄 등록 (#197)
+   * - 무엇을: 신규 host만 INSERT 하고, 이미 존재하는 host는 origin을 보존하여 `skipped`로 분류한다.
+   * - 왜: 기존 upsert 동작은 사용자 안내 없이 origin을 덮어써 의도치 않은 라우팅 변경을 일으켰다.
+   *   안전 우선 정책으로, 기존 host는 명시적 갱신(PUT) 경로를 통해서만 변경되도록 한다.
+   * - 동작: `INSERT ... ON CONFLICT(host) DO NOTHING` 후 `result.changes`로 신규/스킵을 판별.
+   * - 개별 SQL 실패는 `failed`로 수집하여 나머지 행은 계속 처리한다.
    */
   bulkInsert(
     domains: Array<{ host: string; origin: string }>,
-  ): { success: number; failed: Array<{ host: string; error: string }> } {
+  ): {
+    added: number;
+    skipped: Array<{ host: string; existingOrigin: string }>;
+    failed: Array<{ host: string; error: string }>;
+  } {
+    const skipped: Array<{ host: string; existingOrigin: string }> = [];
     const failed: Array<{ host: string; error: string }> = [];
-    let success = 0;
+    let added = 0;
 
-    const stmt = this.db.prepare(
+    // ON CONFLICT DO NOTHING 으로 기존 host 보존 (#197). updated_at 도 유지된다.
+    const insertStmt = this.db.prepare(
       `INSERT INTO domains (host, origin) VALUES (?, ?)
-       ON CONFLICT(host) DO UPDATE SET
-         origin = excluded.origin,
-         updated_at = strftime('%s', 'now')`,
+       ON CONFLICT(host) DO NOTHING`,
+    );
+    // skipped 분류 시 사용자에게 기존 origin을 안내하기 위한 조회 — 트랜잭션 내에서 동기 실행
+    const findStmt = this.db.prepare(
+      `SELECT origin FROM domains WHERE host = ?`,
     );
 
     const runAll = this.db.transaction(() => {
       for (const { host, origin } of domains) {
         try {
-          stmt.run(host, origin);
-          success++;
+          const result = insertStmt.run(host, origin);
+          if (result.changes === 0) {
+            // 기존 host — 사용자 안내용으로 현재 저장된 origin 같이 반환
+            const row = findStmt.get(host) as { origin: string } | undefined;
+            skipped.push({ host, existingOrigin: row?.origin ?? '' });
+          } else {
+            added++;
+          }
         } catch (err) {
           failed.push({
             host,
@@ -219,7 +236,7 @@ export class DomainRepository {
     });
 
     runAll();
-    return { success, failed };
+    return { added, skipped, failed };
   }
 
   /**

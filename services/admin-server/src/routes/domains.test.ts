@@ -437,6 +437,34 @@ describe('POST /api/domains/bulk', () => {
     // 정상 도메인도 저장되지 않아야 한다 (검증 실패 시 전체 요청을 거부)
     expect(repo.findByHost('valid.com')).toBeUndefined();
   });
+
+  // (#197) 기존 host 가 포함된 bulk 추가 시 origin 을 덮어쓰지 않고 skipped 로 분류해야 한다.
+  // 사용자 안내 없는 silent upsert 가 의도치 않은 트래픽 라우팅 변경을 일으키던 회귀를 방지한다.
+  it('기존 host 가 포함되면 origin 을 보존하고 skipped 에 분류한다 (#197)', async () => {
+    const repo = makeRepo();
+    repo.upsert('exists.com', 'https://exists.original');
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/domains/bulk',
+      payload: {
+        domains: [
+          { host: 'exists.com', origin: 'https://exists.changed' },
+          { host: 'newfresh.com', origin: 'https://newfresh.com' },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const body = JSON.parse(res.body);
+    expect(body.added).toBe(1);
+    expect(body.skipped).toEqual([
+      { host: 'exists.com', existingOrigin: 'https://exists.original' },
+    ]);
+    expect(body.failed).toEqual([]);
+    // 기존 호스트 origin 은 변경되면 안 된다 — 안전 우선 정책 (#197)
+    expect(repo.findByHost('exists.com')?.origin).toBe('https://exists.original');
+    expect(repo.findByHost('newfresh.com')?.origin).toBe('https://newfresh.com');
+  });
 });
 
 describe('PUT /api/domains/:host', () => {

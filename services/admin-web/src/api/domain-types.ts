@@ -83,9 +83,18 @@ export interface DomainTopUrl {
   count: number;
 }
 
-/** 일괄 추가 결과 */
+/**
+ * 일괄 추가 결과 (#197)
+ * - added: 신규로 추가된 도메인 수
+ * - skipped: 이미 존재해 origin 을 보존한 host 목록 (existingOrigin 포함)
+ * - failed: SQL 실패한 host 목록 (드물지만 UNIQUE 외 제약/디스크 오류 시 발생 가능)
+ *
+ * 과거 시맨틱(`success`)은 신규/덮어쓰기를 구분하지 못해 의도치 않은 origin 변경을 감추는 문제가 있어
+ * added/skipped/failed 로 분리했다. 서버는 더 이상 기존 host 의 origin 을 덮어쓰지 않는다.
+ */
 export interface BulkAddResult {
-  success: number;
+  added: number;
+  skipped: Array<{ host: string; existingOrigin: string }>;
   failed: Array<{ host: string; error: string }>;
   syncError?: string;
 }

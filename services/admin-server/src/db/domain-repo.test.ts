@@ -182,21 +182,45 @@ describe('DomainRepository', () => {
   });
 
   describe('bulkInsert', () => {
-    it('여러 도메인을 일괄 추가한다', () => {
+    it('여러 도메인을 일괄 추가하면 added 가 2 이고 skipped/failed 는 비어있다', () => {
       const result = repo.bulkInsert([
         { host: 'a.bulk', origin: 'https://a.bulk' },
         { host: 'b.bulk', origin: 'https://b.bulk' },
       ]);
-      expect(result.success).toBe(2);
+      expect(result.added).toBe(2);
+      expect(result.skipped).toHaveLength(0);
       expect(result.failed).toHaveLength(0);
       expect(repo.findAll()).toHaveLength(2);
     });
 
-    it('중복 host는 upsert로 origin이 갱신된다', () => {
+    // (#197) 기존 host 는 origin 을 보존하고 skipped 로 분류해야 한다.
+    // 과거 upsert 시맨틱은 사용자 안내 없이 origin 을 덮어써 트래픽이 잘못 라우팅되는 위험이 있었다.
+    it('중복 host 는 origin 을 보존하고 skipped 로 분류한다 (#197)', () => {
       repo.upsert('dup.bulk', 'https://old.dup');
       const result = repo.bulkInsert([{ host: 'dup.bulk', origin: 'https://new.dup' }]);
-      expect(result.success).toBe(1);
-      expect(repo.findByHost('dup.bulk')?.origin).toBe('https://new.dup');
+      expect(result.added).toBe(0);
+      expect(result.skipped).toEqual([
+        { host: 'dup.bulk', existingOrigin: 'https://old.dup' },
+      ]);
+      // origin 은 변경되지 않아야 한다 — 안전 우선 정책
+      expect(repo.findByHost('dup.bulk')?.origin).toBe('https://old.dup');
+    });
+
+    // (#197) 신규 + 기존 혼합 입력 시 added 와 skipped 가 정확히 분리되어야 한다.
+    it('신규/기존 혼합 입력에서 added 와 skipped 를 분리해서 보고한다 (#197)', () => {
+      repo.upsert('exists.bulk', 'https://exists.original');
+      const result = repo.bulkInsert([
+        { host: 'exists.bulk', origin: 'https://exists.changed' },
+        { host: 'fresh.bulk', origin: 'https://fresh.bulk' },
+      ]);
+      expect(result.added).toBe(1);
+      expect(result.skipped).toEqual([
+        { host: 'exists.bulk', existingOrigin: 'https://exists.original' },
+      ]);
+      expect(result.failed).toHaveLength(0);
+      // 기존 host origin 은 보존, 신규 host 는 입력된 origin 으로 추가
+      expect(repo.findByHost('exists.bulk')?.origin).toBe('https://exists.original');
+      expect(repo.findByHost('fresh.bulk')?.origin).toBe('https://fresh.bulk');
     });
   });
 
