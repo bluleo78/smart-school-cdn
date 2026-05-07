@@ -338,6 +338,12 @@ test.describe('도메인 상세 — Overview 탭', () => {
     // isPending 동안 취소 버튼이 disabled 상태여야 한다
     await expect(page.locator('[data-testid="purge-confirm-dialog"] button:has-text("취소")')).toBeDisabled({ timeout: 1000 });
 
+    // 이슈 #216 회귀 — 우상단 X(닫기) 버튼도 isPending 동안 disabled 처리되어야 한다
+    // (#163/#165 패턴 일관화: disableClose={isPending})
+    await expect(
+      page.locator('[data-testid="purge-confirm-dialog"] button[aria-label="닫기"]'),
+    ).toBeDisabled({ timeout: 1000 });
+
     // ESC 키를 눌러도 dialog가 열린 상태를 유지해야 한다
     await page.keyboard.press('Escape');
     await expect(page.getByTestId('purge-confirm-dialog')).toBeVisible({ timeout: 500 });

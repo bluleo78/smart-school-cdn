@@ -189,7 +189,11 @@ function PurgeConfirmDialog({
 }) {
   return (
     <AlertDialog open={open} onClose={onClose}>
-      <AlertDialogContent className="max-w-sm" data-testid="purge-confirm-dialog">
+      <AlertDialogContent
+        className="max-w-sm"
+        data-testid="purge-confirm-dialog"
+        disableClose={isPending}
+      >
         <AlertDialogTitle>캐시 퍼지</AlertDialogTitle>
         <p className="text-sm text-muted-foreground">
           이 도메인의 전체 캐시를 삭제합니다. 계속하시겠습니까?
