@@ -1201,4 +1201,47 @@ test.describe('사용자 관리', () => {
     await expect(confirmInput).toBeVisible();
     expect(await confirmInput.getAttribute('autocomplete')).toBe('new-password');
   });
+
+  /**
+   * 이슈 #252 회귀 방지 — `__dup_N__` sentinel 접두사가 UI에 raw로 노출되지 않고
+   * 원본 이메일 + "보존된 충돌 항목" 라벨로 표시되어야 한다.
+   * 또한 보존 행의 비밀번호 재설정/재활성화 버튼이 disabled여야 한다.
+   */
+  test('충돌 정리 보존 행 — sentinel 접두사 제거되고 표시 + 액션 잠금 (#252)', async ({ page }) => {
+    const dupUsers = [
+      {
+        id: TEST_USER.id,
+        username: TEST_USER.username,
+        created_at: '2026-04-01T00:00:00.000Z',
+        updated_at: '2026-04-01T00:00:00.000Z',
+        disabled_at: null,
+        last_login_at: TEST_USER.last_login_at,
+      },
+      {
+        id: 3,
+        username: '__dup_3__bluleo78@gmail.com',
+        created_at: '2026-05-06T00:00:00.000Z',
+        updated_at: '2026-05-06T00:00:00.000Z',
+        disabled_at: '2026-05-06T22:11:47.697Z',
+        last_login_at: null,
+      },
+    ];
+    await mockApi(page, 'GET', '/users', dupUsers);
+
+    await page.goto('/users');
+
+    // raw sentinel은 어디에도 보이지 않아야 함
+    await expect(page.getByText('__dup_3__')).toHaveCount(0);
+
+    // 표시는 원본 이메일만, 보조 라벨 동반
+    const dupRow = page.locator('[data-testid="user-row-3"]');
+    await expect(dupRow).toBeVisible();
+    await expect(dupRow).toHaveAttribute('data-archived-duplicate', 'true');
+    await expect(dupRow.getByText('bluleo78@gmail.com', { exact: true })).toBeVisible();
+    await expect(dupRow.locator('[data-testid="archived-duplicate-badge"]')).toBeVisible();
+
+    // 보존 행의 비밀번호 재설정/재활성화 버튼은 잠겨 있어야 함
+    await expect(dupRow.getByRole('button', { name: '비밀번호 재설정' })).toBeDisabled();
+    await expect(dupRow.getByRole('button', { name: '재활성화' })).toBeDisabled();
+  });
 });

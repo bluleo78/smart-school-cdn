@@ -7,6 +7,8 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { listUsers, createUser, updatePassword, disableUser, enableUser, type UserItem } from '../api/users';
 import { formatDate, formatDateTime } from '../lib/format';
+// 충돌 정리(#190) loser 행의 `__dup_N__` sentinel 접두사를 표시 단계에서 제거 (#252)
+import { formatUsername } from '../lib/users/format-username';
 import { useAuth } from '../components/auth/use-auth';
 import { Button } from '../components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '../components/ui/dialog';
@@ -198,7 +200,11 @@ export function UsersPage() {
                   등록된 사용자가 없습니다.
                 </TableCell>
               </TableRow>
-            ) : users.map((u) => (
+            ) : users.map((u) => {
+              // sentinel 접두사 가공 — `__dup_N__이메일` raw 노출 차단 (#252).
+              // isArchivedDup이면 비밀번호 재설정/재활성화 액션을 잠가 잘못된 조작 방지.
+              const { display: displayUsername, isArchivedDuplicate: isArchivedDup } = formatUsername(u.username);
+              return (
               // hover:bg-muted/50 — 클릭 가능한 행임을 시각적으로 전달 (ByDomainTable 패턴과 일관성)
               // 비활성 사용자 행은 opacity-60 + bg-muted/30 + 이메일 text-muted-foreground 로 dimmed 처리.
               // 활성/비활성을 한눈에 식별 가능하도록 행 전체 시각 차이를 부여 (#218).
@@ -207,18 +213,29 @@ export function UsersPage() {
                 className={`hover:bg-muted/50 transition-colors ${u.disabled_at ? 'bg-muted/30 opacity-60' : ''}`}
                 data-testid={`user-row-${u.id}`}
                 data-disabled={u.disabled_at ? 'true' : 'false'}
+                data-archived-duplicate={isArchivedDup ? 'true' : 'false'}
               >
-                {/* 비활성 행은 이메일도 text-muted-foreground 로 톤다운 — Badge 외 텍스트 단서 추가 (#218) */}
-                <TableCell className={`whitespace-nowrap ${u.disabled_at ? 'text-muted-foreground' : ''}`}>{u.username}</TableCell>
+                {/* 비활성 행은 이메일도 text-muted-foreground 로 톤다운 — Badge 외 텍스트 단서 추가 (#218).
+                 *  보존된 충돌 항목(#252)은 sentinel 접두사 제거된 원본 이메일 + "보존된 충돌 항목" 라벨로 표시. */}
+                <TableCell className={`whitespace-nowrap ${u.disabled_at ? 'text-muted-foreground' : ''}`}>
+                  <span>{displayUsername}</span>
+                  {isArchivedDup && (
+                    <Badge variant="outline" className="ml-2 align-middle text-[10px]" data-testid="archived-duplicate-badge">
+                      보존된 충돌 항목
+                    </Badge>
+                  )}
+                </TableCell>
                 {/* formatDate/formatDateTime — ko-KR 로케일 명시, 앱 전역 포맷 통일.
                  *  whitespace-nowrap — 좁은 뷰포트에서 timestamp가 글자 단위로 5줄 분할되는 현상 차단 (#177) */}
                 <TableCell className="text-muted-foreground whitespace-nowrap">{formatDate(u.created_at)}</TableCell>
                 <TableCell className="text-muted-foreground whitespace-nowrap">{u.last_login_at ? formatDateTime(u.last_login_at) : '—'}</TableCell>
                 <TableCell className="whitespace-nowrap">{u.disabled_at ? <Badge variant="outline">비활성</Badge> : <Badge variant="success">활성</Badge>}</TableCell>
                 <TableCell className="space-x-2 whitespace-nowrap">
+                  {/* 보존된 충돌 항목(#252)은 username이 sentinel로 변형되어 비밀번호 재설정/재활성화 의미가 없음 → disabled */}
                   <Button
                     variant="outline"
                     size="xs"
+                    disabled={isArchivedDup}
                     onClick={() => { passwordForm.reset(); setPasswordTarget(u); }}
                   >
                     비밀번호 재설정
@@ -228,6 +245,7 @@ export function UsersPage() {
                     <Button
                       variant="outline"
                       size="xs"
+                      disabled={isArchivedDup}
                       onClick={() => setEnableTarget(u)}
                     >
                       재활성화
@@ -245,7 +263,8 @@ export function UsersPage() {
                   )}
                 </TableCell>
               </TableRow>
-            ))}
+              );
+            })}
           </TableBody>
         </Table>
         </div>
@@ -298,7 +317,8 @@ export function UsersPage() {
       <Dialog open={!!passwordTarget} onClose={() => { if (!passwordMut.isPending) { setPasswordTarget(null); passwordForm.reset(); } }}>
         {/* disableClose — mutation 진행 중 X 버튼 비활성화 (#188, #165 패턴) */}
         <DialogContent disableClose={passwordMut.isPending}>
-          <DialogTitle>{passwordTarget?.username} 비밀번호 재설정</DialogTitle>
+          {/* sentinel 접두사 제거된 표시 이름 사용 (#252) */}
+          <DialogTitle>{passwordTarget ? formatUsername(passwordTarget.username).display : ''} 비밀번호 재설정</DialogTitle>
           <form
             onSubmit={passwordForm.handleSubmit((d) => {
               if (!passwordTarget) return;
@@ -371,7 +391,7 @@ export function UsersPage() {
         <AlertDialogContent className="max-w-sm" data-testid="enable-user-dialog" disableClose={enableMut.isPending}>
           <AlertDialogTitle>사용자 재활성화</AlertDialogTitle>
           <p className="text-sm text-muted-foreground">
-            <span className="font-medium">{enableTarget?.username}</span>을(를) 재활성화하시겠습니까?
+            <span className="font-medium">{enableTarget ? formatUsername(enableTarget.username).display : ''}</span>을(를) 재활성화하시겠습니까?
             재활성화된 사용자는 다시 로그인할 수 있습니다.
           </p>
           <div className="flex justify-end gap-2">
@@ -398,7 +418,7 @@ export function UsersPage() {
         <AlertDialogContent className="max-w-sm" data-testid="disable-user-dialog" disableClose={disableMut.isPending}>
           <AlertDialogTitle>사용자 비활성화</AlertDialogTitle>
           <p className="text-sm text-muted-foreground">
-            <span className="font-medium">{disableTarget?.username}</span>을(를) 비활성화하시겠습니까?
+            <span className="font-medium">{disableTarget ? formatUsername(disableTarget.username).display : ''}</span>을(를) 비활성화하시겠습니까?
             비활성화된 사용자는 로그인할 수 없습니다.
           </p>
           <div className="flex justify-end gap-2">
