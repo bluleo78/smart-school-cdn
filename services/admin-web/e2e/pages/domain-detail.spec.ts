@@ -3210,6 +3210,65 @@ test.describe('도메인 상세 — isError 에러 처리 (#154)', () => {
   });
 });
 
+test.describe('도메인 상세 — DomainCacheCards 빈 상태 (#250)', () => {
+  /**
+   * cache/series 응답이 빈 버킷일 때 — DomainCacheCards가 0.0% 거짓 표시 대신
+   * "아직 데이터가 없습니다" 빈 상태 안내를 노출해야 한다.
+   * 수정 전: total === 0이어도 fmtPct(0) = "0.0%" 카드 3개 그대로 렌더 (L1은 녹색)
+   * 수정 후: empty state 컨테이너로 대체 → 카드 자체가 사라지고 안내 문구 노출
+   */
+  test('cache/series 빈 버킷일 때 DomainCacheCards가 빈 상태 안내를 표시한다 (#250)', async ({
+    page,
+  }) => {
+    // detail 화면 mock — cache/series만 빈 버킷, 나머지는 정상
+    await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
+    await mockApi(page, 'GET', '/proxy/requests', []);
+    await mockApi(page, 'GET', '/domains/summary', createDomainSummary());
+    await mockApi(page, 'GET', '/domains/textbook.com', createDomain());
+    await page.route('**/api/domains/textbook.com/stats*', (route) =>
+      route.request().method() === 'GET'
+        ? route.fulfill({ json: createDomainStats() })
+        : route.fallback(),
+    );
+    await mockApi(page, 'GET', '/domains/textbook.com/logs', createDomainLogs());
+    await mockApi(page, 'GET', '/domains/textbook.com/summary', createDomainHostSummary());
+    await mockApi(page, 'GET', '/tls/certificates', createCertificates());
+    await mockApi(page, 'GET', '/cache/popular', createPopularContent());
+    await mockApi(page, 'GET', '/stats/optimization', createOptimizationStats());
+    await mockApi(page, 'GET', '/optimizer/profiles', createOptimizerProfile());
+    // 빈 버킷 — 분모(total) 0 케이스 재현
+    await page.route('**/api/cache/series*', (route) =>
+      route.fulfill({ json: { buckets: [] } }),
+    );
+    await page.route('**/api/optimization/stats*', (route) =>
+      route.fulfill({ json: createTextCompressStats() }),
+    );
+    await page.route('**/api/domains/textbook.com/top-urls*', (route) =>
+      route.fulfill({ json: { urls: [] } }),
+    );
+    await page.route('**/api/domains/textbook.com/optimization/url-breakdown*', (route) =>
+      route.fulfill({ json: { total: 0, items: [] } }),
+    );
+
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '최적화' }).click();
+
+    // 카드 3개가 사라지고 빈 상태 컨테이너가 노출된다
+    await expect(page.getByTestId('domain-overview-cache-cards-empty')).toBeVisible();
+    await expect(page.getByTestId('domain-overview-l1-hit-rate')).toHaveCount(0);
+    await expect(page.getByTestId('domain-overview-edge-hit-rate')).toHaveCount(0);
+    await expect(page.getByTestId('domain-overview-bypass-rate')).toHaveCount(0);
+    // 0.0% 거짓 표시 잔존 금지 (회귀 가드)
+    await expect(
+      page.getByTestId('domain-overview-cache-cards-empty').getByText('0.0%'),
+    ).toHaveCount(0);
+    // 빈 상태 안내 문구 노출
+    await expect(
+      page.getByTestId('domain-overview-cache-cards-empty').getByText('아직 데이터가 없습니다'),
+    ).toBeVisible();
+  });
+});
+
 test.describe('도메인 상세 — 설정 탭 TLS 수동 갱신 (#102)', () => {
   /**
    * 회귀 방지: DomainSettingsTab의 "수동 갱신" 버튼이 하드코딩 disabled에서
