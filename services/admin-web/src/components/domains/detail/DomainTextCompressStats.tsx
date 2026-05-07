@@ -51,9 +51,14 @@ export function DomainTextCompressStats({ host, period = '30d' }: Props) {
   }
 
   // API 호출 실패 시 에러 메시지 표시 — DomainTopUrlsCard (#148) 패턴 동일 적용
+  // 형제 카드(캐시/최적화/URL별 최적화 내역) 시각 위계 일치를 위해 CardHeader 유지 (#270).
   if (isError) {
     return (
       <Card data-testid="text-compress-stats">
+        <CardHeader>
+          <CardTitle className="text-base font-semibold">텍스트 압축 ({PERIOD_LABEL[period] ?? period} 누적)</CardTitle>
+          <p className="text-sm text-muted-foreground">Phase 15 brotli/gzip 프리컴프레스 결과</p>
+        </CardHeader>
         <CardContent className="py-4">
           <p className="text-sm text-destructive">텍스트 압축 통계를 불러올 수 없습니다</p>
         </CardContent>
@@ -64,10 +69,15 @@ export function DomainTextCompressStats({ host, period = '30d' }: Props) {
   /**
    * 빈 상태 분기 — 데이터 없음(신규 도메인·이벤트 0건)과 실제 0값을 구별 가능하게 한다.
    * DomainStackedChart 와 동일한 패턴: 아이콘 + 안내 문구 표시 (이슈 #89).
+   * 형제 카드와 시각 위계 일치를 위해 CardHeader 유지 (#270).
    */
   if (!data || (data.total === 0 && data.by_decision.length === 0)) {
     return (
       <Card data-testid="text-compress-stats">
+        <CardHeader>
+          <CardTitle className="text-base font-semibold">텍스트 압축 ({PERIOD_LABEL[period] ?? period} 누적)</CardTitle>
+          <p className="text-sm text-muted-foreground">Phase 15 brotli/gzip 프리컴프레스 결과</p>
+        </CardHeader>
         <CardContent className="flex flex-col items-center justify-center py-12 gap-2 text-muted-foreground">
           <FileText size={32} className="opacity-30" />
           <p className="text-sm">아직 데이터가 없습니다</p>
