@@ -646,6 +646,57 @@ test.describe('도메인 상세 — Overview 탭', () => {
     expect(neutralTexts.length).toBeGreaterThan(0);
   });
 
+  /**
+   * 이슈 #245 회귀 방지 — 평균 응답시간 카드 DeltaBadge 단위
+   * 백엔드 responseTimeDelta는 백분율(%)이지만 UI가 "ms" 단위로 잘못 표시했던 버그.
+   * 다른 카드(요청·캐시 히트율)와 동일하게 '%' 단위가 표시되어야 한다.
+   */
+  test('Overview — 평균 응답시간 DeltaBadge가 % 단위로 표시된다 (#245 회귀 방지)', async ({
+    page,
+  }) => {
+    // responseTimeDelta=25.0 (% 의미)인 stats mock — period 쿼리 파라미터 포함을 위해 page.route() 사용
+    await setupDetailMocks(page);
+    await page.route('**/api/domains/textbook.com/stats*', (route) =>
+      route.request().method() === 'GET'
+        ? route.fulfill({
+            json: {
+              host: 'textbook.com',
+              period: '24h',
+              summary: {
+                totalRequests: 1000,
+                requestsDelta: 5.2,
+                cacheHitRate: 0.8,
+                cacheHitRateDelta: 2.1,
+                bandwidth: 1024,
+                avgResponseTime: 125,
+                responseTimeDelta: 25.0,
+              },
+              timeseries: {
+                labels: ['00:00'],
+                hits: [10],
+                misses: [2],
+                bandwidth: [1024],
+                responseTime: [125],
+              },
+            },
+          })
+        : route.fallback(),
+    );
+    await page.goto('/domains/textbook.com');
+
+    const card = page.getByTestId('stat-card-response-time');
+    await expect(card).toBeVisible();
+
+    // DeltaBadge 영역에 'ms' 단위가 등장해서는 안 된다 (이슈 #245 핵심)
+    const cardText = await card.innerText();
+    // 첫 줄의 "125ms"(절대값) 외에 변화율 영역에 ms가 또 나오면 회귀
+    const msMatches = cardText.match(/ms/g) ?? [];
+    expect(msMatches).toHaveLength(1); // "125ms" 한 번만
+
+    // 변화율 영역에 % 단위가 정확히 표시되어야 한다 (다른 카드와 단위 일관성)
+    expect(cardText).toMatch(/25\.0%/);
+  });
+
   test('Overview — Quick Actions 4개 버튼이 동일 y 오프셋에 정렬된다', async ({ page }) => {
     await setupDetailMocks(page);
     await page.goto('/domains/textbook.com');

@@ -88,7 +88,10 @@ function SummaryCards({ host }: { host: string }) {
           <div className="flex items-end justify-between">
             <div>
               <p className="text-3xl font-bold">{(s?.avgResponseTime ?? 0).toFixed(0)}ms</p>
-              <DeltaBadge delta={-(s?.responseTimeDelta ?? 0)} unit="ms" />
+              {/* responseTimeDelta는 백엔드에서 백분율(%)로 산출됨 (domain-stats-repo.ts getDelta).
+                  다른 카드(요청·캐시 히트율)와 단위 일관성을 맞추기 위해 '%'로 표시한다.
+                  부호 반전(-)은 응답시간 감소를 "개선(녹색)"으로 표시하기 위함. */}
+              <DeltaBadge delta={-(s?.responseTimeDelta ?? 0)} unit="%" />
             </div>
             <BarSparkline values={ts?.responseTime ?? Array(24).fill(0)} />
           </div>
