@@ -113,7 +113,8 @@ export function DomainBulkAddDialog({ open, onOpenChange }: DomainBulkAddDialogP
 
   return (
     <Dialog open={open} onClose={handleClose}>
-      <DialogContent data-testid="bulk-add-dialog" disableClose={bulkAdd.isPending}>
+      {/* bulk-paste textarea의 가독 폭 확보 — host origin 쌍(60~70자)이 줄바꿈 없이 한 줄에 들어가도록 max-w-2xl(672px) 부여 (#274) */}
+      <DialogContent data-testid="bulk-add-dialog" className="max-w-2xl" disableClose={bulkAdd.isPending}>
         <DialogTitle>도메인 일괄 추가</DialogTitle>
         <p className="text-xs text-muted-foreground mb-2">
           한 줄에 하나씩 <code className="text-xs bg-muted px-1 py-0.5 rounded">host origin</code> 형식으로 입력하세요.
