@@ -19,7 +19,7 @@ import { Skeleton } from '../components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { downloadCACert, downloadMobileConfig } from '../api/tls';
 import { useCertificates } from '../hooks/useTls';
-import { formatUptime } from '../lib/format';
+import { formatBytes, formatUptime } from '../lib/format';
 import { LogViewer } from '../components/system/LogViewer';
 import type { SystemStatus } from '../api/system';
 
@@ -100,8 +100,10 @@ export function SystemPage() {
       : Math.min(Math.floor(diskUsageRatio * 100), 99);
   const isDiskWarning = diskUsageRatio >= 0.9;
 
-  const diskUsedGB = cache ? (cache.disk.used_bytes / 1024 ** 3).toFixed(1) : '-';
-  const diskMaxGB = cache ? (cache.disk.max_bytes / 1024 ** 3).toFixed(1) : '-';
+  // Dashboard StorageUsageCard와 단위 정책 통일 (#239): GB 고정 → formatBytes 적응형(B/KB/MB/GB).
+  // 같은 캐시 통계 값을 두 페이지가 다른 단위로 표시해 운영자 혼선 발생하던 문제 제거.
+  const diskUsedLabel = cache ? formatBytes(cache.disk.used_bytes) : '-';
+  const diskMaxLabel = cache ? formatBytes(cache.disk.max_bytes) : '-';
 
   return (
     <div className="space-y-6">
@@ -207,8 +209,8 @@ export function SystemPage() {
           ) : (
             <>
               <div className="mb-2 flex justify-between text-sm text-muted-foreground">
-                <span>{diskUsedGB} GB 사용</span>
-                <span>{diskMaxGB} GB 최대</span>
+                <span>{diskUsedLabel} 사용</span>
+                <span>{diskMaxLabel} 최대</span>
               </div>
               <div
                 data-testid="disk-usage-bar"

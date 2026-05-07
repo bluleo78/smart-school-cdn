@@ -79,6 +79,26 @@ test.describe('시스템 페이지', () => {
     expect(barWidth).toBe(99);
   });
 
+  /// 회귀 방지 #239: SystemPage가 GB 고정 단위로 표시해 Dashboard(formatBytes 적응형)와 단위 불일치
+  /// 같은 캐시 통계 값을 두 페이지에서 동일한 단위 정책(B/KB/MB/GB 적응형)으로 표시해야 한다.
+  test('디스크 사용량이 formatBytes 적응형 단위로 표시된다 — 회귀 방지 #239', async ({ page }) => {
+    // 50 MB used, 5 GB max — formatBytes는 "50.0 MB" / "5.0 GB"로 표시해야 한다 (GB 고정 시 "0.0 GB"로 오표시)
+    await mockApi(page, 'GET', '/cache/stats', {
+      requests: 0, l1_hits: 0, l2_hits: 0, miss: 0, bypass_total: 0,
+      bypass: { method: 0, nocache: 0, size: 0, other: 0, total: 0 },
+      l1_hit_rate: 0, edge_hit_rate: 0, bypass_rate: 0,
+      disk: { used_bytes: 50 * 1024 * 1024, max_bytes: 5 * 1024 * 1024 * 1024, entry_count: 10 },
+      by_domain: [],
+    });
+    await page.goto('/system');
+
+    // 적응형 단위로 표시: used는 MB, max는 GB
+    await expect(page.getByText('50.0 MB 사용')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText('5.0 GB 최대')).toBeVisible();
+    // GB 고정 표기("0.0 GB 사용")가 더 이상 노출되지 않아야 한다
+    await expect(page.getByText('0.0 GB 사용')).toHaveCount(0);
+  });
+
   /// 회귀 방지 #140: diskUsagePercent 100% clamp 없어 progress bar overflow 가능
   /// used_bytes > max_bytes 시 bar width가 100%를 초과하지 않아야 한다
   test('used_bytes > max_bytes 이어도 progress bar width가 100% 이하다 — 회귀 방지 #140', async ({ page }) => {
