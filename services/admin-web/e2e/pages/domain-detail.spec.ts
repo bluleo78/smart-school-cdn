@@ -277,6 +277,56 @@ test.describe('도메인 상세 — Overview 탭', () => {
   });
 
   /**
+   * 이슈 #230 회귀 방지 — 헤더 캐시 퍼지 버튼이 비활성 도메인에서도 활성/즉시 실행되던 버그
+   * 수정 전: disabled={purgeDomain.isPending} 만 검사, onClick에서 mutation 즉시 호출
+   * 수정 후: domain.enabled 가드로 disabled + inactive title, 클릭 시 확인 다이얼로그 경유
+   */
+  test('비활성 도메인에서 헤더 캐시 퍼지 버튼이 disabled되고 안내 툴팁이 표시된다 (회귀: #230)', async ({ page }) => {
+    await setupDetailMocks(page);
+    await mockApi(page, 'GET', '/domains/textbook.com', {
+      host: 'textbook.com',
+      origin: 'https://textbook.com',
+      enabled: 0,
+      description: '교과서 CDN',
+      created_at: 1700000000,
+      updated_at: 1700000000,
+    });
+    await page.goto('/domains/textbook.com');
+
+    // 헤더 캐시 퍼지 버튼이 disabled여야 한다
+    const headerPurge = page.getByTestId('domain-purge-button');
+    await expect(headerPurge).toBeDisabled();
+    await expect(headerPurge).toHaveAttribute(
+      'title',
+      '비활성 도메인입니다. 활성화 후 사용 가능합니다.',
+    );
+  });
+
+  /**
+   * 이슈 #230 회귀 방지 — 활성 도메인 헤더 퍼지는 즉시 실행 대신 확인 다이얼로그를 거쳐야 한다
+   */
+  test('활성 도메인 헤더 퍼지 버튼은 확인 다이얼로그를 거쳐 mutation을 트리거한다 (회귀: #230)', async ({ page }) => {
+    await setupDetailMocks(page);
+    let purgeCalled = false;
+    await page.route('**/api/domains/textbook.com/purge', (route) => {
+      purgeCalled = true;
+      void route.fulfill({ status: 200, json: { ok: true } });
+    });
+    await page.goto('/domains/textbook.com');
+
+    // 헤더 퍼지 버튼 클릭 → 확인 다이얼로그가 나타나고 mutation은 아직 실행되지 않아야 한다
+    await page.getByTestId('domain-purge-button').click();
+    const dialog = page.getByTestId('domain-header-purge-dialog');
+    await expect(dialog).toBeVisible();
+    expect(purgeCalled).toBe(false);
+
+    // 확인 버튼 클릭 시 mutation이 실행된다
+    await page.getByTestId('domain-header-purge-confirm').click();
+    await expect(dialog).not.toBeVisible({ timeout: 3000 });
+    expect(purgeCalled).toBe(true);
+  });
+
+  /**
    * 이슈 #203 회귀 방지 — 활성 도메인에서는 기존처럼 4개 버튼이 정상 동작해야 한다
    */
   test('활성 도메인에서는 QuickActions 4개 버튼이 활성 상태이며 안내 배너가 없다 (회귀: #203)', async ({ page }) => {
@@ -2486,8 +2536,9 @@ test.describe('도메인 상세 — 헤더 액션 에러 처리 (#45)', () => {
     const uncaughtErrors: string[] = [];
     page.on('pageerror', (err) => uncaughtErrors.push(err.message));
 
-    // 헤더의 캐시 퍼지 버튼 클릭 (에러 응답)
+    // 헤더의 캐시 퍼지 버튼 클릭 → 확인 다이얼로그 노출 (#230) → 확인 버튼으로 mutation 트리거
     await page.getByTestId('domain-purge-button').click();
+    await page.getByTestId('domain-header-purge-confirm').click();
 
     // onError toast가 표시되어야 한다 (에러 처리 정상 동작)
     await expect(page.getByRole('status').first()).toBeVisible({ timeout: 3000 }).catch(() => {

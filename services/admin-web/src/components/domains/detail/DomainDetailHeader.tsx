@@ -30,15 +30,22 @@ export function DomainDetailHeader({ domain }: Props) {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
   const isEnabled = domain.enabled === 1;
+  // 비활성 도메인 가드 — DomainQuickActions(#203)와 동일한 안내 문구를 재사용해
+  // 헤더/빠른 액션 카드 간 일관성을 유지한다 (#230)
+  const isInactive = !isEnabled;
+  const inactiveTitle = '비활성 도메인입니다. 활성화 후 사용 가능합니다.';
+  // 헤더 퍼지 버튼은 의도치 않은 즉시 실행을 막기 위해 확인 다이얼로그를 거친다 (#230)
+  const [showPurgeDialog, setShowPurgeDialog] = useState(false);
 
   /** 캐시 퍼지 처리
    * mutateAsync는 onError 콜백 실행 후에도 에러를 re-throw하므로
    * try-catch로 Unhandled Promise Rejection을 방지한다 */
-  async function handlePurge() {
+  async function handlePurgeConfirm() {
     try {
       await purgeDomain.mutateAsync(domain.host);
+      setShowPurgeDialog(false);
     } catch {
-      // 에러는 usePurgeDomain의 onError toast가 이미 처리함
+      // 에러는 usePurgeDomain의 onError toast가 이미 처리함 — 다이얼로그는 유지해 재시도 허용
     }
   }
 
@@ -95,11 +102,12 @@ export function DomainDetailHeader({ domain }: Props) {
 
       {/* 오른쪽: 액션 버튼 */}
       <div className="flex items-center gap-2">
-        {/* 캐시 퍼지 */}
+        {/* 캐시 퍼지 — 비활성 도메인에서는 disabled + 안내(#230) */}
         <Button
           variant="default"
-          onClick={handlePurge}
-          disabled={purgeDomain.isPending}
+          onClick={() => setShowPurgeDialog(true)}
+          disabled={purgeDomain.isPending || isInactive}
+          title={isInactive ? inactiveTitle : undefined}
           data-testid="domain-purge-button"
         >
           <RefreshCw size={14} className={purgeDomain.isPending ? 'animate-spin' : ''} />
@@ -131,6 +139,41 @@ export function DomainDetailHeader({ domain }: Props) {
           삭제
         </Button>
       </div>
+
+      {/* 캐시 퍼지 확인 AlertDialog — 헤더 버튼이 즉시 실행되던 회귀 방지 (#230)
+          DomainQuickActions의 PurgeConfirmDialog와 동일 패턴: isPending 중에는 닫기 차단 */}
+      <AlertDialog
+        open={showPurgeDialog}
+        onClose={() => { if (!purgeDomain.isPending) setShowPurgeDialog(false); }}
+      >
+        <AlertDialogContent
+          className="max-w-sm"
+          data-testid="domain-header-purge-dialog"
+          disableClose={purgeDomain.isPending}
+        >
+          <AlertDialogTitle>캐시 퍼지</AlertDialogTitle>
+          <p className="text-sm text-muted-foreground">
+            <span className="font-mono font-medium">{domain.host}</span>의 전체 캐시를 삭제합니다. 계속하시겠습니까?
+          </p>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button
+              variant="outline"
+              onClick={() => setShowPurgeDialog(false)}
+              disabled={purgeDomain.isPending}
+            >
+              취소
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handlePurgeConfirm}
+              disabled={purgeDomain.isPending}
+              data-testid="domain-header-purge-confirm"
+            >
+              {purgeDomain.isPending ? '퍼지 중…' : '퍼지'}
+            </Button>
+          </div>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* 삭제 확인 AlertDialog — 진행 중 ESC/백드롭/X 닫기 차단 (#165) */}
       <AlertDialog open={showDeleteDialog} onClose={() => { if (!deleteDomain.isPending) setShowDeleteDialog(false); }}>
