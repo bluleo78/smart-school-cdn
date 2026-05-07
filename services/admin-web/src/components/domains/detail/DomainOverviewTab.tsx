@@ -29,9 +29,10 @@ function SummaryCards({ host }: { host: string }) {
   if (isLoading) {
     // 4-카드 그리드 — iPad portrait(810px)/landscape(1180px)에서 4-col로 좁아지면
     // BarSparkline(약 117px)이 좌측 큰 숫자와 함께 카드 폭을 초과하므로
-    // lg(1024px)부터 4-col 펼침. 그 미만은 sm(640px)부터 2-col 유지 (#271)
+    // xl(1280px)부터 4-col 펼침. 그 미만은 sm(640px)부터 2-col 유지.
+    // (#271 회귀 1차: lg(1024)는 iPad landscape 1180을 여전히 4-col로 잡아 overflow 재발 → xl로 상향)
     return (
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {[...Array(4)].map((_, i) => (
           <Card key={i} className="overflow-hidden">
             <CardHeader><CardTitle><Skeleton className="h-4 w-24" /></CardTitle></CardHeader>
@@ -47,11 +48,12 @@ function SummaryCards({ host }: { host: string }) {
   const s = data?.summary;
   const ts = data?.timeseries;
   const hourlyRequests = ts ? ts.hits.map((h, i) => h + (ts.misses[i] ?? 0)) : Array(24).fill(0);
-  // 4-카드 그리드 — md(768px) 4-col 강제 시 BarSparkline이 카드 경계 밖으로 17~96px 오버플로우.
-  // lg(1024px)부터 4-col로 펼치고, 각 Card에 overflow-hidden을 두어 스파크라인 클리핑 (#271,
-  // 선례: DomainSummaryCards의 #71/#129 가드)
+  // 4-카드 그리드 — md(768px)/lg(1024px) 4-col 강제 시 BarSparkline이 카드 경계 밖으로 17~96px 오버플로우.
+  // 회귀 1차(#271): lg(1024)로는 iPad landscape(1180)도 4-col에 걸려 sparkline overflow 재발 → xl(1280)로 상향.
+  // 1280 미만 viewport에서는 2-col 유지하여 카드별 가용 폭을 ~370px 이상 확보.
+  // 각 Card에는 overflow-hidden을 둬 sparkline이 경계를 넘지 않도록 클리핑 (선례: DomainSummaryCards의 #71/#129 가드)
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4" data-testid="domain-stat-cards">
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4" data-testid="domain-stat-cards">
       <Card data-testid="stat-card-requests" className="overflow-hidden">
         <CardHeader><CardTitle>오늘 요청</CardTitle></CardHeader>
         <CardContent>

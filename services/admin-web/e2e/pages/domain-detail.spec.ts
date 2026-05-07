@@ -749,33 +749,47 @@ test.describe('도메인 상세 — Overview 탭', () => {
    * 이슈 #271 회귀 방지 — DomainOverviewTab KPI 4-카드 BarSparkline overflow
    * 수정 전: md:grid-cols-4(768px)부터 4-col 강제 → iPad portrait(810px)에서 카드 폭 ~178px,
    *          BarSparkline(~117px)이 카드 우측 경계 밖으로 17~96px 비져나옴
-   * 수정 후: lg:grid-cols-4(1024px) + 각 Card overflow-hidden
-   *          - iPad portrait(810px)에서는 2-col 유지, 카드 폭 충분히 확보
+   * 회귀 1차(#271): lg:grid-cols-4(1024px)로는 iPad landscape(1180px)도 여전히 4-col에 걸려 overflow 재발.
+   *                 → xl:grid-cols-4(1280px)로 상향, iPad landscape 미만은 2-col 유지.
+   * 수정 후: xl:grid-cols-4(1280px) + 각 Card overflow-hidden
+   *          - iPad portrait(810)/landscape(1180) 모두 2-col 유지, 카드 폭 ~370px 이상
    *          - 만약 폭이 부족해도 overflow-hidden으로 시각 침범 차단
    */
   test('Overview — KPI 4-카드 BarSparkline이 카드 경계를 침범하지 않는다 (회귀: #271)', async ({ page }) => {
     await setupDetailMocks(page);
-    // iPad portrait — 이슈 재현 viewport
+    // iPad portrait — 1차 재현 viewport
     await page.setViewportSize({ width: 810, height: 1080 });
     await page.goto('/domains/textbook.com');
 
     await expect(page.getByTestId('domain-stat-cards')).toBeVisible();
 
-    // 1) 그리드 클래스 — md:grid-cols-4가 아닌 lg:grid-cols-4여야 한다
+    // 1) 그리드 클래스 — md/lg가 아닌 xl:grid-cols-4여야 한다 (회귀 1차 후)
     const grid = page.getByTestId('domain-stat-cards');
     const gridClass = await grid.getAttribute('class');
-    expect(gridClass).toContain('lg:grid-cols-4');
+    expect(gridClass).toContain('xl:grid-cols-4');
     expect(gridClass).not.toMatch(/(^| )md:grid-cols-4( |$)/);
+    expect(gridClass).not.toMatch(/(^| )lg:grid-cols-4( |$)/);
 
-    // 2) 시각 검증 — 각 카드의 sparkline(.h-9)이 카드 right 경계를 초과하지 않는다
+    // 2) 시각 검증 — 각 카드의 sparkline(.h-9)이 카드 right 경계를 초과하지 않는다 (portrait)
     const ids = ['stat-card-requests', 'stat-card-cache-hit', 'stat-card-bandwidth', 'stat-card-response-time'];
     for (const id of ids) {
       const card = page.getByTestId(id);
       const cardBox = await card.boundingBox();
       const sparkBox = await card.locator('.h-9').first().boundingBox();
-      expect(cardBox, `${id} card box`).not.toBeNull();
-      expect(sparkBox, `${id} spark box`).not.toBeNull();
-      // overflow-hidden으로 클리핑되므로 sparkline의 시각적 right가 카드 right를 초과하지 않음
+      expect(cardBox, `${id} card box (portrait)`).not.toBeNull();
+      expect(sparkBox, `${id} spark box (portrait)`).not.toBeNull();
+      expect(sparkBox!.x + sparkBox!.width).toBeLessThanOrEqual(cardBox!.x + cardBox!.width + 1);
+    }
+
+    // 3) iPad landscape(1180×820) — 회귀 1차에서 재발했던 viewport 추가 검증
+    await page.setViewportSize({ width: 1180, height: 820 });
+    await expect(page.getByTestId('domain-stat-cards')).toBeVisible();
+    for (const id of ids) {
+      const card = page.getByTestId(id);
+      const cardBox = await card.boundingBox();
+      const sparkBox = await card.locator('.h-9').first().boundingBox();
+      expect(cardBox, `${id} card box (landscape)`).not.toBeNull();
+      expect(sparkBox, `${id} spark box (landscape)`).not.toBeNull();
       expect(sparkBox!.x + sparkBox!.width).toBeLessThanOrEqual(cardBox!.x + cardBox!.width + 1);
     }
   });
