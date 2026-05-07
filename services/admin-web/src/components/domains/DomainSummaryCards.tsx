@@ -3,7 +3,7 @@ import { useDomainSummary } from '../../hooks/useDomainSummary';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Skeleton } from '../ui/skeleton';
 import { formatBytes } from '../../lib/format';
-import { BarSparkline, DeltaBadge } from './StatSparkline';
+import { BarSparkline, DeltaBadge, EnabledDisabledGauge } from './StatSparkline';
 
 export function DomainSummaryCards() {
   // error: API 요청 실패 여부 — isError가 true이면 0 fallback 대신 에러 메시지 표시 (#104)
@@ -40,18 +40,27 @@ export function DomainSummaryCards() {
     // 4개 카드 동일 수직 stack 룰 적용: 제목 → 숫자 → delta(or 보조라벨) → 그래프 (#256)
     // overflow-hidden: BarSparkline(24바 × 5px)이 카드 경계를 초과하지 않도록 클리핑 (#129)
     <div className="grid grid-cols-2 md:grid-cols-4 gap-4" data-testid="domain-summary-cards">
-      {/* 카드 1: 전체 도메인 — 스파크라인 슬롯은 비워 두되 다른 카드와 높이 정렬 위해 placeholder 유지 (#256) */}
+      {/* 카드 1: 전체 도메인 — 4개 카드 콘텐츠 구조 통일 (#258)
+          delta 슬롯에 활성/비활성 카운트, 그래프 슬롯에 EnabledDisabledGauge로 시각 무게 정렬 */}
       <Card data-testid="summary-card-total">
         <CardHeader><CardTitle>전체 도메인</CardTitle></CardHeader>
         <CardContent className="overflow-hidden">
           <p className="text-3xl font-bold">{data?.total ?? 0}</p>
-          {/* delta 위치 슬롯 — 활성/비활성 카운트로 대체 (delta 개념 없음) */}
-          <div className="flex gap-3 mt-1">
-            <span className="text-xs text-success">활성 {data?.enabled ?? 0}</span>
-            <span className="text-xs text-muted-foreground">비활성 {data?.disabled ?? 0}</span>
+          {/* delta 위치 슬롯 — 활성/비활성 카운트로 대체 (delta 개념 없음).
+              다른 카드의 DeltaBadge와 같은 줄 높이를 유지해 4카드 라인 정렬 (#258) */}
+          <div className="mt-1 flex gap-3 text-xs font-medium">
+            <span className="text-success">활성 {data?.enabled ?? 0}</span>
+            <span className="text-muted-foreground">비활성 {data?.disabled ?? 0}</span>
           </div>
-          {/* 그래프 슬롯 — 스파크라인 없음. h-9으로 4카드 높이 동기화 (#256) */}
-          <div className="h-9 mt-2" aria-hidden="true" />
+          {/* 그래프 슬롯 — 활성/비활성 비율 게이지 (#258).
+              별도 trend 데이터 없이 현재 카운트만으로 다른 카드의 BarSparkline과
+              동일한 36px(h-9) 영역을 채워 시각 무게를 맞춘다 */}
+          <div className="mt-2">
+            <EnabledDisabledGauge
+              enabled={data?.enabled ?? 0}
+              disabled={data?.disabled ?? 0}
+            />
+          </div>
         </CardContent>
       </Card>
 

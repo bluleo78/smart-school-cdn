@@ -245,6 +245,87 @@ test.describe('도메인 관리 — 요약 카드', () => {
    * - 카드 4개가 한 행(top 정렬)에 표시되고
    * - 카드 내부에서 숫자(p.text-3xl)가 sparkline 위에 위치(겹침 없음)해야 한다.
    */
+  /**
+   * 이슈 #258 회귀 방지 — 4개 KPI 카드 콘텐츠 구조 통일
+   * - 첫 카드(전체 도메인)에도 delta 슬롯 + 그래프 슬롯이 다른 카드와 동일 위치에 존재
+   * - 4개 카드 그래프 영역(h-9 = 36px)이 모두 같은 높이로 렌더되며 시각 무게가 비슷
+   *   (BarSparkline floor 12px + EnabledDisabledGauge 12px stacked bar)
+   */
+  test('4개 카드 모두 delta 슬롯 + 그래프 슬롯이 동일 위치에 존재한다 (#258 회귀 방지)', async ({
+    page,
+  }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/domains');
+
+    const summaryCards = page.getByTestId('domain-summary-cards');
+    await expect(summaryCards).toBeVisible();
+
+    // 카드 1에 활성/비활성 비율 게이지가 존재 (다른 카드 BarSparkline과 같은 슬롯)
+    await expect(page.getByTestId('domain-enabled-gauge')).toBeVisible();
+
+    // 4개 카드 그래프 슬롯이 모두 같은 height(h-9 = 36px)를 가져야 함 — 시각 무게 정렬
+    const chartHeights = await summaryCards.evaluate((el) => {
+      const cards = el.querySelectorAll('[data-testid^="summary-card-"]');
+      return Array.from(cards).map((c) => {
+        const charts = c.querySelectorAll('[aria-hidden="true"]');
+        const chart = charts[charts.length - 1] as HTMLElement | undefined;
+        return chart ? Math.round(chart.getBoundingClientRect().height) : 0;
+      });
+    });
+    expect(chartHeights).toHaveLength(4);
+    // 4개 모두 36px(h-9) 같은 높이
+    for (const h of chartHeights) {
+      expect(h).toBe(36);
+    }
+  });
+
+  /**
+   * 이슈 #258 회귀 방지 — BarSparkline 평탄 데이터 floor
+   * 데이터가 모두 0이거나 평탄해도 막대 높이가 12px 이상으로 표시되어
+   * 차트 영역(36px)의 1/3 이상을 차지해야 한다.
+   */
+  test('BarSparkline 평탄/0 데이터에서도 막대 높이가 12px 이상이다 (#258 회귀 방지)', async ({
+    page,
+  }) => {
+    await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
+    await mockApi(page, 'GET', '/proxy/requests', []);
+    // 모든 hourly 배열이 0인 시나리오 — 카드 3·4의 평탄 라인 재현
+    await mockApi(page, 'GET', '/domains/summary', {
+      ...createDomainSummary(),
+      hourlyRequests: Array(24).fill(0),
+      hourlyCacheHitRate: Array(24).fill(0),
+      hourlyBandwidth: Array(24).fill(0),
+    });
+    await mockApi(page, 'GET', '/domains', createDomains());
+
+    await page.goto('/domains');
+
+    const summaryCards = page.getByTestId('domain-summary-cards');
+    await expect(summaryCards).toBeVisible();
+
+    // 카드 2·3·4의 BarSparkline 막대 높이가 모두 12px 이상이어야 한다
+    const barHeights = await summaryCards.evaluate((el) => {
+      const cards = el.querySelectorAll(
+        '[data-testid="summary-card-requests"], [data-testid="summary-card-cache-hit"], [data-testid="summary-card-bandwidth"]',
+      );
+      const heights: number[] = [];
+      cards.forEach((c) => {
+        // BarSparkline 내부 막대들 — w-[5px] 클래스로 식별
+        c.querySelectorAll('div.w-\\[5px\\]').forEach((bar) => {
+          heights.push(Math.round((bar as HTMLElement).getBoundingClientRect().height));
+        });
+      });
+      return heights;
+    });
+    expect(barHeights.length).toBeGreaterThan(0);
+    for (const h of barHeights) {
+      expect(h).toBeGreaterThanOrEqual(12);
+    }
+  });
+
   for (const vw of [810, 1180, 1280, 1440]) {
     test(`${vw}px 뷰포트에서 통계 카드 4개가 동일 수직 stack 레이아웃을 유지한다 (#256 회귀 방지)`, async ({
       page,
