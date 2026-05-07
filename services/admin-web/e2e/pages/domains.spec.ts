@@ -239,6 +239,31 @@ test.describe('도메인 관리 — 요약 카드', () => {
   });
 
   /**
+   * 이슈 #264 회귀 방지 — 데스크탑(1280·1440) 뷰포트에서 DomainToolbar 검색 input이
+   * 부모 flex 컨테이너 안에서 collapse되어 ~46px로 줄어들던 문제. 검색 wrapper에
+   * `flex-1 md:flex-none md:w-64` 클래스를 적용해 컨테이너 폭을 명시적으로 보장한다.
+   * 1280·1440 두 뷰포트 모두에서 input width가 200px 이상이어야 한다.
+   */
+  for (const vw of [1280, 1440] as const) {
+    test(`${vw}px 뷰포트에서 DomainToolbar 검색 input width가 collapse되지 않는다 (#264 회귀 방지)`, async ({
+      page,
+    }) => {
+      await setupBaseMocks(page);
+      await mockApi(page, 'GET', '/domains', createDomains());
+
+      await page.setViewportSize({ width: vw, height: 800 });
+      await page.goto('/domains');
+
+      const search = page.getByTestId('domain-search');
+      await expect(search).toBeVisible();
+
+      const width = await search.evaluate((el) => (el as HTMLElement).getBoundingClientRect().width);
+      // 데스크탑에서 md:w-64(=256px)이 적용되어야 — collapse 시엔 ~46px
+      expect(width).toBeGreaterThanOrEqual(200);
+    });
+  }
+
+  /**
    * 이슈 #256 회귀 방지 — 4개 통계 카드 동일 수직 stack 룰
    * 제목 → 숫자 → delta → 그래프 순으로 모든 카드가 동일 레이아웃이어야 한다.
    * iPad portrait 810px / landscape 1180px / 데스크탑 1280px / 1440px 4개 viewport에서

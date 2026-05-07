@@ -154,7 +154,7 @@ export function DomainToolbar({
       <div className="flex items-center gap-2">
         {/* 검색 입력 + 클리어(X) 버튼 — 입력값이 있고 IME 조합 중이 아닐 때만 X 노출(#213).
             X는 절대 위치로 입력 우측에 겹치며, 텍스트가 아이콘에 가려지지 않도록 pr-8 여백을 둔다. */}
-        <div className="relative w-full md:w-52">
+        <div className="relative flex-1 md:flex-none md:w-64">
           <Input
             placeholder="도메인 검색..."
             value={searchValue}
