@@ -1224,6 +1224,34 @@ test.describe('도메인 상세 — 통계 탭', () => {
   });
 
   /**
+   * 이슈 #268 회귀 방지 — DomainUrlOptimizationTable 필터 툴바 SelectTrigger 폭 적용
+   * - 호출부의 w-48(192px) / w-32(128px)가 베이스 className의 w-full에 덮이지 않아야 한다.
+   * - select.tsx 가 cn() / tailwind-merge로 className 머지를 처리해야 통과한다.
+   * - 1440×900 뷰포트(카드 ~1110px)에서도 두 트리거가 인라인 적정 폭을 유지한다.
+   */
+  test('URL별 내역 표 필터 툴바 — SelectTrigger 호출부 폭(w-48/w-32)이 적용된다 (회귀: #268)', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '최적화' }).click();
+    await expect(page.getByTestId('url-optimization-table')).toBeVisible();
+
+    // url-opt-decision: 호출부 className="w-48 text-sm" → 192px
+    const decisionTrigger = page.getByTestId('url-opt-decision');
+    const decisionBox = await decisionTrigger.boundingBox();
+    expect(decisionBox).not.toBeNull();
+    expect(decisionBox!.width).toBeCloseTo(192, 0);
+
+    // url-opt-sort: 호출부 className="w-32 text-sm" → 128px
+    const sortTrigger = page.getByTestId('url-opt-sort');
+    const sortBox = await sortTrigger.boundingBox();
+    expect(sortBox).not.toBeNull();
+    expect(sortBox!.width).toBeCloseTo(128, 0);
+  });
+
+  /**
    * 이슈 #249 — DomainUrlOptimizationTable 빈 상태 메시지 분기
    * 진짜 0건과 "검색/decision 필터로 0건" 두 상황을 구분해야 한다.
    * - 필터 비활성 → "집계된 이벤트 없음" (data-testid="url-opt-empty")
