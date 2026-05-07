@@ -267,17 +267,33 @@ export class DomainRepository {
   }
 
   /**
-   * 도메인 일괄 삭제
+   * 도메인 일괄 삭제 (#212)
    * - IN 절로 여러 호스트를 한 번에 삭제
-   * - 삭제된 행 수 반환
+   * - 부분 실패(요청 N건 vs 실제 삭제 M건) 안내를 위해 삭제 전 SELECT로 실재 호스트를 확인하여
+   *   `missing` 목록(요청에는 있으나 DB에 없는 호스트)을 함께 계산해 반환한다.
+   * - 동일한 host가 중복으로 들어와도 missing 판정 시에는 중복을 제거해 비교한다.
    */
-  bulkDelete(hosts: string[]): number {
-    if (hosts.length === 0) return 0;
+  bulkDelete(hosts: string[]): { deleted: number; missing: string[] } {
+    if (hosts.length === 0) return { deleted: 0, missing: [] };
 
-    const placeholders = hosts.map(() => '?').join(', ');
-    return this.db
+    // 비문자열/빈 호스트는 매칭 자체가 불가하므로 missing 판정에서 제외하지 않고
+    // 요청 그대로(중복 제거 후) 비교 — UI에는 어떤 항목이 누락됐는지 그대로 알린다.
+    const uniqueHosts = Array.from(new Set(hosts));
+    const placeholders = uniqueHosts.map(() => '?').join(', ');
+
+    // 삭제 직전 매칭되는 host 목록을 먼저 SELECT — 트랜잭션 없이도 동일 prepare 직후 실행하므로
+    // 외부 세션의 동시 삭제 영향은 미미. 우리는 "이 요청 시점에 DB에 없던 host"만 missing 으로 보고한다.
+    const presentRows = this.db
+      .prepare(`SELECT host FROM domains WHERE host IN (${placeholders})`)
+      .all(...uniqueHosts) as Array<{ host: string }>;
+    const presentSet = new Set(presentRows.map((r) => r.host));
+    const missing = uniqueHosts.filter((h) => !presentSet.has(h));
+
+    const deleted = this.db
       .prepare(`DELETE FROM domains WHERE host IN (${placeholders})`)
-      .run(...hosts).changes;
+      .run(...uniqueHosts).changes;
+
+    return { deleted, missing };
   }
 
   /** 호스트 삭제 — 삭제된 행 수 반환 */

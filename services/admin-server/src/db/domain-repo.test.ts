@@ -231,17 +231,33 @@ describe('DomainRepository', () => {
       repo.upsert('keep.test', 'https://keep.test');
     });
 
-    it('선택된 도메인을 일괄 삭제하고 삭제된 행 수를 반환한다', () => {
-      const count = repo.bulkDelete(['del1.test', 'del2.test']);
-      expect(count).toBe(2);
+    it('선택된 도메인을 일괄 삭제하고 deleted/missing을 반환한다', () => {
+      const result = repo.bulkDelete(['del1.test', 'del2.test']);
+      expect(result.deleted).toBe(2);
+      expect(result.missing).toEqual([]);
       expect(repo.findByHost('del1.test')).toBeUndefined();
       expect(repo.findByHost('del2.test')).toBeUndefined();
       expect(repo.findByHost('keep.test')).toBeDefined();
     });
 
-    it('빈 배열이면 0을 반환하고 아무것도 삭제하지 않는다', () => {
-      expect(repo.bulkDelete([])).toBe(0);
+    it('빈 배열이면 deleted=0, missing=[]을 반환하고 아무것도 삭제하지 않는다', () => {
+      expect(repo.bulkDelete([])).toEqual({ deleted: 0, missing: [] });
       expect(repo.findAll()).toHaveLength(3);
+    });
+
+    // (#212) 부분 실패: 요청한 host 중 일부가 DB에 없으면 missing 목록으로 반환되어야 한다.
+    it('요청 호스트 중 일부가 DB에 없으면 missing 에 포함된다 (#212)', () => {
+      const result = repo.bulkDelete(['del1.test', 'nope-aaa.test', 'nope-bbb.test']);
+      expect(result.deleted).toBe(1);
+      expect(result.missing.sort()).toEqual(['nope-aaa.test', 'nope-bbb.test']);
+      expect(repo.findByHost('del1.test')).toBeUndefined();
+    });
+
+    // 요청에 동일 호스트가 중복 들어와도 중복 제거 후 한 번만 비교한다.
+    it('중복 host는 중복 제거 후 비교한다 (#212)', () => {
+      const result = repo.bulkDelete(['del1.test', 'del1.test', 'nope.test']);
+      expect(result.deleted).toBe(1);
+      expect(result.missing).toEqual(['nope.test']);
     });
   });
 

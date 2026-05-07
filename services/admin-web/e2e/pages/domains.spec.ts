@@ -1618,3 +1618,81 @@ test.describe('도메인 관리 — 검색 debounce unmount cleanup (#143)', () 
     expect(staleSearchCalled).toBe(false);
   });
 });
+
+/**
+ * 이슈 #212 회귀 방지 — 도메인 일괄 삭제 부분 실패 분리 안내
+ * 서버 응답 shape: { deleted, requested, missing }.
+ * deleted < requested 또는 missing 이 비어있지 않으면 warning 토스트로 누락 host 를 안내해야 한다.
+ *
+ * 모킹 이유: 다른 세션에서 선삭제된 상황(부분 실패)을 결정적으로 재현하려면
+ * 서버 응답을 고정해야 한다. mock 이 재현하는 조건: DELETE /api/domains/bulk 가
+ * { deleted: 1, requested: 2, missing: ['gone.com'] } 을 반환하는 상황.
+ * 이 mock 이 실제 버그 조건과 동일한 이유: 훅은 응답 shape 만 보고 토스트를 분기하므로
+ * mock 응답으로 분기 동작을 정확히 검증할 수 있다.
+ */
+test.describe('도메인 관리 — 일괄 삭제 부분 실패 분리 안내 (#212)', () => {
+  test('deleted < requested 시 warning 토스트가 누락 host 를 표시한다', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+
+    // DELETE /api/domains/bulk — 부분 실패 응답 모킹
+    await page.route('**/api/domains/bulk', async (route) => {
+      if (route.request().method() === 'DELETE') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            deleted: 1,
+            requested: 2,
+            missing: ['cdn.school.kr'],
+          }),
+        });
+      } else {
+        return route.fallback();
+      }
+    });
+
+    await page.goto('/domains');
+    await expect(page.getByTestId('domains-table')).toBeVisible();
+
+    // 두 개의 호스트 선택 후 일괄 삭제 트리거
+    await page.getByTestId('domain-select-textbook.com').check();
+    await page.getByTestId('domain-select-cdn.school.kr').check();
+    await page.getByTestId('toolbar-bulk-delete-btn').click();
+    await expect(page.getByTestId('bulk-delete-dialog')).toBeVisible();
+    await page.getByTestId('bulk-delete-confirm').click();
+
+    // sonner warning 토스트에 "요청 2건 중 1건만 삭제" + 누락 host 가 포함되어야 한다
+    const toast = page.locator('[data-sonner-toast]').first();
+    await expect(toast).toBeVisible();
+    await expect(toast).toContainText('요청 2건 중 1건만 삭제');
+    await expect(toast).toContainText('cdn.school.kr');
+  });
+
+  test('전부 성공 시 기존 success 토스트 유지', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+
+    await page.route('**/api/domains/bulk', async (route) => {
+      if (route.request().method() === 'DELETE') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ deleted: 1, requested: 1, missing: [] }),
+        });
+      } else {
+        return route.fallback();
+      }
+    });
+
+    await page.goto('/domains');
+    await page.getByTestId('domain-select-textbook.com').check();
+    await page.getByTestId('toolbar-bulk-delete-btn').click();
+    await expect(page.getByTestId('bulk-delete-dialog')).toBeVisible();
+    await page.getByTestId('bulk-delete-confirm').click();
+
+    const toast = page.locator('[data-sonner-toast]').first();
+    await expect(toast).toBeVisible();
+    await expect(toast).toContainText('1건이 삭제되었습니다');
+  });
+});

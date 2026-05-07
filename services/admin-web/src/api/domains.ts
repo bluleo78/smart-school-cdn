@@ -70,9 +70,22 @@ export async function bulkAddDomains(
   return res.data;
 }
 
+/**
+ * 도메인 일괄 삭제 응답 (#212)
+ * - deleted: 실제 DB 에서 삭제된 행 수
+ * - requested: 요청에 포함된 호스트 개수(중복 포함 원본 길이)
+ * - missing: 요청에는 있었으나 DB 에 없어 삭제되지 못한 호스트 목록
+ *   → 부분 실패(다른 세션 선삭제/정규화 차이 등)를 분리 안내하는 데 사용한다.
+ */
+export interface BulkDeleteResult {
+  deleted: number;
+  requested: number;
+  missing: string[];
+}
+
 /** 도메인 일괄 삭제 */
-export async function bulkDeleteDomains(hosts: string[]): Promise<{ deleted: number }> {
-  const res = await axios.delete<{ deleted: number }>('/api/domains/bulk', { data: { hosts } });
+export async function bulkDeleteDomains(hosts: string[]): Promise<BulkDeleteResult> {
+  const res = await axios.delete<BulkDeleteResult>('/api/domains/bulk', { data: { hosts } });
   return res.data;
 }
 

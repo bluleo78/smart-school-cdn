@@ -989,10 +989,29 @@ describe('DELETE /api/domains/bulk', () => {
       payload: { hosts: ['a.test', 'b.test'] },
     });
     expect(res.statusCode).toBe(200);
-    expect(JSON.parse(res.body).deleted).toBe(2);
+    const body = JSON.parse(res.body);
+    expect(body.deleted).toBe(2);
+    expect(body.requested).toBe(2);
+    expect(body.missing).toEqual([]);
     expect(eventsRepo.query({ host: 'a.test' })).toHaveLength(0);
     expect(eventsRepo.query({ host: 'b.test' })).toHaveLength(0);
     expect(eventsRepo.query({ host: 'keep.test' })).toHaveLength(1);
+  });
+
+  // (#212) 부분 실패 — 요청 host 중 일부만 매칭되어 삭제된 경우 deleted/requested/missing이 정확히 분리되어야 한다.
+  it('부분 실패 시 deleted/requested/missing을 분리해 반환한다 (#212)', async () => {
+    const repo = makeRepo();
+    repo.upsert('exists.test', 'https://exists.test');
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'DELETE', url: '/api/domains/bulk',
+      payload: { hosts: ['exists.test', 'gone-aaa.test', 'gone-bbb.test'] },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.deleted).toBe(1);
+    expect(body.requested).toBe(3);
+    expect((body.missing as string[]).sort()).toEqual(['gone-aaa.test', 'gone-bbb.test']);
   });
 });
 

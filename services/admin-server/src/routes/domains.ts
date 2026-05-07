@@ -410,7 +410,9 @@ export async function domainRoutes(
       // host 정규화 (#201) — 같은 도메인의 대소문자 변형이 섞여 들어와도 일관되게 lowercase 키로 삭제.
       // 비문자열 항목이 섞이면 안전하게 그대로 두고 bulkDelete 가 미일치로 무시하게 둔다.
       const hosts = rawHosts.map((h) => (typeof h === 'string' ? normalizeHost(h) : h));
-      const deleted = domainRepo.bulkDelete(hosts);
+      // (#212) 부분 실패 분리 안내를 위해 bulkDelete 가 deleted + missing 을 함께 반환하도록 확장.
+      // missing 은 "요청에 포함되었으나 DB에 매칭되는 행이 없던 host" — 클라이언트에서 분리 토스트로 안내한다.
+      const { deleted, missing } = domainRepo.bulkDelete(hosts as string[]);
       const synced = await syncToProxy(domainRepo);
       if (!synced) {
         return reply.status(502).send({ error: 'Proxy 동기화 실패' });
@@ -422,7 +424,8 @@ export async function domainRoutes(
       // 호출해 도메인 복원 경로와의 일관성을 유지한다.
       const optEventsRepo = new OptimizationEventsRepository(domainRepo.database);
       optEventsRepo.deleteByHosts(hosts);
-      return reply.status(200).send({ deleted });
+      // requested 는 사용자가 보낸 호스트 수(중복 포함 원본 길이) — 토스트의 "요청 N건 중 M건"의 N에 해당.
+      return reply.status(200).send({ deleted, requested: rawHosts.length, missing });
     },
   );
 
