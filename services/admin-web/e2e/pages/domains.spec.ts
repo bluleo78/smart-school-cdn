@@ -331,16 +331,18 @@ test.describe('도메인 관리 — 요약 카드', () => {
     const summaryCards = page.getByTestId('domain-summary-cards');
     await expect(summaryCards).toBeVisible();
 
-    // 카드 2·3·4의 BarSparkline 막대 높이가 모두 12px 이상이어야 한다
+    // 카드 2·3·4의 BarSparkline 막대 높이가 모두 viewBox 단위 12 이상이어야 한다.
+    // #271 3차 수정으로 BarSparkline은 SVG viewBox 0 0 W 36 좌표계의 <rect>로 렌더된다.
+    // viewBox가 36 단위 고정이므로 rect.height(svg attr)로 직접 12 이상을 검증한다.
     const barHeights = await summaryCards.evaluate((el) => {
       const cards = el.querySelectorAll(
         '[data-testid="summary-card-requests"], [data-testid="summary-card-cache-hit"], [data-testid="summary-card-bandwidth"]',
       );
       const heights: number[] = [];
       cards.forEach((c) => {
-        // BarSparkline 내부 막대들 — w-[5px] 클래스로 식별
-        c.querySelectorAll('div.w-\\[5px\\]').forEach((bar) => {
-          heights.push(Math.round((bar as HTMLElement).getBoundingClientRect().height));
+        c.querySelectorAll('svg.h-9 rect').forEach((bar) => {
+          const h = parseFloat(bar.getAttribute('height') ?? '0');
+          heights.push(h);
         });
       });
       return heights;

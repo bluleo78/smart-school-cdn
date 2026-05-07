@@ -1,26 +1,47 @@
 /// 도메인 통계 공통 컴포넌트 — BarSparkline, DeltaBadge
 /// DomainSummaryCards, DomainOverviewTab에서 공유
 
-/** 바 스파크라인 — 높이 36px, 바 너비 5px
- *  - 데이터가 평탄/0이어도 차트 영역의 1/3 이상 차지하도록 baseline floor 적용 (#258)
- *    카드 2(요청)와 카드 3·4(히트율/대역폭)의 시각 무게가 데이터 크기와 무관하게
- *    비슷하게 보이도록, 정규화 분모는 max(observedMax, 1)로 두되 바 자체의 최소 높이를
- *    12px로 올린다 — 차트 영역 36px의 약 1/3.
+/** 바 스파크라인 — 높이 36px(h-9), 부모 폭에 자동 스케일 (반응형)
+ *  - 회귀 #271 3차: 카드 폭이 좁아지면 절대 117px(24바×5px+gap)이 카드 경계를 초과 → SVG viewBox 기반으로 전환.
+ *    부모가 좁아지면 bar 폭/gap도 같은 비율로 축소된다 (preserveAspectRatio="none"으로 X축만 자유 스케일,
+ *    Y축은 36px 고정 표현 위해 height fixed). flex 자식으로 들어갈 때 min-w-0이 효과를 발휘하도록
+ *    block + w-full로 둠.
+ *  - baseline floor 12px — 평탄/0 데이터에서도 차트 영역(36)의 1/3 이상 표시 (#258).
  */
 export function BarSparkline({ values }: { values: number[] }) {
   const max = Math.max(...values, 1);
-  // 순수 장식 요소 — 카드 텍스트가 실제 수치를 제공하므로 AT에서 숨긴다
+  const n = values.length;
+  // viewBox 좌표계 — bar 5 + gap 2 = 7 단위, 마지막 bar 뒤 gap 제외
+  const BAR = 5;
+  const GAP = 2;
+  const VB_W = n * BAR + Math.max(0, n - 1) * GAP;
+  const VB_H = 36;
   return (
-    <div className="flex items-end gap-0.5 h-9" aria-hidden="true">
-      {values.map((v, i) => (
-        <div
-          key={i}
-          className="w-[5px] rounded-sm bg-primary opacity-70"
-          // 최소 12px floor — 평탄 데이터가 4px로 죽어 보이지 않도록 (#258)
-          style={{ height: `${Math.max(12, (v / max) * 36)}px` }}
-        />
-      ))}
-    </div>
+    <svg
+      // 카드 폭이 좁아지면 X축만 자동 스케일 (Y축은 height로 36px 고정)
+      // min-w-0: flex 자식에서 컨테이너 폭 제약을 받도록
+      className="block w-full h-9 min-w-0"
+      viewBox={`0 0 ${VB_W} ${VB_H}`}
+      preserveAspectRatio="none"
+      aria-hidden="true"
+    >
+      {values.map((v, i) => {
+        // 최소 12px floor — 평탄 데이터가 4px로 죽어 보이지 않도록 (#258)
+        const h = Math.max(12, (v / max) * VB_H);
+        return (
+          <rect
+            key={i}
+            x={i * (BAR + GAP)}
+            y={VB_H - h}
+            width={BAR}
+            height={h}
+            rx={1}
+            className="fill-primary"
+            opacity={0.7}
+          />
+        );
+      })}
+    </svg>
   );
 }
 

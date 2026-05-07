@@ -747,50 +747,41 @@ test.describe('도메인 상세 — Overview 탭', () => {
 
   /**
    * 이슈 #271 회귀 방지 — DomainOverviewTab KPI 4-카드 BarSparkline overflow
-   * 수정 전: md:grid-cols-4(768px)부터 4-col 강제 → iPad portrait(810px)에서 카드 폭 ~178px,
-   *          BarSparkline(~117px)이 카드 우측 경계 밖으로 17~96px 비져나옴
-   * 회귀 1차(#271): lg:grid-cols-4(1024px)로는 iPad landscape(1180px)도 여전히 4-col에 걸려 overflow 재발.
-   *                 → xl:grid-cols-4(1280px)로 상향, iPad landscape 미만은 2-col 유지.
-   * 수정 후: xl:grid-cols-4(1280px) + 각 Card overflow-hidden
-   *          - iPad portrait(810)/landscape(1180) 모두 2-col 유지, 카드 폭 ~370px 이상
-   *          - 만약 폭이 부족해도 overflow-hidden으로 시각 침범 차단
+   * 수정 전: BarSparkline이 24바×5px+gap=117px 절대 폭 → 카드 폭이 좁아지면 경계 밖으로 비져나옴
+   * 회귀 1차(md→lg) / 2차(lg→xl): grid breakpoint만 조정 → BarSparkline 절대 폭 자체가 원인이라 재발
+   * 수정 후(3차): BarSparkline을 SVG viewBox + preserveAspectRatio="none"으로 전환하고
+   *               sparkline 슬롯에 flex-1 min-w-0 max-w-[120px] 적용 → 부모 폭에 자동 스케일.
+   *               grid breakpoint와 무관하게 4-카드 어떤 viewport에서도 overflow 0px.
    */
   test('Overview — KPI 4-카드 BarSparkline이 카드 경계를 침범하지 않는다 (회귀: #271)', async ({ page }) => {
     await setupDetailMocks(page);
-    // iPad portrait — 1차 재현 viewport
-    await page.setViewportSize({ width: 810, height: 1080 });
     await page.goto('/domains/textbook.com');
 
-    await expect(page.getByTestId('domain-stat-cards')).toBeVisible();
-
-    // 1) 그리드 클래스 — md/lg가 아닌 xl:grid-cols-4여야 한다 (회귀 1차 후)
-    const grid = page.getByTestId('domain-stat-cards');
-    const gridClass = await grid.getAttribute('class');
-    expect(gridClass).toContain('xl:grid-cols-4');
-    expect(gridClass).not.toMatch(/(^| )md:grid-cols-4( |$)/);
-    expect(gridClass).not.toMatch(/(^| )lg:grid-cols-4( |$)/);
-
-    // 2) 시각 검증 — 각 카드의 sparkline(.h-9)이 카드 right 경계를 초과하지 않는다 (portrait)
     const ids = ['stat-card-requests', 'stat-card-cache-hit', 'stat-card-bandwidth', 'stat-card-response-time'];
-    for (const id of ids) {
-      const card = page.getByTestId(id);
-      const cardBox = await card.boundingBox();
-      const sparkBox = await card.locator('.h-9').first().boundingBox();
-      expect(cardBox, `${id} card box (portrait)`).not.toBeNull();
-      expect(sparkBox, `${id} spark box (portrait)`).not.toBeNull();
-      expect(sparkBox!.x + sparkBox!.width).toBeLessThanOrEqual(cardBox!.x + cardBox!.width + 1);
-    }
+    // 회귀 viewport 매트릭스 — iPad portrait/landscape + 데스크탑 4-col 시작점/일반
+    const viewports: Array<{ w: number; h: number; label: string }> = [
+      { w: 810, h: 1080, label: 'iPad portrait' },
+      { w: 1180, h: 820, label: 'iPad landscape' },
+      { w: 1280, h: 900, label: 'desktop xl start' },
+      { w: 1440, h: 900, label: 'desktop wide' },
+    ];
 
-    // 3) iPad landscape(1180×820) — 회귀 1차에서 재발했던 viewport 추가 검증
-    await page.setViewportSize({ width: 1180, height: 820 });
-    await expect(page.getByTestId('domain-stat-cards')).toBeVisible();
-    for (const id of ids) {
-      const card = page.getByTestId(id);
-      const cardBox = await card.boundingBox();
-      const sparkBox = await card.locator('.h-9').first().boundingBox();
-      expect(cardBox, `${id} card box (landscape)`).not.toBeNull();
-      expect(sparkBox, `${id} spark box (landscape)`).not.toBeNull();
-      expect(sparkBox!.x + sparkBox!.width).toBeLessThanOrEqual(cardBox!.x + cardBox!.width + 1);
+    for (const vp of viewports) {
+      await page.setViewportSize({ width: vp.w, height: vp.h });
+      await expect(page.getByTestId('domain-stat-cards')).toBeVisible();
+      for (const id of ids) {
+        const card = page.getByTestId(id);
+        const cardBox = await card.boundingBox();
+        // BarSparkline은 SVG로 렌더되므로 svg.h-9 직접 선택
+        const sparkBox = await card.locator('svg.h-9').first().boundingBox();
+        expect(cardBox, `${id} card box (${vp.label})`).not.toBeNull();
+        expect(sparkBox, `${id} spark box (${vp.label})`).not.toBeNull();
+        // 카드 right 경계를 침범하지 않는다 (1px 부동소수점 허용)
+        expect(
+          sparkBox!.x + sparkBox!.width,
+          `${id} sparkline overflow at ${vp.label} (${vp.w}x${vp.h})`,
+        ).toBeLessThanOrEqual(cardBox!.x + cardBox!.width + 1);
+      }
     }
   });
 
@@ -1711,6 +1702,40 @@ test.describe('도메인 상세 — Logs 탭', () => {
 
     // 갱신 간격이 5분으로 유지되어야 한다 (초기값 30초로 리셋되면 버그)
     await expect(page.getByRole('combobox', { name: '자동 갱신 간격' })).toContainText('5분');
+  });
+
+  test('최적화 탭에도 트래픽 탭과 동일한 자동 갱신 토글/RefreshIntervalSelect가 노출된다 (회귀: #273)', async ({ page }) => {
+    // 버그: 최적화 탭 툴바엔 ↻ 버튼만 있고 자동 갱신 드롭다운/갱신 라벨이 누락 → 탭 간 일관성 깨짐
+    // 수정: DomainStatsTab 에 RefreshIntervalSelect 추가, opRefresh URL 키로 상태 영속화
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com?tab=optimizer');
+
+    // 최적화 탭 진입 — 자동 갱신 드롭다운(combobox)이 가시화돼야 한다
+    const optimizerTab = page.getByTestId('domain-optimization-tab');
+    await expect(optimizerTab).toBeVisible();
+    const optSelect = optimizerTab.getByTestId('refresh-interval-select');
+    await expect(optSelect).toBeVisible();
+    await expect(optSelect).toContainText('30초');
+
+    // 갱신 주기를 1분으로 변경
+    await optimizerTab.getByRole('combobox', { name: '자동 갱신 간격' }).click();
+    await page.getByRole('option', { name: '1분' }).click();
+    await expect(optimizerTab.getByRole('combobox', { name: '자동 갱신 간격' })).toContainText('1분');
+
+    // URL 쿼리에 opRefresh=60000 가 반영돼야 한다 (트래픽 탭의 tfRefresh 와 분리된 키)
+    await expect(page).toHaveURL(/opRefresh=60000/);
+
+    // 트래픽 탭으로 이동해도 트래픽 탭의 기본값(30초)은 영향을 받지 않아야 한다 (탭별 분리)
+    await page.getByRole('tab', { name: '트래픽' }).click();
+    await expect(
+      page.getByTestId('domain-traffic-tab').getByRole('combobox', { name: '자동 갱신 간격' }),
+    ).toContainText('30초');
+
+    // 최적화 탭으로 복귀 — 1분 설정이 유지돼야 한다 (탭 전환 후에도 URL 보존)
+    await page.getByRole('tab', { name: '최적화' }).click();
+    await expect(
+      page.getByTestId('domain-optimization-tab').getByRole('combobox', { name: '자동 갱신 간격' }),
+    ).toContainText('1분');
   });
 
   test('"에러만" 토글 — 4xx 에러가 목록에 표시된다 (회귀: #46)', async ({ page }) => {
