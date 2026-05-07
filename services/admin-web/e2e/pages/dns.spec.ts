@@ -90,6 +90,52 @@ test.describe('DNS 관리 페이지', () => {
     await expect(page.getByText('등록된 레코드가 없습니다.')).toBeVisible();
   });
 
+  /**
+   * 이슈 #209 회귀 방지 — RecordsTab 검색 입력 IME 조합 중 미완성 자모로 즉시 필터링되어 깜빡임 발생.
+   * 수정 전: onChange={e => setQ(e.target.value)} — 미완성 자모 `ㅎ`가 즉시 q에 반영되어 빈 결과 표시.
+   * 수정 후: composingRef + onCompositionStart/End 가드 — 조합 중에는 localInput만 갱신, q는 보류 (#189 패턴).
+   */
+  test('레코드 탭 — IME 조합 중 미완성 자모는 필터에 반영되지 않는다 (회귀: #209)', async ({ page }) => {
+    await mockApi(page, 'GET', '/dns/status', createDnsStatusOnline());
+    // host에 'ㅎ'를 포함하지 않는 레코드만 — 가드가 없으면 즉시 빈 상태로 전환됨
+    await mockApi(page, 'GET', '/dns/records', createDnsRecords([
+      { host: 'a.test', target: '10.0.0.1', rtype: 'A', source: 'override' },
+      { host: 'b.test', target: '10.0.0.2', rtype: 'A', source: 'override' },
+    ]));
+    await mockDnsQuery(page, '/dns/queries', createDnsQueriesMixed());
+    await mockDnsQuery(page, '/dns/metrics', createDnsMetrics());
+
+    await page.goto('/dns?tab=records');
+
+    const input = page.getByTestId('records-filter');
+    await expect(input).toBeVisible();
+
+    // IME compositionstart + composing input 시뮬레이션 — Playwright 키 입력으로는
+    // isComposing 트리거가 어려우므로 합성 이벤트로 대체 (domain-detail.spec #179 패턴 준용).
+    await input.evaluate((el) => {
+      const i = el as HTMLInputElement;
+      i.focus();
+      i.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(i, 'ㅎ');
+      const ev = new InputEvent('input', { bubbles: true, data: 'ㅎ' });
+      Object.defineProperty(ev, 'isComposing', { value: true });
+      i.dispatchEvent(ev);
+    });
+
+    // 조합 중에는 q에 반영되지 않으므로 레코드 목록은 그대로 유지되고 빈 상태가 노출되지 않아야 한다
+    await expect(page.getByText('"ㅎ"에 일치하는 레코드가 없습니다.')).not.toBeVisible();
+    await expect(page.getByText('a.test')).toBeVisible();
+    await expect(page.getByText('b.test')).toBeVisible();
+
+    // 조합 종료 시 최종 값이 q에 한 번에 반영되어 빈 상태로 전환되어야 한다 (양방향 보장)
+    await input.evaluate((el) => {
+      const i = el as HTMLInputElement;
+      i.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: 'ㅎ' }));
+    });
+    await expect(page.getByText('"ㅎ"에 일치하는 레코드가 없습니다.')).toBeVisible();
+  });
+
   test('통계 탭 — 24시간 버튼 클릭 시 /api/dns/metrics?range=24h 요청이 발생한다', async ({ page }) => {
     await mockDnsDefaults(page);
     await page.goto('/dns');

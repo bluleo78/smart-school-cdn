@@ -1,7 +1,7 @@
 /** DNS 관리 페이지 — 디자인 시스템 일관성 리파인
  *  페이지 헤더 + 상태 스트립 + 3개 탭(레코드/통계/최근 쿼리).
  *  SystemPage / DashboardPage / DomainsPage 와 동일한 shadcn/ui · 시맨틱 토큰 패턴을 따른다. */
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { AlertTriangle, BarChart2 } from 'lucide-react';
 import {
@@ -190,7 +190,51 @@ function StripStat({ label, value }: { label: string; value: string }) {
 /** 레코드 탭 — 호스트 검색 필터 + A 레코드 테이블 */
 function RecordsTab() {
   const { data: records, isLoading, error } = useDnsRecords();
+  // q: 실제 필터에 반영되는 값(완성 자모 기준).
+  // localInput: IME 조합 중 input에 표시할 미완성 값(필터 트리거 X).
+  // 조합 중에는 localInput만 갱신하고, compositionend에서 한 번에 q에 반영해 깜빡임을 막는다 (#209, #189 패턴).
   const [q, setQ] = useState('');
+  const [localInput, setLocalInput] = useState<string | null>(null);
+
+  // IME 조합 중 여부를 동기적으로 추적 — onChange 시점의 e.nativeEvent.isComposing이
+  // compositionend 직후 false로 보일 수 있는 React 합성 이벤트 처리 순서 문제를 우회한다 (DomainToolbar 동일).
+  const composingRef = useRef(false);
+
+  // 표시값: 조합 중이면 localInput, 그 외엔 q.
+  const searchValue = localInput ?? q;
+
+  // 미완성 자모(예: `ㅎ`, `갂`)가 클라이언트 필터에 즉시 반영되는 것을 막는다.
+  // 조합 중에는 표시값만 갱신하고 q(=필터 트리거)는 보류한다 (#209).
+  const handleSearchChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const value = e.target.value;
+      setLocalInput(value);
+      // 표준 가드: ref(가장 신뢰) || isComposing(모던) || keyCode 229(레거시).
+      const ne = e.nativeEvent as InputEvent & { keyCode?: number };
+      if (composingRef.current || ne.isComposing || ne.keyCode === 229) {
+        return; // 조합 중 — 필터 보류
+      }
+      setQ(value);
+      setLocalInput(null);
+    },
+    [],
+  );
+
+  // IME 조합 시작 — 진행 중 input 이벤트는 필터 트리거 안 함
+  const handleCompositionStart = useCallback(() => {
+    composingRef.current = true;
+  }, []);
+
+  // IME 조합 종료 — 최종 값을 한 번만 q에 반영해 정확히 1회 필터링
+  const handleCompositionEnd = useCallback(
+    (e: React.CompositionEvent<HTMLInputElement>) => {
+      composingRef.current = false;
+      const value = e.currentTarget.value;
+      setQ(value);
+      setLocalInput(null);
+    },
+    [],
+  );
 
   const filtered = useMemo(
     () => (records ?? []).filter(r => r.host.toLowerCase().includes(q.toLowerCase())),
@@ -209,8 +253,10 @@ function RecordsTab() {
         <CardTitle className="whitespace-nowrap">DNS 레코드 ({filtered.length})</CardTitle>
         <Input
           placeholder="호스트 검색…"
-          value={q}
-          onChange={e => setQ(e.target.value)}
+          value={searchValue}
+          onChange={handleSearchChange}
+          onCompositionStart={handleCompositionStart}
+          onCompositionEnd={handleCompositionEnd}
           className="max-w-xs"
           data-testid="records-filter"
         />
