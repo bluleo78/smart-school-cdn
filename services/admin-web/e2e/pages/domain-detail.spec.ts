@@ -997,6 +997,37 @@ test.describe('도메인 상세 — 통계 탭', () => {
     await expect(page.getByTestId('cache-series-degrade-notice')).toHaveCount(0);
   });
 
+  test('커스텀 기간 선택 시 텍스트 압축/URL 최적화 24h 폴백 안내가 노출된다 (회귀: #226)', async ({ page }) => {
+    // '커스텀' 기간은 stats API 미지원 → 텍스트 압축/URL 최적화가 silent하게 24h로 폴백되던 버그.
+    // 수정 후: (1) 상단 통합 안내 배너에 "커스텀 범위는 미지원" 문구 + 4개 섹션 명시,
+    //          (2) URL별 최적화 카드 부제도 "커스텀 범위 미지원 — 최근 24시간..."으로 동적 변경.
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '최적화' }).click();
+
+    // 24h(기본) → 안내 배너 없음, URL 카드 부제는 기본 문구
+    await expect(page.getByTestId('cache-series-degrade-notice')).toHaveCount(0);
+    await expect(page.getByTestId('url-opt-subtitle')).toHaveText(/^선택 기간의/);
+
+    // 30d → 안내 배너만 표시 (커스텀 폴백 문구는 아님), URL 카드 부제는 기본 유지
+    await page.getByTestId('period-30d').click();
+    const notice30 = page.getByTestId('cache-series-degrade-notice');
+    await expect(notice30).toBeVisible();
+    await expect(notice30).toContainText('텍스트 압축');
+    await expect(notice30).toContainText('URL별 최적화 내역');
+    await expect(notice30).not.toContainText('커스텀 범위는 미지원');
+    await expect(page.getByTestId('url-opt-subtitle')).toHaveText(/^선택 기간의/);
+
+    // 커스텀 → 폴백 명시 안내 배너 + URL 카드 부제도 "커스텀 범위 미지원" 문구로 전환
+    await page.getByTestId('period-custom').click();
+    const noticeCustom = page.getByTestId('cache-series-degrade-notice');
+    await expect(noticeCustom).toBeVisible();
+    await expect(noticeCustom).toContainText('커스텀 범위는 미지원');
+    await expect(noticeCustom).toContainText('텍스트 압축');
+    await expect(noticeCustom).toContainText('URL별 최적화 내역');
+    await expect(page.getByTestId('url-opt-subtitle')).toHaveText(/커스텀 범위 미지원 — 최근 24시간/);
+  });
+
   test('최적화 탭에 텍스트 압축 통계와 URL별 내역 표가 보인다', async ({ page }) => {
     await setupDetailMocks(page);
     await page.goto('/domains/textbook.com');

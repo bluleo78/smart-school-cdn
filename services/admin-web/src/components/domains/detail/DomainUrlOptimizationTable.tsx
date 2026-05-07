@@ -42,7 +42,21 @@ type Decision =
 
 const PAGE = 50;
 
-export function DomainUrlOptimizationTable({ host, period = '24h' }: { host: string; period?: Period }) {
+/**
+ * URL별 최적화 내역 표.
+ *
+ * @param isCustomFallback PeriodSelector에서 'custom'을 선택해 24h로 폴백된 상태인지 (#226).
+ *   true이면 카드 부제에 "선택 기간"이 아닌 "최근 24시간"임을 명시한다.
+ */
+export function DomainUrlOptimizationTable({
+  host,
+  period = '24h',
+  isCustomFallback = false,
+}: {
+  host: string;
+  period?: Period;
+  isCustomFallback?: boolean;
+}) {
   const [q, setQ] = useState('');
   const [sort, setSort] = useState<Sort>('savings');
   const [decision, setDecision] = useState<Decision>('all');
@@ -72,8 +86,13 @@ export function DomainUrlOptimizationTable({ host, period = '24h' }: { host: str
     <Card data-testid="url-optimization-table">
       <CardHeader>
         <CardTitle className="text-base font-semibold">URL별 최적화 내역</CardTitle>
-        {/* 사용자 친화적 문구 — 내부 DB 테이블명 대신 의미 전달 (#120) */}
-        <p className="text-sm text-muted-foreground">선택 기간의 이미지 최적화 이벤트를 URL별로 집계합니다</p>
+        {/* 사용자 친화적 문구 — 내부 DB 테이블명 대신 의미 전달 (#120).
+            'custom' 폴백 상태에서는 사용자가 입력한 커스텀 범위가 반영되지 않음을 부제로 명시 (#226). */}
+        <p className="text-sm text-muted-foreground" data-testid="url-opt-subtitle">
+          {isCustomFallback
+            ? '커스텀 범위 미지원 — 최근 24시간의 이미지 최적화 이벤트를 URL별로 집계합니다'
+            : '선택 기간의 이미지 최적화 이벤트를 URL별로 집계합니다'}
+        </p>
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">

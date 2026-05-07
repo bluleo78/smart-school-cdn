@@ -43,6 +43,13 @@ export function DomainStatsTab({ host, period, onPeriodChange }: Props) {
     qc.invalidateQueries({ queryKey: ['domain', host] });
   }
 
+  // 'custom' 기간은 stats API 미지원 → 텍스트 압축/URL별 최적화도 24h로 silent fallback 되었음 (#226).
+  // 어느 섹션이든 24h로 폴백되는 상태이면 상단에 한 번에 안내한다.
+  const degraded = isSeriesDegraded(period);
+  const isCustom = period.period === 'custom';
+  // 텍스트 압축/URL 최적화 섹션에 실제로 전달되는 표시 기간 (custom은 24h로 폴백).
+  const effectiveStatsPeriod: '1h' | '24h' | '7d' | '30d' = isCustom ? '24h' : period.period;
+
   return (
     <div className="space-y-6" data-testid="domain-optimization-tab">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -50,27 +57,34 @@ export function DomainStatsTab({ host, period, onPeriodChange }: Props) {
         <ManualRefreshButton onClick={handleRefresh} isRefreshing={isFetching} />
       </div>
 
+      {/* 7d/30d/custom 선택 시 stats/시계열 API가 24h 해상도만 지원함을 통합 안내 (#51, #226).
+          기존엔 캐시 섹션 안에만 안내가 있어 텍스트 압축/URL 최적화 폴백 사실이 누락됐음. */}
+      {degraded && (
+        <div
+          className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-700 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-300"
+          data-testid="cache-series-degrade-notice"
+        >
+          <Info size={14} className="mt-0.5 shrink-0" />
+          <span>
+            {isCustom
+              ? '커스텀 범위는 미지원 — 시계열 차트, 캐시 카드, 텍스트 압축, URL별 최적화 내역은 24시간 데이터로 표시됩니다.'
+              : '시계열 차트, 캐시 카드, 텍스트 압축, URL별 최적화 내역은 24시간 해상도로 표시됩니다.'}
+          </span>
+        </div>
+      )}
+
       {/* 캐시 섹션 */}
       <Card data-testid="stats-cache-section">
         <CardHeader><CardTitle className="text-base font-semibold">캐시</CardTitle></CardHeader>
         <CardContent className="space-y-4">
-          {/* 7d/30d/custom 선택 시 시계열 API가 24h 해상도만 지원함을 안내 (#51) */}
-          {isSeriesDegraded(period) && (
-            <div
-              className="flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-700 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-300"
-              data-testid="cache-series-degrade-notice"
-            >
-              <Info size={14} className="shrink-0" />
-              <span>시계열 차트와 캐시 카드는 24시간 해상도로 표시됩니다.</span>
-            </div>
-          )}
           <DomainCacheCards host={host} range={toSeriesRange(period)} />
           <DomainStackedChart host={host} range={toSeriesRange(period)} />
         </CardContent>
       </Card>
 
-      {/* 텍스트 압축 섹션 (Phase 16-3) — period를 전달하여 PeriodSelector 연동 (#53 수정) */}
-      <DomainTextCompressStats host={host} period={period.period === 'custom' ? '24h' : period.period} />
+      {/* 텍스트 압축 섹션 (Phase 16-3) — period를 전달하여 PeriodSelector 연동 (#53 수정).
+          'custom'은 24h로 폴백되며, 폴백 사실은 상단 통합 안내 배너로 노출 (#226). */}
+      <DomainTextCompressStats host={host} period={effectiveStatsPeriod} />
 
       {/* 최적화 섹션 */}
       <Card data-testid="stats-optimization-section">
@@ -83,10 +97,12 @@ export function DomainStatsTab({ host, period, onPeriodChange }: Props) {
         </CardContent>
       </Card>
 
-      {/* URL별 최적화 내역 (Phase 16-3) — period 'custom'은 24h 로 fallback */}
+      {/* URL별 최적화 내역 (Phase 16-3) — period 'custom'은 24h로 fallback (#226 안내 배너 참조).
+          isCustomFallback 플래그로 카드 부제에 폴백 명시. */}
       <DomainUrlOptimizationTable
         host={host}
-        period={period.period === 'custom' ? '24h' : period.period}
+        period={effectiveStatsPeriod}
+        isCustomFallback={isCustom}
       />
     </div>
   );
