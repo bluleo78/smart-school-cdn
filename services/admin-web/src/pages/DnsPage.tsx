@@ -35,7 +35,7 @@ import {
   useDnsMetrics,
 } from '../hooks/useDns';
 import type { DnsQueryResultLabel, DnsMetricRange } from '../api/dns';
-import { formatUptime } from '../lib/format';
+import { formatUptime, formatTime } from '../lib/format';
 
 /** 결과 라벨 → Badge variant 매핑 */
 const RESULT_VARIANT: Record<DnsQueryResultLabel, 'success' | 'outline' | 'destructive'> = {
@@ -571,7 +571,8 @@ function QueriesTab() {
               {visible.map((e, i) => (
                 <TableRow key={`${e.ts_unix_ms}-${i}`} className="hover:bg-muted/50">
                   <TableCell className="font-mono text-xs text-muted-foreground">
-                    {new Date(e.ts_unix_ms).toLocaleTimeString()}
+                    {/* #223: 인자 없는 toLocaleTimeString()은 12시간제(오전/오후)로 폴백 — 앱 전체 24시간 정책 통일 */}
+                    {formatTime(e.ts_unix_ms)}
                   </TableCell>
                   <TableCell className="font-mono text-xs">{e.client_ip}</TableCell>
                   <TableCell className="font-mono truncate max-w-[280px]">{e.qname}</TableCell>

@@ -263,6 +263,37 @@ test.describe('DNS 관리 페이지', () => {
     await expect(page.getByText('b.test')).toBeVisible();
   });
 
+  // 회귀 테스트: #223 — QueriesTab '시각' 컬럼이 12시간(오전/오후) 포맷으로 표시되어 다른 페이지와 불일치
+  test('최근 쿼리 시각 컬럼은 24시간 ko-KR 포맷이며 오전/오후 표기를 포함하지 않는다 (#223)', async ({ page }) => {
+    // 고정 시각(13:05:07 = 오후 1:05:07)으로 모킹해 12시간/24시간 분기를 명확히 검증한다.
+    const fixed = new Date('2026-01-01T13:05:07+09:00').getTime();
+    await mockApi(page, 'GET', '/dns/status', createDnsStatusOnline());
+    await mockApi(page, 'GET', '/dns/records', createDnsRecords());
+    await mockDnsQuery(page, '/dns/queries', {
+      entries: [
+        {
+          ts_unix_ms: fixed,
+          client_ip: '10.0.0.1',
+          qname: 'a.test',
+          qtype: 'A',
+          result: 'matched',
+          latency_us: 1234,
+        },
+      ],
+    });
+    await mockDnsQuery(page, '/dns/metrics', createDnsMetrics());
+
+    await page.goto('/dns?tab=queries');
+
+    // 첫 번째 데이터 행의 '시각' 셀(첫 번째 td) — 24시간 포맷 '13시 5분 7초' 류여야 한다
+    const firstTimeCell = page.locator('table tbody tr').first().locator('td').first();
+    const timeText = (await firstTimeCell.textContent()) ?? '';
+    // 12시간제 표식이 없어야 한다 (#223 회귀 방지)
+    expect(timeText).not.toMatch(/오전|오후|AM|PM/);
+    // 24시간제 13시(=오후 1시)가 포함되어야 한다
+    expect(timeText).toMatch(/13/);
+  });
+
   // 회귀 테스트: #47 — 필터 토글 버튼에 aria-pressed ARIA 상태 속성 누락
   test('최근 쿼리 필터 버튼에 aria-pressed 속성이 올바르게 반영된다 (#47)', async ({ page }) => {
     await mockDnsDefaults(page);

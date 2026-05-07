@@ -36,3 +36,12 @@ export function formatDateTime(value: string | number): string {
   // hour12: false — 앱 전체 24시간제 표기 정책(로그 뷰어, 도메인 로그, 대시보드)과 통일
   return new Date(value).toLocaleString('ko-KR', { hour12: false });
 }
+
+/**
+ * 날짜 문자열·타임스탬프를 ko-KR 24시간제 시간 포맷(HH시 MM분 SS초)으로 변환한다
+ * - LogViewer.formatTime과 동일 시그니처(toLocaleTimeString('ko-KR', { hour12: false }))로 통일 (#223)
+ * - 인자 없는 toLocaleTimeString() 호출 시 브라우저 기본 로케일/12시간제로 폴백되는 문제 방지
+ */
+export function formatTime(value: string | number): string {
+  return new Date(value).toLocaleTimeString('ko-KR', { hour12: false });
+}
