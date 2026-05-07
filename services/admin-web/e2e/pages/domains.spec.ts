@@ -1205,6 +1205,47 @@ test.describe('도메인 관리 — 검색 클리어 버튼 (#213)', () => {
 });
 
 /**
+ * 이슈 #243 회귀 방지 — 검색 입력 trim 누락
+ * 공백만 입력하거나 양 끝 공백이 포함된 검색어가 그대로 URL `?q=` 와 API에 실리면
+ * 정상 도메인이 0건으로 보이는 거짓 빈 상태가 발생한다. 입력값을 trim하여
+ * 빈 문자열은 undefined로 흘리고, 양 끝 공백은 잘라낸 값만 전달해야 한다.
+ */
+test.describe('도메인 관리 — 검색 입력 trim 정규화 (#243)', () => {
+  test('공백만 입력하면 URL ?q= 가 추가되지 않고 결과가 유지된다', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+
+    await page.goto('/domains');
+    await expect(page.getByTestId('domains-table')).toBeVisible();
+
+    // 공백 3개 입력 — debounce 300ms 후 처리
+    await page.getByTestId('domain-search').fill('   ');
+    await page.waitForTimeout(400);
+
+    // URL에 ?q= 가 들어가면 안 된다 (#243 핵심)
+    expect(page.url()).not.toContain('q=');
+    // 도메인 목록은 그대로 표시되어야 한다 (거짓 빈 상태 발생 X)
+    await expect(page.getByTestId('domains-table')).toBeVisible();
+  });
+
+  test('양 끝 공백이 포함된 검색어는 trim된 값으로 URL에 반영된다', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+    await mockApi(page, 'GET', '/domains?q=textbook', createDomains());
+
+    await page.goto('/domains');
+
+    // 양 끝 공백 포함 입력
+    await page.getByTestId('domain-search').fill('  textbook  ');
+    await page.waitForTimeout(400);
+
+    // URL에는 trim된 값만 반영되어야 한다 — `q=textbook+++` 같은 형태가 되면 안 됨
+    expect(page.url()).toContain('q=textbook');
+    expect(page.url()).not.toMatch(/q=[^&]*\+/);
+  });
+});
+
+/**
  * 이슈 #70 회귀 방지 — 토글/퍼지 버튼 뮤테이션 진행 중 disabled 미처리
  * toggleMutation 또는 purgeMutation이 isPending 상태일 때,
  * 토글/퍼지 버튼이 disabled 처리되어 중복 클릭이 불가능해야 한다.

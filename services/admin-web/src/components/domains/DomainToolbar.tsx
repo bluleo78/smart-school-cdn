@@ -65,7 +65,10 @@ export function DomainToolbar({
       }
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
-        onFilterChange({ ...filter, q: value || undefined });
+        // 공백만 입력했거나 양 끝 공백이 포함된 경우 trim하여 정규화 — `?q=+++`로
+        // 거짓 빈 결과가 표시되는 현상 방지(#243). 빈 문자열은 undefined로 전달.
+        const trimmed = value.trim();
+        onFilterChange({ ...filter, q: trimmed || undefined });
         setLocalInput(null); // debounce 완료 → 부모 filter에 위임
       }, 300);
     },
@@ -87,7 +90,9 @@ export function DomainToolbar({
       setLocalInput(value);
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
-        onFilterChange({ ...filter, q: value || undefined });
+        // 조합 종료 후에도 양 끝 공백/공백만 입력 케이스를 정규화 — debounce 콜백과 동일(#243).
+        const trimmed = value.trim();
+        onFilterChange({ ...filter, q: trimmed || undefined });
         setLocalInput(null);
       }, 300);
     },
