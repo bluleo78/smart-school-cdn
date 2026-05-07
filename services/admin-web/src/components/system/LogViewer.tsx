@@ -85,12 +85,23 @@ export function LogViewer() {
     }
   }, [filteredLines.length, autoScroll]);
 
-  /** 스크롤 이벤트 핸들러 — 사용자가 위로 스크롤하면 자동 비활성화, 맨 아래 도달 시 재활성화 */
+  /**
+   * 스크롤 이벤트 핸들러 — 사용자가 위로 스크롤하면 자동 비활성화 (단방향).
+   *
+   * #235: 사용자가 OFF한 뒤 레벨 필터로 보이는 줄 수가 줄어들면 컨테이너 scrollHeight가 작아지며
+   * 브라우저가 scrollTop을 자동 클램프(예: 500 → 0)한다. 이 클램프 시점의 atBottom 판정으로 인해
+   * 사용자의 명시적 OFF 의도가 사라지는 문제를 방지한다.
+   *
+   * 해결: scroll 이벤트는 "맨 아래에서 멀어지면 OFF로 전환"하는 단방향만 수행한다. OFF→ON 복귀는
+   * 사용자가 자동 스크롤 토글 버튼을 명시적으로 누른 경우에만 일어난다 (onClick 핸들러).
+   */
   const handleScroll = useCallback(() => {
     if (!scrollRef.current) return;
     const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
     const atBottom = scrollHeight - scrollTop - clientHeight < 30;
-    setAutoScroll(atBottom);
+    if (!atBottom) {
+      setAutoScroll(false);
+    }
   }, []);
 
   return (

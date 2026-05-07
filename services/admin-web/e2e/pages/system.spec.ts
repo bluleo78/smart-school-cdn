@@ -667,4 +667,50 @@ test.describe('LogViewer', () => {
     await expect(page.getByTestId('log-empty')).not.toHaveText('로그를 수신 중입니다...');
     await expect(page.getByTestId('log-empty')).not.toHaveText('연결 대기 중...');
   });
+
+  test('OFF 상태에서 레벨 필터로 줄 수가 줄어도 자동 스크롤이 다시 켜지지 않는다 — 회귀 방지 #235', async ({ page }) => {
+    // #235: 사용자가 명시적으로 자동 스크롤 OFF한 뒤, 레벨 필터로 보이는 줄 수가 줄어 컨테이너
+    // scrollHeight가 작아지면 브라우저가 scrollTop을 자동 클램프하면서 scroll 이벤트가 발생하고
+    // atBottom 판정 결과 autoScroll이 다시 ON으로 자동 복귀하던 버그를 방지한다.
+    // 충분한 줄 수의 INFO 로그(>스크롤 영역 높이)와 ERROR 0건을 제공해 필터 적용 시 0건이 되도록 한다.
+    const manyInfo = Array.from({ length: 60 }, (_, i) =>
+      `data: ${JSON.stringify({
+        timestamp: new Date().toISOString(),
+        level: 'INFO',
+        message: `INFO 로그 ${i} — 자동 스크롤 의도 보존 회귀`,
+        service: 'proxy',
+      })}\n\n`,
+    ).join('');
+
+    await page.route('**/api/logs/**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        headers: { 'Cache-Control': 'no-cache' },
+        body: manyInfo,
+      });
+    });
+    await page.goto('/system');
+
+    // 마지막 줄까지 렌더링되어 scrollHeight > clientHeight 보장
+    await page.waitForFunction(() =>
+      document.querySelector('[data-testid="log-scroll-area"]')?.textContent?.includes('INFO 로그 59'),
+    );
+
+    // 사용자가 위로 스크롤 — autoScroll OFF로 전환되어야 한다
+    await page.getByTestId('log-scroll-area').evaluate((el) => {
+      (el as HTMLElement).scrollTop = 100;
+      el.dispatchEvent(new Event('scroll', { bubbles: true }));
+    });
+    const btn = page.getByTestId('log-autoscroll-btn');
+    await expect(btn).toHaveAttribute('aria-pressed', 'false');
+
+    // 레벨 필터를 ERROR로 변경 — INFO만 있으므로 filteredLines=0, scrollHeight 축소
+    await page.getByTestId('log-level-select').click();
+    await page.getByRole('option', { name: 'ERROR' }).click();
+
+    // 핵심 검증: 사용자가 끈 자동 스크롤이 ON으로 자동 복귀하면 안 된다
+    await expect(btn).toHaveAttribute('aria-pressed', 'false');
+    await expect(btn).toHaveText('자동 스크롤 OFF');
+  });
 });
