@@ -252,7 +252,9 @@ function OriginSection({ domain }: { domain: Domain }) {
  * 수동 갱신 버튼은 useTlsRenew 훅으로 활성화 — DomainQuickActions와 동일 기능 (#102)
  */
 function TlsSection({ host }: { host: string }) {
-  const { data: cert } = useDomainTls(host);
+  // isError를 함께 destructure — 인증서 조회 실패 시 '미발급' 거짓 표시 대신
+  // 명시적 에러 메시지를 노출하고, 미확정 상태에서 '수동 갱신' 트리거를 막는다 (#247)
+  const { data: cert, isError } = useDomainTls(host);
   /** TLS 수동 갱신 뮤테이션 — 갱신 중 버튼 비활성화로 중복 요청 방지 */
   const tlsRenewMutation = useTlsRenew();
 
@@ -264,11 +266,12 @@ function TlsSection({ host }: { host: string }) {
     <Card>
       <CardHeader className="flex flex-row items-center justify-between pb-2">
         <CardTitle className="text-sm">TLS / 인증서</CardTitle>
-        {/* 수동 갱신 — useTlsRenew 훅으로 활성화, 갱신 진행 중에만 disabled (#102) */}
+        {/* 수동 갱신 — useTlsRenew 훅으로 활성화, 갱신 진행 중에만 disabled (#102)
+            인증서 조회 실패(isError) 시에도 비활성화 — 미확정 상태에서 잘못된 갱신 트리거 방지 (#247) */}
         <Button
           variant="outline"
           size="xs"
-          disabled={tlsRenewMutation.isPending}
+          disabled={tlsRenewMutation.isPending || isError}
           onClick={() => tlsRenewMutation.mutate(host)}
           data-testid="tls-renew-settings"
         >
@@ -276,14 +279,21 @@ function TlsSection({ host }: { host: string }) {
         </Button>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
-          <TlsRow label="상태">
-            <TlsStatusBadge expiresAt={cert?.expires_at} />
-          </TlsRow>
-          <TlsRow label="발급자">자동 발급</TlsRow>
-          <TlsRow label="만료일">{toKoDate(cert?.expires_at)}</TlsRow>
-          <TlsRow label="마지막 갱신">{toKoDate(cert?.issued_at)}</TlsRow>
-        </div>
+        {/* API 호출 실패 시 — '미발급' 거짓 표시 대신 명시적 에러 메시지 노출 (#247, #154 패턴) */}
+        {isError ? (
+          <p className="text-sm text-destructive" data-testid="tls-section-error">
+            인증서 정보를 불러올 수 없습니다
+          </p>
+        ) : (
+          <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
+            <TlsRow label="상태">
+              <TlsStatusBadge expiresAt={cert?.expires_at} />
+            </TlsRow>
+            <TlsRow label="발급자">자동 발급</TlsRow>
+            <TlsRow label="만료일">{toKoDate(cert?.expires_at)}</TlsRow>
+            <TlsRow label="마지막 갱신">{toKoDate(cert?.issued_at)}</TlsRow>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

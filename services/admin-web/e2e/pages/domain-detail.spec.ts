@@ -3276,3 +3276,43 @@ test.describe('도메인 상세 — 설정 탭 와일드카드 URL 퍼지 (#234)
     expect(purgeCallCount).toBe(0);
   });
 });
+
+// ─── TLS 인증서 조회 실패 (#247 회귀) ────────────────────────────────
+test.describe('도메인 상세 — TLS 인증서 조회 실패 시 에러 분기 (#247)', () => {
+  /**
+   * DomainInfoCards / TlsSection — /api/tls/certificates 500 시 '미발급' 거짓 표시 대신 에러 메시지
+   * 수정 전: isError 처리 없어 cert=undefined → TlsStatusBadge가 '미발급' 배지 + 만료일 '—' 표시
+   * 수정 후: isError=true → "인증서 정보를 불러올 수 없습니다" 메시지, '미발급' 배지/만료일 행 숨김
+   */
+  test('Overview 탭 — DomainInfoCards가 TLS 조회 실패 시 에러 메시지를 표시한다', async ({ page }) => {
+    await setupDetailMocks(page);
+    // tls/certificates만 500으로 덮어쓰기 — 다른 mock은 정상 응답 유지
+    await page.route('**/api/tls/certificates', (route) =>
+      route.fulfill({ status: 500, json: { error: 'Internal Server Error' } }),
+    );
+
+    await page.goto('/domains/textbook.com');
+
+    // TLS 상태 카드 헤딩은 그대로 보이지만 본문은 에러 메시지로 대체된다
+    await expect(page.getByRole('heading', { name: 'TLS 상태' })).toBeVisible();
+    await expect(page.getByTestId('domain-tls-info-error')).toBeVisible();
+    await expect(page.getByTestId('domain-tls-info-error')).toContainText('인증서 정보를 불러올 수 없습니다');
+    // '미발급' 배지나 만료일 '—' 행이 더 이상 표시되지 않는다 (거짓 표시 회귀 방지)
+    await expect(page.getByText('미발급', { exact: true })).toHaveCount(0);
+  });
+
+  test('Settings 탭 — TlsSection이 TLS 조회 실패 시 에러 메시지 + 갱신 버튼 비활성화', async ({ page }) => {
+    await setupDetailMocks(page);
+    await page.route('**/api/tls/certificates', (route) =>
+      route.fulfill({ status: 500, json: { error: 'Internal Server Error' } }),
+    );
+
+    await page.goto('/domains/textbook.com?tab=settings');
+
+    // 'TLS / 인증서' 카드 본문이 에러 메시지로 대체된다
+    await expect(page.getByTestId('tls-section-error')).toBeVisible();
+    await expect(page.getByTestId('tls-section-error')).toContainText('인증서 정보를 불러올 수 없습니다');
+    // 미확정 상태에서 잘못된 갱신 트리거를 막기 위해 [수동 갱신] 버튼은 비활성화되어야 한다
+    await expect(page.getByTestId('tls-renew-settings')).toBeDisabled();
+  });
+});

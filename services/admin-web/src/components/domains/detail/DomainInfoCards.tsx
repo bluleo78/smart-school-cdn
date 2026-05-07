@@ -19,7 +19,9 @@ function InfoRow({ label, children }: { label: string; children: React.ReactNode
 }
 
 export function DomainInfoCards({ domain }: Props) {
-  const { data: cert } = useDomainTls(domain.host);
+  // isError를 함께 destructure하여 인증서 조회 실패 시 '미발급' 거짓 표시 대신
+  // 명시적 에러 메시지를 노출한다 — null(정상 미발급)과 undefined(에러)를 구분 (#247)
+  const { data: cert, isError } = useDomainTls(domain.host);
 
   /** 타임스탬프(초) → 한국어 날짜 문자열 */
   const toKoDate = (ts: number) =>
@@ -49,13 +51,22 @@ export function DomainInfoCards({ domain }: Props) {
           <CardTitle>TLS 상태</CardTitle>
         </CardHeader>
         <CardContent>
-          {/* TlsStatusBadge로 통일 — raw ● + text-* span 제거 (#73) */}
-          <InfoRow label="TLS 상태">
-            <TlsStatusBadge expiresAt={cert?.expires_at} />
-          </InfoRow>
-          <InfoRow label="TLS 만료일">
-            {cert ? new Date(cert.expires_at).toLocaleDateString('ko-KR') : '—'}
-          </InfoRow>
+          {/* API 호출 실패 시 — '미발급' 거짓 표시 대신 명시적 에러 메시지 노출 (#247, #154 패턴) */}
+          {isError ? (
+            <p className="text-sm text-destructive" data-testid="domain-tls-info-error">
+              인증서 정보를 불러올 수 없습니다
+            </p>
+          ) : (
+            <>
+              {/* TlsStatusBadge로 통일 — raw ● + text-* span 제거 (#73) */}
+              <InfoRow label="TLS 상태">
+                <TlsStatusBadge expiresAt={cert?.expires_at} />
+              </InfoRow>
+              <InfoRow label="TLS 만료일">
+                {cert ? new Date(cert.expires_at).toLocaleDateString('ko-KR') : '—'}
+              </InfoRow>
+            </>
+          )}
         </CardContent>
       </Card>
     </div>
