@@ -30,7 +30,7 @@ function SummaryCards({ host }: { host: string }) {
     // 4-카드 그리드 — sm(640px)부터 2-col, md(768px)부터 4-col.
     // BarSparkline은 SVG viewBox 기반으로 부모 폭에 자동 스케일하므로 어떤 카드 폭에서도 overflow 없음 (#271 3차).
     return (
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {[...Array(4)].map((_, i) => (
           <Card key={i} className="overflow-hidden">
             <CardHeader><CardTitle><Skeleton className="h-4 w-24" /></CardTitle></CardHeader>
@@ -47,21 +47,23 @@ function SummaryCards({ host }: { host: string }) {
   const ts = data?.timeseries;
   const hourlyRequests = ts ? ts.hits.map((h, i) => h + (ts.misses[i] ?? 0)) : Array(24).fill(0);
   // 4-카드 그리드 — BarSparkline이 SVG viewBox로 부모 폭에 자동 스케일되도록 수정(#271 3차).
-  // 따라서 md(768px)부터 4-col을 켜도 카드가 좁아지면 sparkline도 같이 좁아져 overflow 없음.
   // overflow-hidden은 안전망으로 유지 (선례: DomainSummaryCards #71/#129 가드).
-  // 좌측 텍스트 블록은 min-w-0으로 flex shrink 허용, sparkline 컨테이너는 max 폭(120px)을 두되 카드 폭이 부족하면 그 이하로 축소.
+  // 카드 내부 레이아웃은 flex 대신 grid `[minmax(0,1fr)_120px]`로 좌측 텍스트(자동 축소)와 우측 sparkline 슬롯(120px 고정)을
+  // 명확히 분리한다. flex + min-w-0만으로는 좌측 `whitespace-nowrap` 텍스트(예: "954.4 MB")가 자연 폭을 잠식해 sparkline이
+  // 22~70px로 collapse되는 문제(#275 — #271 회귀)를 차단한다.
+  // 4-col 브레이크포인트는 lg(1024px)로 상향 — iPad portrait/landscape에서는 2-col로 카드 폭(~370px)을 확보해 sparkline 120px 정상 표시.
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4" data-testid="domain-stat-cards">
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4" data-testid="domain-stat-cards">
       <Card data-testid="stat-card-requests" className="overflow-hidden">
         <CardHeader><CardTitle>오늘 요청</CardTitle></CardHeader>
         <CardContent>
-          <div className="flex items-end justify-between gap-2 min-w-0">
+          <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,120px)] items-end gap-2">
             <div>
               <p className="text-3xl font-bold">{(s?.totalRequests ?? 0).toLocaleString()}</p>
               <DeltaBadge delta={s?.requestsDelta ?? 0} unit="%" />
             </div>
             {/* sparkline 슬롯 — 최대 120px, 좁은 카드에서는 자동 축소 */}
-            <div className="flex-1 min-w-0 max-w-[120px]">
+            <div className="min-w-0">
               <BarSparkline values={hourlyRequests} />
             </div>
           </div>
@@ -70,12 +72,12 @@ function SummaryCards({ host }: { host: string }) {
       <Card data-testid="stat-card-cache-hit" className="overflow-hidden">
         <CardHeader><CardTitle>캐시 히트율</CardTitle></CardHeader>
         <CardContent>
-          <div className="flex items-end justify-between gap-2 min-w-0">
+          <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,120px)] items-end gap-2">
             <div>
               <p className="text-3xl font-bold">{((s?.cacheHitRate ?? 0) * 100).toFixed(1)}%</p>
               <DeltaBadge delta={s?.cacheHitRateDelta ?? 0} unit="%" />
             </div>
-            <div className="flex-1 min-w-0 max-w-[120px]">
+            <div className="min-w-0">
               <BarSparkline values={ts?.hits ?? Array(24).fill(0)} />
             </div>
           </div>
@@ -84,7 +86,7 @@ function SummaryCards({ host }: { host: string }) {
       <Card data-testid="stat-card-bandwidth" className="overflow-hidden">
         <CardHeader><CardTitle>오늘 대역폭</CardTitle></CardHeader>
         <CardContent>
-          <div className="flex items-end justify-between gap-2 min-w-0">
+          <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,120px)] items-end gap-2">
             <div>
               {/* whitespace-nowrap: formatBytes 결과 "688.4 MB"의 number+space+unit이
                   4-카드 grid의 좁은 좌측 컬럼에서 공백 wrap되어 2줄로 분리되는 문제 방지 (#262).
@@ -92,7 +94,7 @@ function SummaryCards({ host }: { host: string }) {
               <p className="text-3xl font-bold whitespace-nowrap">{formatBytes(s?.bandwidth ?? 0)}</p>
               <span className="text-xs text-muted-foreground">누적</span>
             </div>
-            <div className="flex-1 min-w-0 max-w-[120px]">
+            <div className="min-w-0">
               <BarSparkline values={ts?.bandwidth ?? Array(24).fill(0)} />
             </div>
           </div>
@@ -101,7 +103,7 @@ function SummaryCards({ host }: { host: string }) {
       <Card data-testid="stat-card-response-time" className="overflow-hidden">
         <CardHeader><CardTitle>평균 응답시간</CardTitle></CardHeader>
         <CardContent>
-          <div className="flex items-end justify-between gap-2 min-w-0">
+          <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,120px)] items-end gap-2">
             <div>
               <p className="text-3xl font-bold">{(s?.avgResponseTime ?? 0).toFixed(0)}ms</p>
               {/* responseTimeDelta는 백엔드에서 백분율(%)로 산출됨 (domain-stats-repo.ts getDelta).
@@ -109,7 +111,7 @@ function SummaryCards({ host }: { host: string }) {
                   부호 반전(-)은 응답시간 감소를 "개선(녹색)"으로 표시하기 위함. */}
               <DeltaBadge delta={-(s?.responseTimeDelta ?? 0)} unit="%" />
             </div>
-            <div className="flex-1 min-w-0 max-w-[120px]">
+            <div className="min-w-0">
               <BarSparkline values={ts?.responseTime ?? Array(24).fill(0)} />
             </div>
           </div>

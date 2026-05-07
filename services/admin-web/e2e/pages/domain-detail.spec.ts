@@ -785,6 +785,44 @@ test.describe('도메인 상세 — Overview 탭', () => {
     }
   });
 
+  /**
+   * 이슈 #275 회귀 방지 — DomainOverviewTab KPI 4-카드 BarSparkline 폭 collapse
+   * 회귀 배경: #271(commit 6a4a3d2)에서 SVG viewBox로 자동 스케일 + flex-1 min-w-0 max-w-[120px] 적용했지만,
+   *           좌측 텍스트 블록에 min-w-0 미부여 + whitespace-nowrap 강제 폭(예: "954.4 MB")이 결합되면
+   *           좌측이 자연 폭을 잠식 → sparkline이 22~70px(카드별 3배 편차)로 collapse.
+   * 수정(#275): 카드 내부 레이아웃을 grid `[minmax(0,1fr) minmax(0,120px)]`로 전환 + lg:grid-cols-4 (md→lg).
+   *            iPad portrait/landscape에서는 2-col(카드 ~370px) → sparkline 120px, 4-col에서도 120px 보장.
+   * 검증: 4개 카드의 sparkline 폭이 모두 동일(편차 ≤2px) + iPad에서 100px 이상.
+   */
+  test('Overview — KPI 4-카드 BarSparkline 폭이 균일하고 collapse되지 않는다 (회귀: #275)', async ({ page }) => {
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com');
+
+    const ids = ['stat-card-requests', 'stat-card-cache-hit', 'stat-card-bandwidth', 'stat-card-response-time'];
+    const viewports: Array<{ w: number; h: number; label: string; minSpark: number }> = [
+      { w: 810, h: 1080, label: 'iPad portrait', minSpark: 100 },
+      { w: 1180, h: 820, label: 'iPad landscape', minSpark: 100 },
+      { w: 1440, h: 900, label: 'desktop wide', minSpark: 100 },
+    ];
+
+    for (const vp of viewports) {
+      await page.setViewportSize({ width: vp.w, height: vp.h });
+      await expect(page.getByTestId('domain-stat-cards')).toBeVisible();
+      const widths: number[] = [];
+      for (const id of ids) {
+        const sparkBox = await page.getByTestId(id).locator('svg.h-9').first().boundingBox();
+        expect(sparkBox, `${id} spark box (${vp.label})`).not.toBeNull();
+        widths.push(sparkBox!.width);
+      }
+      // 4 카드 sparkline 폭이 균일 (편차 2px 이하 — 부동소수점 허용)
+      const minW = Math.min(...widths);
+      const maxW = Math.max(...widths);
+      expect(maxW - minW, `sparkline width variance at ${vp.label}: ${widths.join(',')}`).toBeLessThanOrEqual(2);
+      // collapse 방지 — 카드 폭이 충분한 viewport에서는 100px 이상
+      expect(minW, `sparkline collapsed at ${vp.label}: ${widths.join(',')}`).toBeGreaterThanOrEqual(vp.minSpark);
+    }
+  });
+
   test('Overview — Quick Actions 4개 버튼이 동일 y 오프셋에 정렬된다', async ({ page }) => {
     await setupDetailMocks(page);
     await page.goto('/domains/textbook.com');
