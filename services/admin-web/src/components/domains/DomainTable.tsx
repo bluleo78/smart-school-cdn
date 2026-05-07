@@ -48,10 +48,16 @@ interface DomainTableProps {
    * 제공하지 않으면 CTA 버튼을 렌더링하지 않는다.
    */
   onClearFilter?: () => void;
-  /** 토글 진행 중인 도메인 호스트 — 해당 행만 disabled 처리한다 (#162) */
-  pendingToggleHost?: string | null;
-  /** 퍼지 진행 중인 도메인 호스트 — 해당 행만 disabled 처리한다 (#162) */
-  pendingPurgeHost?: string | null;
+  /**
+   * 토글 진행 중인 도메인 호스트 집합 — 포함된 행을 모두 disabled 처리한다.
+   * 서로 다른 행을 빠르게 연속 클릭해도 모든 in-flight 행이 disabled 유지되도록
+   * 단일 host 대신 Set으로 다중 추적한다 (#205, 기존 #162 단일 처리 확장).
+   */
+  pendingToggleHosts?: Set<string>;
+  /**
+   * 퍼지 진행 중인 도메인 호스트 집합 — 포함된 행을 모두 disabled 처리한다 (#205).
+   */
+  pendingPurgeHosts?: Set<string>;
   /**
    * 현재 정렬 기준 컬럼 — 정렬 헤더 강조·aria-sort 표시에 사용한다.
    * 현재 정렬 가능 컬럼: 'host' (도메인명 오름/내림차순)
@@ -81,8 +87,8 @@ export function DomainTable({
   enabledFilter,
   onClearSearch,
   onClearFilter,
-  pendingToggleHost = null,
-  pendingPurgeHost = null,
+  pendingToggleHosts,
+  pendingPurgeHosts,
   sortKey,
   sortDir,
   onSortChange,
@@ -312,7 +318,7 @@ export function DomainTable({
               {/* 액션 버튼 — shadcn Tooltip으로 감싸 다크모드 대응·즉시 표시 UX 확보 */}
               <TableCell className="text-right">
                 <div className="flex items-center justify-end gap-1">
-                  {/* 캐시 퍼지 — pendingPurgeHost 행만 disabled 처리하여 중복 클릭 방지 (#162) */}
+                  {/* 캐시 퍼지 — in-flight 호스트 집합에 포함된 행을 disabled 처리해 중복 클릭 방지 (#162, #205) */}
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <Button
@@ -320,7 +326,7 @@ export function DomainTable({
                         size="icon"
                         className="h-7 w-7"
                         onClick={() => onPurge(domain.host)}
-                        disabled={pendingPurgeHost === domain.host}
+                        disabled={pendingPurgeHosts?.has(domain.host) ?? false}
                         data-testid={`domain-purge-${domain.host}`}
                         aria-label={`${domain.host} 캐시 퍼지`}
                       >
@@ -330,7 +336,7 @@ export function DomainTable({
                     <TooltipContent>캐시 퍼지</TooltipContent>
                   </Tooltip>
 
-                  {/* 활성/비활성 토글 — pendingToggleHost 행만 disabled 처리하여 중복 클릭 방지 (#162) */}
+                  {/* 활성/비활성 토글 — in-flight 호스트 집합에 포함된 행을 disabled 처리해 중복/race 차단 (#162, #205) */}
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <Button
@@ -338,7 +344,7 @@ export function DomainTable({
                         size="icon"
                         className="h-7 w-7"
                         onClick={() => onToggle(domain.host)}
-                        disabled={pendingToggleHost === domain.host}
+                        disabled={pendingToggleHosts?.has(domain.host) ?? false}
                         data-testid={`domain-toggle-${domain.host}`}
                         aria-label={`${domain.host} ${isEnabled ? '비활성화' : '활성화'}`}
                       >

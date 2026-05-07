@@ -15,8 +15,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { useDomains } from '../hooks/useDomains';
 import { useAddDomain } from '../hooks/useAddDomain';
 import { useDeleteDomain } from '../hooks/useDeleteDomain';
-import { useToggleDomain } from '../hooks/useToggleDomain';
-import { usePurgeDomain } from '../hooks/usePurgeDomain';
+import { useToggleDomain, usePendingToggleHosts } from '../hooks/useToggleDomain';
+import { usePurgeDomain, usePendingPurgeHosts } from '../hooks/usePurgeDomain';
 import { useCertificates } from '../hooks/useTls';
 import type { DomainsFilter } from '../api/domain-types';
 import { DomainSummaryCards } from '../components/domains/DomainSummaryCards';
@@ -246,6 +246,10 @@ export function DomainsPage() {
   const toggleMutation = useToggleDomain();
   const purgeMutation = usePurgeDomain();
   const deleteMutation = useDeleteDomain();
+  // in-flight 호스트 집합 — 서로 다른 행을 빠르게 연속 클릭해도 모든 진행 중인 행을
+  // disabled로 유지하기 위해 Set으로 추적한다 (#205, useMutationState 기반).
+  const pendingToggleHosts = usePendingToggleHosts();
+  const pendingPurgeHosts = usePendingPurgeHosts();
 
   // TLS 인증서 목록 — GET /api/tls/certificates 를 한 번 조회해
   // 도메인별 만료일 맵을 만든다 (N+1 아님, 전체 목록 한 번 요청)
@@ -319,9 +323,9 @@ export function DomainsPage() {
               selectedHosts={selectedHosts}
               onSelectChange={setSelectedHosts}
               onToggle={(host) => toggleMutation.mutate(host)}
-              pendingToggleHost={toggleMutation.isPending ? (toggleMutation.variables ?? null) : null}
+              pendingToggleHosts={pendingToggleHosts}
               onPurge={(host) => purgeMutation.mutate(host)}
-              pendingPurgeHost={purgeMutation.isPending ? (purgeMutation.variables ?? null) : null}
+              pendingPurgeHosts={pendingPurgeHosts}
               onDelete={(host) => setDeleteTarget(host)}
               onAddDomain={() => setShowAddDialog(true)}
               searchQuery={filter.q}

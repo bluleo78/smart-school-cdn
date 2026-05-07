@@ -1004,6 +1004,42 @@ test.describe('도메인 관리 — 토글/퍼지 중복 클릭 방지 (#70)', (
     await expect(toggleBtn).not.toBeDisabled({ timeout: 2000 });
   });
 
+  /**
+   * 회귀 방지 — 다른 행 토글 race (#205)
+   * 서로 다른 두 행의 토글을 빠르게 연속 클릭했을 때, 첫 번째 행도 응답이 올 때까지
+   * disabled가 유지되어야 한다. 단일 useMutation의 variables가 최신 호출로 덮여써져
+   * 첫 행의 disabled가 풀리던 race를 useMutationState 기반 in-flight 집합 추적으로 차단한다.
+   */
+  test('서로 다른 두 행의 토글 연속 클릭 시 두 행 모두 응답 완료까지 disabled 유지된다 (#205)', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+    // 두 도메인의 토글 응답을 모두 600ms 지연 — 두 mutation이 동시에 in-flight 상태가 되도록
+    await mockApi(page, 'POST', '/domains/textbook.com/toggle', { host: 'textbook.com', origin: 'https://textbook.com', enabled: 0, description: '', created_at: 1700000000, updated_at: 1700000000 }, { delay: 600 });
+    await mockApi(page, 'POST', '/domains/cdn.school.kr/toggle', { host: 'cdn.school.kr', origin: 'https://cdn.school.kr', enabled: 0, description: '', created_at: 1700000100, updated_at: 1700000100 }, { delay: 600 });
+
+    await page.goto('/domains');
+    await expect(page.getByTestId('domains-table')).toBeVisible();
+
+    const toggleA = page.getByTestId('domain-toggle-textbook.com');
+    const toggleB = page.getByTestId('domain-toggle-cdn.school.kr');
+
+    // 두 버튼 모두 처음엔 활성화
+    await expect(toggleA).not.toBeDisabled();
+    await expect(toggleB).not.toBeDisabled();
+
+    // A 클릭 → 즉시 B 클릭 (1초 안에)
+    await toggleA.click();
+    await toggleB.click();
+
+    // 핵심 검증: B가 클릭되어도 A는 여전히 disabled여야 한다 (#205 race 방지)
+    await expect(toggleA).toBeDisabled();
+    await expect(toggleB).toBeDisabled();
+
+    // 응답 완료 후 두 버튼 모두 다시 활성화
+    await expect(toggleA).not.toBeDisabled({ timeout: 3000 });
+    await expect(toggleB).not.toBeDisabled({ timeout: 3000 });
+  });
+
   test('퍼지 API 요청 중에는 퍼지 버튼이 disabled 상태가 된다', async ({ page }) => {
     await setupBaseMocks(page);
     await mockApi(page, 'GET', '/domains', createDomains());
