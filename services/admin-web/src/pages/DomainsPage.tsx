@@ -144,7 +144,13 @@ function AddDomainDialog({ onClose }: { onClose: () => void }) {
           <Button type="button" variant="outline" onClick={onClose}>
             취소
           </Button>
-          <Button type="submit" disabled={addDomain.isPending} data-testid="add-domain-submit">
+          {/* 빈 입력 가드 — toolbar/일괄 삭제·DomainCacheSection 퍼지와 disabled 처리 일관성 유지 (#232).
+              인라인 에러는 의도적 입력 후 형식 오류 알림용이며 빈 폼 제출 가드용으로 쓰지 않는다. */}
+          <Button
+            type="submit"
+            disabled={addDomain.isPending || !host.trim() || !origin.trim()}
+            data-testid="add-domain-submit"
+          >
             {addDomain.isPending ? '추가 중…' : '추가'}
           </Button>
         </div>

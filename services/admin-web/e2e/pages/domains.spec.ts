@@ -414,20 +414,19 @@ test.describe('도메인 관리 — 도메인 추가', () => {
     await expect(page.getByTestId('add-domain-origin-error')).toBeVisible();
   });
 
-  test('host 입력 없이 제출 시 오류가 표시된다', async ({ page }) => {
+  test('host 입력 없이는 제출 버튼이 비활성화된다 (#232)', async ({ page }) => {
     await setupBaseMocks(page);
     await mockApi(page, 'GET', '/domains', []);
 
     await page.goto('/domains');
 
     await page.getByTestId('toolbar-add-btn').click();
-    // host 비워두고 origin만 입력
+    // host 비워두고 origin만 입력 — 빈 입력 가드가 클릭 자체를 차단해야 한다
     await page.getByTestId('add-domain-origin').fill('https://newdomain.com');
-    await page.getByTestId('add-domain-submit').click();
 
-    // 도메인 필드 바로 아래 인라인 에러로 표시 (#16 인라인 에러 개선)
-    await expect(page.getByTestId('add-domain-host-error')).toBeVisible();
-    // 실패 시 다이얼로그는 닫히지 않아야 한다
+    // toolbar/일괄 삭제·DomainCacheSection 퍼지와 일관된 disabled 처리 (#232)
+    await expect(page.getByTestId('add-domain-submit')).toBeDisabled();
+    // 다이얼로그는 그대로 유지된다
     await expect(page.getByTestId('add-domain-dialog')).toBeVisible();
   });
 
@@ -542,6 +541,38 @@ test.describe('도메인 관리 — 도메인 추가', () => {
     await closeBtn.click();
     await expect(dialog).not.toBeVisible();
   });
+
+  /**
+   * 이슈 #232 회귀 방지 — 단건 추가 다이얼로그 빈 입력 가드
+   * host/origin 둘 중 하나라도 비어 있으면 제출 버튼은 disabled여야 한다.
+   * (toolbar 일괄 삭제·DomainCacheSection 퍼지와 disabled 처리 일관성)
+   */
+  test('host/origin 둘 중 하나라도 비어 있으면 제출 버튼이 비활성화된다 (#232)', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', []);
+
+    await page.goto('/domains');
+    await page.getByTestId('toolbar-add-btn').click();
+
+    const submit = page.getByTestId('add-domain-submit');
+    const host = page.getByTestId('add-domain-host');
+    const origin = page.getByTestId('add-domain-origin');
+
+    // 둘 다 비어 있을 때 — disabled
+    await expect(submit).toBeDisabled();
+
+    // host만 입력 — 여전히 disabled
+    await host.fill('newdomain.com');
+    await expect(submit).toBeDisabled();
+
+    // origin도 입력 — enabled
+    await origin.fill('https://newdomain.com');
+    await expect(submit).toBeEnabled();
+
+    // origin을 공백만으로 비우면 다시 disabled (.trim() 가드)
+    await origin.fill('   ');
+    await expect(submit).toBeDisabled();
+  });
 });
 
 test.describe('도메인 관리 — 도메인 삭제', () => {
@@ -641,7 +672,7 @@ test.describe('도메인 관리 — 일괄 추가 (#55)', () => {
     await expect(errorMsg).not.toHaveText('추가할 도메인을 입력해주세요.');
   });
 
-  test('빈 입력이면 "추가할 도메인을 입력해주세요." 메시지가 표시된다', async ({ page }) => {
+  test('빈 입력이면 일괄 추가 버튼이 비활성화된다 (#232)', async ({ page }) => {
     await setupBaseMocks(page);
     await mockApi(page, 'GET', '/domains', createDomains());
 
@@ -651,13 +682,15 @@ test.describe('도메인 관리 — 일괄 추가 (#55)', () => {
     await page.getByRole('button', { name: '일괄 추가' }).click();
     await expect(page.getByTestId('bulk-add-dialog')).toBeVisible();
 
-    // 아무것도 입력하지 않고 제출
-    await page.getByTestId('bulk-add-submit').click();
+    // 입력 미리보기는 "입력된 도메인이 없습니다." 안내 + 버튼은 disabled (#232)
+    await expect(page.getByTestId('bulk-add-preview')).toHaveText('입력된 도메인이 없습니다.');
+    await expect(page.getByTestId('bulk-add-submit')).toBeDisabled();
 
-    // 빈 입력 안내 메시지가 표시되어야 한다
-    const errorMsg = page.getByTestId('bulk-add-error');
-    await expect(errorMsg).toBeVisible();
-    await expect(errorMsg).toHaveText('추가할 도메인을 입력해주세요.');
+    // 한 번 입력했다가 비우면 다시 disabled로 돌아가는지 확인 (toggle 회귀)
+    await page.getByTestId('bulk-add-textarea').fill('a.example.com https://a.example.com');
+    await expect(page.getByTestId('bulk-add-submit')).toBeEnabled();
+    await page.getByTestId('bulk-add-textarea').fill('');
+    await expect(page.getByTestId('bulk-add-submit')).toBeDisabled();
   });
 
   /**
