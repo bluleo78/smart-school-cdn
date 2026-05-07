@@ -562,6 +562,17 @@ function QueriesTab() {
     });
   }
 
+  // 빈 상태 분기용 — 결과 필터 일부라도 해제되어 있는지 판정
+  // 진짜 쿼리 0건과 "필터로 0건 매칭" 두 상황을 메시지·CTA로 구분한다 (#231, #227 패턴)
+  const allResults: DnsQueryResultLabel[] = ['matched', 'forwarded', 'nxdomain'];
+  const hasActiveFilter = filter.size < allResults.length;
+  const totalCount = queries?.length ?? 0;
+
+  /** 결과 필터 일괄 초기화 — 빈 상태 안내 패널의 CTA에서 사용 */
+  function handleResetFilters() {
+    setFilter(new Set<DnsQueryResultLabel>(allResults));
+  }
+
   return (
     <Card>
       {/* 모바일 stack — 헤더+필터 버튼이 좁은 뷰포트에서 가로 오버플로 발생 차단 (#177) */}
@@ -586,7 +597,35 @@ function QueriesTab() {
       </CardHeader>
       <CardContent>
         {visible.length === 0 ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">표시할 쿼리가 없습니다.</p>
+          // 빈 상태 분기 (#231) — 필터 활성/비활성에 따라 안내 메시지 + CTA를 다르게 노출한다
+          // (a) 필터 비활성(전부 켜짐) 또는 데이터 자체 0건 → "표시할 쿼리가 없습니다."
+          // (b) 필터로 인해 0건 매칭 → 활성 필터 정보가 포함된 안내 + 초기화 버튼
+          hasActiveFilter && totalCount > 0 ? (
+            <div
+              className="flex flex-col items-center gap-2 py-8 text-muted-foreground"
+              data-testid="queries-empty-filter"
+            >
+              <p className="text-sm font-medium text-foreground">
+                선택한 결과 필터에 일치하는 쿼리가 없습니다.
+              </p>
+              <p className="text-xs">필터 조건을 변경하거나 초기화해 보세요.</p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleResetFilters}
+                data-testid="queries-reset-filters-btn"
+              >
+                필터 초기화
+              </Button>
+            </div>
+          ) : (
+            <p
+              className="py-8 text-center text-sm text-muted-foreground"
+              data-testid="queries-empty"
+            >
+              표시할 쿼리가 없습니다.
+            </p>
+          )
         ) : (
           // overflow-x-auto 래퍼 — 좁은 뷰포트에서 페이지 가로 스크롤 차단 (#177)
           <div className="w-full overflow-x-auto">

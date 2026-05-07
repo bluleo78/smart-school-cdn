@@ -263,6 +263,51 @@ test.describe('DNS 관리 페이지', () => {
     await expect(page.getByText('b.test')).toBeVisible();
   });
 
+  /**
+   * 이슈 #231 — QueriesTab 빈 상태 메시지 분기
+   * 진짜 쿼리 0건과 "결과 필터로 0건" 두 상황을 구분해야 한다.
+   * - 데이터 0건 → "표시할 쿼리가 없습니다." (data-testid="queries-empty")
+   * - 데이터 있음 + 필터 전부 해제 → 필터 안내 + 초기화 CTA (data-testid="queries-empty-filter")
+   */
+  test('빈 상태 — 데이터 자체가 0건일 때 "표시할 쿼리가 없습니다." 메시지가 표시된다 (#231)', async ({ page }) => {
+    await mockApi(page, 'GET', '/dns/status', createDnsStatusOnline());
+    await mockApi(page, 'GET', '/dns/records', createDnsRecords());
+    await mockDnsQuery(page, '/dns/queries', { entries: [] });
+    await mockDnsQuery(page, '/dns/metrics', createDnsMetrics());
+
+    await page.goto('/dns?tab=queries');
+
+    await expect(page.getByTestId('queries-empty')).toBeVisible();
+    // 필터 분기는 노출되지 않아야 한다
+    await expect(page.getByTestId('queries-empty-filter')).toHaveCount(0);
+  });
+
+  test('빈 상태 — 결과 필터를 모두 해제해 0건 매칭 시 필터 안내 + 초기화 버튼이 표시된다 (#231)', async ({ page }) => {
+    await mockDnsDefaults(page);
+    await page.goto('/dns?tab=queries');
+
+    // 기본 상태에서는 데이터가 노출되어야 한다
+    await expect(page.getByText('a.test')).toBeVisible();
+
+    // 결과 필터 3개 모두 해제 → visible.length === 0 이지만 totalCount > 0
+    await page.getByTestId('filter-matched').click();
+    await page.getByTestId('filter-forwarded').click();
+    await page.getByTestId('filter-nxdomain').click();
+
+    const emptyFilter = page.getByTestId('queries-empty-filter');
+    await expect(emptyFilter).toBeVisible();
+    await expect(emptyFilter).toContainText('필터');
+    // 진짜 빈 상태 분기는 노출되지 않아야 한다
+    await expect(page.getByTestId('queries-empty')).toHaveCount(0);
+
+    // 초기화 버튼 클릭 → 모든 필터 다시 활성화되어 데이터 노출
+    await page.getByTestId('queries-reset-filters-btn').click();
+    await expect(page.getByTestId('filter-matched')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByTestId('filter-forwarded')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByTestId('filter-nxdomain')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByText('a.test')).toBeVisible();
+  });
+
   // 회귀 테스트: #223 — QueriesTab '시각' 컬럼이 12시간(오전/오후) 포맷으로 표시되어 다른 페이지와 불일치
   test('최근 쿼리 시각 컬럼은 24시간 ko-KR 포맷이며 오전/오후 표기를 포함하지 않는다 (#223)', async ({ page }) => {
     // 고정 시각(13:05:07 = 오후 1:05:07)으로 모킹해 12시간/24시간 분기를 명확히 검증한다.
