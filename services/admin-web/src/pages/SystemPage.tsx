@@ -43,14 +43,21 @@ export function SystemPage() {
     setCurrentTheme(theme);
   }
 
-  // CA 인증서/iOS 프로파일 다운로드 mutation — 실패 시 toast.error로 피드백 (#187)
-  // 이전엔 anchor href click만 호출해 4xx/5xx 응답 시 silent 실패했다.
+  // CA 인증서/iOS 프로파일 다운로드 mutation — 성공/실패 양쪽 토스트로 피드백 (#187, #214)
+  // - 이전엔 anchor href click만 호출해 4xx/5xx 응답 시 silent 실패했다 (#187 → onError 추가).
+  // - 그 후에도 success 시 인앱 안내가 없어 운영자가 다운로드 완료 여부를 확인할 단서가 없었다 (#214).
+  //   브라우저별 다운로드 칩 위치/허가 정책이 달라 시각적 단서가 부족하므로 success 토스트로 다음 단계까지 안내한다.
   const caDownload = useMutation({
     mutationFn: downloadCACert,
+    onSuccess: () =>
+      toast.success('CA 인증서를 다운로드했습니다. 다운로드 폴더에서 확인하세요.'),
     onError: () => toast.error('CA 인증서 다운로드에 실패했습니다.'),
   });
   const mobileconfigDownload = useMutation({
     mutationFn: downloadMobileConfig,
+    // iPad 설치 안내(우측 가이드)와 어조 일치 — 설정 앱에서 설치 단계로 이어지도록 명시
+    onSuccess: () =>
+      toast.success('iOS 프로파일을 다운로드했습니다. 설정 앱에서 설치를 계속하세요.'),
     onError: () => toast.error('iOS 프로파일 다운로드에 실패했습니다.'),
   });
 

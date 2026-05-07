@@ -148,6 +148,43 @@ test.describe('CA 인증서 섹션', () => {
       page.getByText('iOS 프로파일 다운로드에 실패했습니다.'),
     ).toBeVisible({ timeout: 5000 });
   });
+
+  /// 회귀 방지 #214: CA/iOS 프로파일 다운로드 성공 시 토스트 부재로 결과 피드백 비대칭
+  /// 200 응답을 모킹해 mutation onSuccess 토스트가 노출되는지 검증한다.
+  test('CA 인증서 다운로드 성공 시 토스트가 표시된다 — 회귀 방지 #214', async ({ page }) => {
+    // Blob 응답이 필요 — downloadCACert는 응답을 Blob으로 처리해 anchor download 트리거
+    await page.route('**/api/tls/ca', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/x-x509-ca-cert',
+        body: 'fake-cert-bytes',
+      }),
+    );
+    await page.goto('/system');
+
+    await page.getByTestId('ca-download-btn').click();
+
+    await expect(
+      page.getByText('CA 인증서를 다운로드했습니다. 다운로드 폴더에서 확인하세요.'),
+    ).toBeVisible({ timeout: 5000 });
+  });
+
+  test('iOS 프로파일 다운로드 성공 시 토스트가 표시된다 — 회귀 방지 #214', async ({ page }) => {
+    await page.route('**/api/tls/ca/mobileconfig', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/x-apple-aspen-config',
+        body: 'fake-mobileconfig-bytes',
+      }),
+    );
+    await page.goto('/system');
+
+    await page.getByTestId('mobileconfig-download-btn').click();
+
+    await expect(
+      page.getByText('iOS 프로파일을 다운로드했습니다. 설정 앱에서 설치를 계속하세요.'),
+    ).toBeVisible({ timeout: 5000 });
+  });
 });
 
 test.describe('발급된 인증서 목록', () => {
