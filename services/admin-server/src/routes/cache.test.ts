@@ -394,6 +394,28 @@ describe('DELETE /api/cache/purge', () => {
     expect(mock.purgeAll).toHaveBeenCalled();
   });
 
+  // #208 회귀: gRPC uint64 필드는 @grpc/grpc-js가 string으로 역직렬화 → admin-web의 number 비교가
+  // 깨져 "0건 삭제" 성공 토스트가 노출되던 문제. boundary에서 Number 변환 보장.
+  it('gRPC가 uint64를 string으로 반환해도 number로 정규화한다 (#208 회귀)', async () => {
+    // @grpc/grpc-js 기본 동작: uint64 → string (정밀도 보존). 여기선 "0", "0" 시뮬레이션.
+    const purgeResult = { purged_files: '0' as unknown as number, freed_bytes: '0' as unknown as number };
+    const mock = makeStorageMock(async () => ({ used_bytes: 0, total_bytes: 0 }));
+    mock.purgeUrl.mockResolvedValueOnce(purgeResult);
+    const { app } = mkApp({ storage: mock, domains: ['example.com'] });
+
+    const res = await app.inject({
+      method: 'DELETE', url: '/api/cache/purge',
+      headers: { 'content-type': 'application/json' },
+      payload: { type: 'url', target: 'https://example.com/never-cached' },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    // string "0"이 아니라 number 0으로 와야 admin-web의 === 0 분기가 동작한다
+    expect(body).toEqual({ purged_count: 0, freed_bytes: 0 });
+    expect(typeof body.purged_count).toBe('number');
+    expect(typeof body.freed_bytes).toBe('number');
+  });
+
   // #168: 화이트리스트 외 type 값은 모두 400 (purgeAll 폴백 차단)
   it.each(['NUKE', 'urls', 'bogus', 'domain_typo', ''])(
     'type이 화이트리스트 외 문자열("%s")이면 400을 반환하고 purgeAll을 호출하지 않는다 (#168)',

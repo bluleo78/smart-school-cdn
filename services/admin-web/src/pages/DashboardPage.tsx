@@ -30,10 +30,12 @@ export function DashboardPage() {
     try {
       const result = await purge({ type: 'all' });
       // purged_count === 0 이면 매칭된 캐시가 없다는 안내 토스트(info)로 분기 (#208).
-      if (result.purged_count === 0) {
+      // gRPC uint64 → string 직렬화 경로 방어 (#208 회귀).
+      const purgedCount = Number(result.purged_count);
+      if (purgedCount === 0) {
         toast.info('퍼지할 캐시 항목이 없습니다.');
       } else {
-        toast.success(`캐시 ${result.purged_count}건 퍼지 완료 (${formatBytes(result.freed_bytes)} 해제)`);
+        toast.success(`캐시 ${purgedCount}건 퍼지 완료 (${formatBytes(Number(result.freed_bytes))} 해제)`);
       }
     } catch {
       toast.error('캐시 퍼지에 실패했습니다.');

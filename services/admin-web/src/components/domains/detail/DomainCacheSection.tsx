@@ -43,11 +43,14 @@ export function DomainCacheSection({ host }: Props) {
       const result = await purgeMutation.mutateAsync({ type: 'url', target: urlInput.trim() });
       // purged_count === 0 이면 매칭된 캐시가 없다는 안내 토스트(info)로 분기 (#208).
       // success 그대로 노출하면 사용자가 "캐시가 비워졌다"고 오인할 수 있다.
-      if (result.purged_count === 0) {
+      // gRPC uint64는 string으로 직렬화될 수 있으므로 Number 변환 후 비교한다 (#208 회귀 — admin-server에서
+      // 정규화하지만 방어적으로 한 번 더 변환해 컨트랙트 위반 시에도 분기가 깨지지 않게 한다).
+      const purgedCount = Number(result.purged_count);
+      if (purgedCount === 0) {
         toast.info('해당 URL의 캐시 항목이 없습니다.');
       } else {
         // DashboardPage 전체 퍼지 토스트와 동일 형식으로 freed_bytes(해제 용량)도 함께 표시 (#186)
-        toast.success(`퍼지 완료 — ${result.purged_count}건 삭제 (${formatBytes(result.freed_bytes)} 해제)`);
+        toast.success(`퍼지 완료 — ${purgedCount}건 삭제 (${formatBytes(Number(result.freed_bytes))} 해제)`);
       }
       setUrlInput('');
     } catch {
@@ -62,11 +65,13 @@ export function DomainCacheSection({ host }: Props) {
       const result = await purgeMutation.mutateAsync({ type: 'domain', target: host });
       setPurgeDialogOpen(false);
       // purged_count === 0 이면 도메인에 캐시가 없다는 안내 토스트(info)로 분기 (#208).
-      if (result.purged_count === 0) {
+      // gRPC uint64 → string 직렬화 경로 방어 (#208 회귀).
+      const purgedCount = Number(result.purged_count);
+      if (purgedCount === 0) {
         toast.info('해당 도메인의 캐시 항목이 없습니다.');
       } else {
         // DashboardPage 전체 퍼지 토스트와 동일 형식으로 freed_bytes(해제 용량)도 함께 표시 (#186)
-        toast.success(`도메인 캐시 퍼지 완료 — ${result.purged_count}건 삭제 (${formatBytes(result.freed_bytes)} 해제)`);
+        toast.success(`도메인 캐시 퍼지 완료 — ${purgedCount}건 삭제 (${formatBytes(Number(result.freed_bytes))} 해제)`);
       }
     } catch {
       // 실패 시 다이얼로그를 유지하여 사용자가 재시도할 수 있도록 한다

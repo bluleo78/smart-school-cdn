@@ -234,7 +234,10 @@ export async function cacheRoutes(app: FastifyInstance) {
       }
       // gRPC 응답 필드명(purged_files)을 클라이언트 계약(purged_count)으로 정규화한다 (#182).
       // storage-service의 .proto는 purged_files를 사용하지만 admin-web은 purged_count를 기대한다.
-      return { purged_count: res.purged_files, freed_bytes: res.freed_bytes };
+      // 또한 .proto의 uint64 필드는 @grpc/grpc-js가 정밀도 보존을 위해 string으로 역직렬화하므로
+      // admin-web의 number 계약에 맞춰 Number 변환한다 (#208 — string "0" 이 ===0 비교를 빠져나가
+      // "0건 삭제" 성공 토스트를 띄우는 회귀를 차단).
+      return { purged_count: Number(res.purged_files), freed_bytes: Number(res.freed_bytes) };
     } catch {
       return reply.status(502).send({ error: 'storage-service에 연결할 수 없습니다.' });
     }
