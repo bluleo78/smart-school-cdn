@@ -167,6 +167,45 @@ test.describe('발급된 인증서 목록', () => {
     await expect(row.getByText('만료됨')).toBeVisible({ timeout: 10000 });
   });
 
+  /// 회귀 방지 #196: 24시간 이내 미래 만료가 '만료됨'으로 잘못 표시되던 경계값 버그
+  /// - 1h 미래 → '시간 후 만료' (만료됨이 아니어야 함)
+  /// - 23h 미래 → '시간 후 만료' (만료됨이 아니어야 함)
+  /// - 25h 미래 → '1일 후 만료' (Math.ceil로 N일 후 만료 분기로 진입)
+  /// - 1h 과거 → '만료됨' (정상 동작 유지)
+  test('24시간 이내 미래 만료는 시간 단위로 표시된다 — 회귀 방지 #196', async ({ page }) => {
+    const now = Date.now();
+    const future1h = new Date(now + 1 * 3_600_000).toISOString();
+    const future23h = new Date(now + 23 * 3_600_000).toISOString();
+    const future25h = new Date(now + 25 * 3_600_000).toISOString();
+    const past1h = new Date(now - 1 * 3_600_000).toISOString();
+    const issued = new Date(now - 86_400_000).toISOString();
+    await mockApi(page, 'GET', '/tls/certificates', [
+      { domain: 'future-1h.test', issued_at: issued, expires_at: future1h },
+      { domain: 'future-23h.test', issued_at: issued, expires_at: future23h },
+      { domain: 'future-25h.test', issued_at: issued, expires_at: future25h },
+      { domain: 'past-1h.test', issued_at: issued, expires_at: past1h },
+    ]);
+    await page.goto('/system');
+
+    // 1h 미래 만료 — '만료됨'이 아니라 'N시간 후 만료'로 표시되어야 한다
+    const row1h = page.locator('tr', { hasText: 'future-1h.test' });
+    await expect(row1h.getByText(/\d+시간 후 만료/)).toBeVisible({ timeout: 10000 });
+    await expect(row1h.getByText('만료됨', { exact: true })).toHaveCount(0);
+
+    // 23h 미래 만료 — '만료됨'이 아니라 'N시간 후 만료'
+    const row23h = page.locator('tr', { hasText: 'future-23h.test' });
+    await expect(row23h.getByText(/\d+시간 후 만료/)).toBeVisible({ timeout: 10000 });
+    await expect(row23h.getByText('만료됨', { exact: true })).toHaveCount(0);
+
+    // 25h 미래 만료 — Math.ceil로 '1일 후 만료'
+    const row25h = page.locator('tr', { hasText: 'future-25h.test' });
+    await expect(row25h.getByText(/\d+일 후 만료/)).toBeVisible({ timeout: 10000 });
+
+    // 1h 과거 만료 — '만료됨' 정상 표시 (기존 동작 유지)
+    const rowPast = page.locator('tr', { hasText: 'past-1h.test' });
+    await expect(rowPast.getByText('만료됨', { exact: true })).toBeVisible({ timeout: 10000 });
+  });
+
   // 30초마다 자동 갱신: useTls 훅의 refetchInterval: 30_000 옵션으로 구현됨.
   // E2E에서 타이머 기반 폴링을 직접 검증하는 것은 신뢰성이 낮으므로 생략한다.
 });
