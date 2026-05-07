@@ -358,6 +358,19 @@ export async function domainRoutes(
           return reply.status(400).send({ error: `유효한 도메인 형식이 아닙니다: "${d.host}"` });
         }
       }
+      // 동일 host 중복 줄 방어 (#225) — 클라이언트가 사전 검출하지만, 직접 API 호출 시
+      // bulkInsert ON CONFLICT 가 첫 origin 만 저장하고 나머지를 "skipped(이미 존재)" 로 분류해
+      // 사용자에게 잘못된 안내가 나가는 데이터 의도 손실을 막는다. 명시적 400 으로 거부.
+      const seenHosts = new Set<string>();
+      for (const d of normalizedHostDomains) {
+        if (typeof d.host !== 'string') continue;
+        if (seenHosts.has(d.host)) {
+          return reply.status(400).send({
+            error: `중복된 host: ${d.host}. 한 번에는 같은 host를 한 번만 입력해 주세요.`,
+          });
+        }
+        seenHosts.add(d.host);
+      }
       // 각 도메인의 origin URL 형식 검증 — scheme/host/길이/공백 종합 검증 (#167)
       // javascript:, file://, ftp:// 등 비정상 scheme + `http://`(빈 host) + 5000자 + 공백 포함 host 모두 차단
       for (const d of normalizedHostDomains) {

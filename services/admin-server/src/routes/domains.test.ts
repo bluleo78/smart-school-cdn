@@ -568,6 +568,47 @@ describe('POST /api/domains/bulk', () => {
     expect(repo.findByHost('newfresh.com')?.origin).toBe('https://newfresh.com');
   });
 
+  // (#225) 같은 요청 내 동일 host 두 줄이면 명시적 400으로 거부.
+  // 그렇지 않으면 ON CONFLICT가 첫 줄 INSERT 후 두 번째 줄을 "이미 존재(기존 origin)"로 잘못 안내해
+  // 사용자가 사전 등록한 적 없는데도 skipped 로 표기되고 두 번째 origin 의도가 손실된다.
+  it('동일 host 가 같은 요청에 두 번 들어오면 400을 반환한다 (#225)', async () => {
+    const repo = makeRepo();
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/domains/bulk',
+      payload: {
+        domains: [
+          { host: 'dup.example.com', origin: 'https://a.example.com' },
+          { host: 'dup.example.com', origin: 'https://b.example.com' },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    const body = JSON.parse(res.body);
+    expect(body.error).toContain('중복된 host');
+    expect(body.error).toContain('dup.example.com');
+    // 어느 것도 저장되지 않아야 한다 — 부분 저장으로 인한 의도 손실 방지
+    expect(repo.findByHost('dup.example.com')).toBeUndefined();
+  });
+
+  // (#225) host 정규화 후 중복 비교 — 'Dup.com'/'dup.com' 같이 대소문자만 다른 입력도 같은 host 로 본다
+  it('대소문자만 다른 동일 host(정규화 후) 가 두 번 들어오면 400을 반환한다 (#225)', async () => {
+    const repo = makeRepo();
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/domains/bulk',
+      payload: {
+        domains: [
+          { host: 'Dup.example.com', origin: 'https://a.example.com' },
+          { host: 'dup.example.com', origin: 'https://b.example.com' },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
   it('대문자가 섞인 host 는 lowercase 로 정규화되어 저장된다 (#201)', async () => {
     const repo = makeRepo();
     const app = buildApp(repo);

@@ -778,6 +778,70 @@ test.describe('도메인 관리 — 일괄 추가 (#55)', () => {
   });
 
   /**
+   * 이슈 #225 회귀 방지 — 동일 host 두 줄 입력 시 두 번째 origin 무시되고 'skipped' 토스트만 표시
+   * 클라이언트 parseLines 단계에서 동일 host 중복을 명시적으로 차단해야 한다.
+   * 서버 ON CONFLICT 동작 때문에 첫 줄만 INSERT 되고 두 번째 줄이 "이미 존재"로 잘못 안내되는
+   * 데이터 의도 손실을 사전에 방지.
+   *
+   * mock 정당성: 클라이언트 검증 통과 후 서버 호출이 가지 않아야 함을 검증하기 위해 POST 모킹.
+   */
+  test('동일 host 가 두 줄 입력되면 인라인 에러 표시 + POST 차단 (#225)', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+
+    let bulkAddCalled = false;
+    await page.route('**/api/domains/bulk', async (route) => {
+      if (route.request().method() === 'POST') {
+        bulkAddCalled = true;
+        await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ added: 0, skipped: [], failed: [] }) });
+      } else {
+        await route.continue();
+      }
+    });
+
+    await page.goto('/domains');
+    await page.getByRole('button', { name: '일괄 추가' }).click();
+    await expect(page.getByTestId('bulk-add-dialog')).toBeVisible();
+
+    // 동일 host 두 줄(서로 다른 origin) — #225 재현 입력
+    await page
+      .getByTestId('bulk-add-textarea')
+      .fill('bulk-dup-test.invalid https://a.example.com\nbulk-dup-test.invalid https://b.example.com');
+    await page.getByTestId('bulk-add-submit').click();
+
+    // 인라인 에러 — 중복 안내 (#225 핵심)
+    const errorMsg = page.getByTestId('bulk-add-error');
+    await expect(errorMsg).toBeVisible();
+    await expect(errorMsg).toContainText('중복된 host');
+    await expect(errorMsg).toContainText('bulk-dup-test.invalid');
+
+    // 다이얼로그가 닫히지 않아야 한다
+    await expect(page.getByTestId('bulk-add-dialog')).toBeVisible();
+
+    // 서버 호출 차단 확인 — 잘못된 'skipped' 토스트가 나갈 여지를 사전 차단
+    expect(bulkAddCalled).toBe(false);
+  });
+
+  // (#225) 정규화 후(대소문자만 다른) 동일 host 도 중복으로 차단되어야 한다
+  test('대소문자만 다른 동일 host 두 줄도 중복 에러로 차단된다 (#225)', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+
+    await page.goto('/domains');
+    await page.getByRole('button', { name: '일괄 추가' }).click();
+    await expect(page.getByTestId('bulk-add-dialog')).toBeVisible();
+
+    await page
+      .getByTestId('bulk-add-textarea')
+      .fill('Dup-Case.invalid https://a.example.com\ndup-case.invalid https://b.example.com');
+    await page.getByTestId('bulk-add-submit').click();
+
+    const errorMsg = page.getByTestId('bulk-add-error');
+    await expect(errorMsg).toBeVisible();
+    await expect(errorMsg).toContainText('중복된 host');
+  });
+
+  /**
    * 이슈 #170 회귀 방지 — 닫기 후 재오픈 시 입력값/에러 메시지 잔존
    * 외부 Wrapper 컴포넌트가 항상 마운트되어 useState가 보존되는 점이 원인.
    * useEffect로 open=false 전환을 감지해 text/parseError를 리셋한다.

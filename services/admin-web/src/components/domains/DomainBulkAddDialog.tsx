@@ -32,7 +32,14 @@ export function DomainBulkAddDialog({ open, onOpenChange }: DomainBulkAddDialogP
       .filter((l) => l.length > 0);
 
     const result: Array<{ host: string; origin: string }> = [];
-    for (const line of lines) {
+    // 동일 host 중복 줄 사전 감지용 — 첫 등장 줄 번호를 기록해 두 번째 줄에서 명시적 차단 (#225)
+    // 같은 요청 안에서 host가 중복되면 서버 ON CONFLICT 로직이 첫 줄을 INSERT 후 두 번째 줄을
+    // "이미 존재함"으로 분류해 사용자가 사전 등록한 적 없는데도 잘못된 안내가 나간다.
+    // dedupe(첫 줄 채택)은 두 번째 origin 의도를 무시하므로, 사용자가 직접 어떤 origin을
+    // 남길지 결정하도록 강제한다.
+    const seenHostLine = new Map<string, number>();
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
       const parts = line.split(/\s+/);
       if (parts.length < 2) {
         setParseError(`잘못된 형식: "${line}" — "host origin" 형식으로 입력해주세요.`);
@@ -56,7 +63,18 @@ export function DomainBulkAddDialog({ open, onOpenChange }: DomainBulkAddDialogP
       // host 정규화 — DNS 호스트네임은 case-insensitive (RFC 1035 §2.3.3) 이고 서버도 lowercase
       // 로 통일 저장하므로(#201), 클라이언트도 입력 시 lowercase 로 통일해 동일 도메인이 대소문자
       // 차이만으로 별도 행처럼 보이지 않도록 한다.
-      result.push({ host: parts[0].toLowerCase(), origin });
+      const host = parts[0].toLowerCase();
+      // 동일 host 중복 차단 (#225) — 두 번째 origin 의도가 손실되지 않도록 사용자에게 직접 정정 요구
+      const prevLineIndex = seenHostLine.get(host);
+      if (prevLineIndex !== undefined) {
+        setParseError(
+          `중복된 host: ${host} (${i + 1}번째 줄, 이미 ${prevLineIndex + 1}번째 줄에 입력됨). ` +
+            `한 번에는 같은 host를 한 번만 입력해 주세요.`,
+        );
+        return null;
+      }
+      seenHostLine.set(host, i);
+      result.push({ host, origin });
     }
     return result;
   }
