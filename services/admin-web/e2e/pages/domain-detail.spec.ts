@@ -2000,6 +2000,54 @@ test.describe('도메인 상세 — 설정 탭', () => {
   });
 
   /**
+   * 이슈 #208 회귀 방지 — URL 퍼지 응답 purged_count=0 시 success 토스트 대신 info 안내 토스트로 분기
+   * 수정 전: `퍼지 완료 — 0건 삭제 (0 B 해제)` success 토스트로 표시되어 사용자가 캐시가 비워졌다고 오인
+   * 수정 후: `해당 URL의 캐시 항목이 없습니다.` info 토스트로 안내, "퍼지 완료" 텍스트는 노출되지 않아야 함
+   */
+  test('URL 퍼지 — purged_count=0 응답 시 매칭 없음 info 토스트로 분기된다 (회귀: #208)', async ({ page }) => {
+    await setupDetailMocks(page);
+    // purged_count=0 응답으로 매칭 없음 시나리오 재현
+    await page.route('**/api/cache/purge', (route) =>
+      route.fulfill({ json: { purged_count: 0, freed_bytes: 0 } }),
+    );
+
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '설정' }).click();
+
+    // 캐시에 없는 URL 퍼지 시도
+    await page.getByTestId('url-purge-input').fill('https://textbook.com/never-visited-path-xyz');
+    await page.getByTestId('url-purge-btn').click();
+
+    // info 안내 토스트가 표시되어야 한다
+    await expect(page.getByText('해당 URL의 캐시 항목이 없습니다.')).toBeVisible({ timeout: 3000 });
+    // success 형식의 "퍼지 완료 — 0건 삭제" 토스트는 노출되지 않아야 한다
+    await expect(page.getByText('퍼지 완료 — 0건 삭제')).toHaveCount(0);
+  });
+
+  /**
+   * 이슈 #208 회귀 방지 — 도메인 전체 퍼지 응답 purged_count=0 시 info 안내 토스트로 분기
+   */
+  test('도메인 전체 퍼지 — purged_count=0 응답 시 매칭 없음 info 토스트로 분기된다 (회귀: #208)', async ({ page }) => {
+    await setupDetailMocks(page);
+    await page.route('**/api/cache/purge', (route) =>
+      route.fulfill({ json: { purged_count: 0, freed_bytes: 0 } }),
+    );
+
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '설정' }).click();
+
+    // 도메인 전체 퍼지 → 확인 다이얼로그 → 퍼지 실행
+    await page.getByTestId('domain-purge-btn').click();
+    await expect(page.getByTestId('domain-purge-dialog')).toBeVisible();
+    await page.getByTestId('domain-purge-confirm-btn').click();
+
+    // info 안내 토스트가 표시되어야 한다
+    await expect(page.getByText('해당 도메인의 캐시 항목이 없습니다.')).toBeVisible({ timeout: 3000 });
+    // success 형식의 "도메인 캐시 퍼지 완료 — 0건 삭제" 토스트는 노출되지 않아야 한다
+    await expect(page.getByText('도메인 캐시 퍼지 완료 — 0건 삭제')).toHaveCount(0);
+  });
+
+  /**
    * 이슈 #80 회귀 방지 — 오리진 편집 폼에서 Enter 키 제출·Esc 취소가 동작하지 않던 버그
    * 수정 후:
    * - 오리진 입력 필드에서 Enter 키 누르면 폼이 제출되어야 한다
