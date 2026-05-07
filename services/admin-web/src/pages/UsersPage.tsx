@@ -33,7 +33,10 @@ import { Skeleton } from '../components/ui/skeleton';
 const createSchema = z.object({
   username: z.string()
     .min(1, '이메일을 입력해주세요.')
-    .email('이메일 형식이 아닙니다.'),
+    .email('이메일 형식이 아닙니다.')
+    // 서버 한도(254자)와 동기화 — 클라이언트에서 인라인 에러로 즉시 안내해 서버 400 왕복 방지 (#253).
+    // 서버: services/admin-server/src/routes/users.ts `z.string().regex(EMAIL_LIKE_RE).max(254)`.
+    .max(254, '이메일은 254자를 넘을 수 없습니다.'),
   password: z.string()
     .min(1, '비밀번호를 입력해주세요.')
     .min(8, '8자 이상 입력해주세요.'),
@@ -75,8 +78,18 @@ export function UsersPage() {
       createForm.reset();
     },
     onError: (e) => {
-      const status = (e as { response?: { status?: number } }).response?.status;
-      toast.error(status === 409 ? '이미 존재하는 이메일입니다.' : '사용자 추가에 실패했습니다.');
+      // 409 중복 / 400 invalid_input(형식·길이 위반) / 그 외 일반 실패로 분기.
+      // 클라이언트 zod max(254)로 대부분 차단되지만, 멀티탭/IME paste 등 우회 시 서버 400을 사람이 읽을 수 있는
+      // 토스트로 노출 (#253).
+      const err = e as { response?: { status?: number; data?: { error?: string } } };
+      const status = err.response?.status;
+      if (status === 409) {
+        toast.error('이미 존재하는 이메일입니다.');
+      } else if (status === 400 && err.response?.data?.error === 'invalid_input') {
+        toast.error('이메일 형식이 올바르지 않거나 너무 깁니다 (최대 254자).');
+      } else {
+        toast.error('사용자 추가에 실패했습니다.');
+      }
     },
   });
 
@@ -280,8 +293,10 @@ export function UsersPage() {
             <div>
               {/* htmlFor/id 연결 — 레이블 클릭 시 입력 필드 포커스·스크린 리더 연동 (#79) */}
               <Label htmlFor="add-user-email">이메일</Label>
-              {/* 이메일 입력 — autocomplete="username"으로 브라우저 자동완성·비밀번호 매니저 연동 지원 */}
-              <Input id="add-user-email" type="email" autoComplete="username" {...createForm.register('username')} />
+              {/* 이메일 입력 — autocomplete="username"으로 브라우저 자동완성·비밀번호 매니저 연동 지원.
+               *  maxLength=254 — 서버 한도와 동기화한 입력 단계 가드. zod max(254)와 이중 방어 (#253).
+               *  IME 환경에서도 키보드 입력 단계에서 길이 초과를 차단해 서버 왕복 비용 절감. */}
+              <Input id="add-user-email" type="email" autoComplete="username" maxLength={254} {...createForm.register('username')} />
               {createForm.formState.errors.username && <p className="text-xs text-destructive">{createForm.formState.errors.username.message}</p>}
             </div>
             <div>
