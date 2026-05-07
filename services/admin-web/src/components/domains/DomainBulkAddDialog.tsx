@@ -10,6 +10,18 @@ interface DomainBulkAddDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
+/**
+ * 일괄 추가 입력 가드 상한 (#255)
+ * - MAX_INPUT_CHARS: textarea `maxLength`로 강제하는 총 글자 수 한도(64KB).
+ *   사용자가 실수로 거대한 텍스트(예: 40,000줄, 1.4MB)를 붙여넣어도 입력 단계에서 hard cap 되어
+ *   Fastify body-limit(1MB) 초과로 인한 413 / admin-server 트랜잭션 장기 점유를 사전 차단한다.
+ * - MAX_LINES: 한 번에 등록 가능한 줄 수 상한. 빈 줄 포함 전체 줄 수 기준으로 검사한다.
+ *   서버 `/api/domains/bulk` 가드(domains.length ≤ MAX_LINES)와 일치시켜 직접 API 호출 시에도
+ *   동일하게 거부되도록 한다.
+ */
+export const BULK_ADD_MAX_INPUT_CHARS = 65536;
+export const BULK_ADD_MAX_LINES = 500;
+
 export function DomainBulkAddDialog({ open, onOpenChange }: DomainBulkAddDialogProps) {
   const [text, setText] = useState('');
   const [parseError, setParseError] = useState<string | null>(null);
@@ -23,9 +35,21 @@ export function DomainBulkAddDialog({ open, onOpenChange }: DomainBulkAddDialogP
    */
   const totalLines = text === '' ? 0 : text.split('\n').length;
   const domainCount = text.split('\n').filter((l) => l.trim().length > 0).length;
+  // (#255) 줄 수 상한 초과 시 미리보기/버튼 disabled 동기화 — 클릭 후 에러를 띄우는 것보다 즉각적 피드백 제공
+  const overLineLimit = totalLines > BULK_ADD_MAX_LINES;
 
   /** 각 줄을 공백으로 split하여 { host, origin } 파싱 */
   function parseLines(): Array<{ host: string; origin: string }> | null {
+    // 줄 수 상한 가드 (#255) — 빈 줄 포함 전체 줄 수가 한도를 넘으면 파싱 진입 전에 거부.
+    // 거대한 입력(예: 40,000줄)이 그대로 통과해 미리보기/제출 버튼이 활성화되는 것을 차단한다.
+    const totalLinesAtParse = text === '' ? 0 : text.split('\n').length;
+    if (totalLinesAtParse > BULK_ADD_MAX_LINES) {
+      setParseError(
+        `한 번에 입력할 수 있는 줄 수는 최대 ${BULK_ADD_MAX_LINES}줄입니다 (현재 ${totalLinesAtParse}줄). 나누어 등록해 주세요.`,
+      );
+      return null;
+    }
+
     const lines = text
       .split('\n')
       .map((l) => l.trim())
@@ -127,6 +151,9 @@ export function DomainBulkAddDialog({ open, onOpenChange }: DomainBulkAddDialogP
           className="font-mono resize-y"
           placeholder={"textbook.com https://textbook.com\ncdn.school.kr https://origin.school.kr"}
           data-testid="bulk-add-textarea"
+          // 입력 단계 hard cap (#255) — 붙여넣기로 거대한 텍스트가 누적되는 것을 브라우저 차원에서 차단.
+          // 줄 수 상한과 분리된 글자 수 가드(64KB)로, 한 줄짜리 초장문도 사전 거부된다.
+          maxLength={BULK_ADD_MAX_INPUT_CHARS}
         />
         {/* 입력 미리보기 — 큰 입력(예: 1000줄) 붙여넣었을 때 의도치 않은 대량 등록 방지용 카운트 표시 (#219) */}
         <p
@@ -136,7 +163,9 @@ export function DomainBulkAddDialog({ open, onOpenChange }: DomainBulkAddDialogP
         >
           {domainCount === 0
             ? '입력된 도메인이 없습니다.'
-            : `${totalLines}줄 / 도메인 ${domainCount}개`}
+            : overLineLimit
+              ? `${totalLines}줄 / 도메인 ${domainCount}개 — 최대 ${BULK_ADD_MAX_LINES}줄까지 등록할 수 있습니다.`
+              : `${totalLines}줄 / 도메인 ${domainCount}개`}
         </p>
         {parseError && (
           <p className="text-xs text-destructive" data-testid="bulk-add-error">
@@ -151,7 +180,7 @@ export function DomainBulkAddDialog({ open, onOpenChange }: DomainBulkAddDialogP
               버튼 disabled 신호를 동기화하여 toolbar 일괄 삭제와 일관성 확보 (#232) */}
           <Button
             onClick={handleSubmit}
-            disabled={bulkAdd.isPending || domainCount === 0}
+            disabled={bulkAdd.isPending || domainCount === 0 || overLineLimit}
             data-testid="bulk-add-submit"
           >
             {bulkAdd.isPending

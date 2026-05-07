@@ -345,6 +345,15 @@ export async function domainRoutes(
       if (!Array.isArray(domains) || domains.length === 0) {
         return reply.status(400).send({ error: 'domains 배열은 필수 항목입니다.' });
       }
+      // (#255) 일괄 등록 상한 가드 — admin-web Textarea의 줄 수 상한과 일치시켜
+      // 직접 API 호출이나 mock 우회로 거대한 배열이 들어오는 경우에도 동일하게 거부한다.
+      // Fastify body-limit(1MB) 외 별도의 length 가드가 없어 long-running 트랜잭션 / 503 위험을 사전 차단.
+      const BULK_MAX_DOMAINS = 500;
+      if (domains.length > BULK_MAX_DOMAINS) {
+        return reply.status(400).send({
+          error: `한 번에 등록할 수 있는 도메인은 최대 ${BULK_MAX_DOMAINS}개입니다 (요청: ${domains.length}개).`,
+        });
+      }
       // host 정규화 (#201) — DNS case-insensitive. 정규화 후 검증/저장 모두 lowercase 입력으로 일관.
       // 입력값을 직접 mutate 하면 호출 측 객체에 영향이 가므로 새 배열을 만들고 이후 단계에 전달한다.
       const normalizedHostDomains = domains.map((d) => ({

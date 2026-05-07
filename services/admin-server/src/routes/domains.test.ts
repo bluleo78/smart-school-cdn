@@ -448,6 +448,41 @@ describe('POST /api/domains/bulk', () => {
     expect(res.statusCode).toBe(201);
   });
 
+  // (#255) domains.length 상한 — 거대한 배열로 인한 long-running 트랜잭션/503 위험 사전 차단
+  it('domains 배열 길이가 500개를 초과하면 400을 반환한다 (#255)', async () => {
+    const repo = makeRepo();
+    const app = buildApp(repo);
+    // 501개 — 한도(500) 초과
+    const domains = Array.from({ length: 501 }, (_, i) => ({
+      host: `host${i}.example.com`,
+      origin: `https://host${i}.example.com`,
+    }));
+    const res = await app.inject({
+      method: 'POST', url: '/api/domains/bulk',
+      payload: { domains },
+    });
+    expect(res.statusCode).toBe(400);
+    const body = JSON.parse(res.body);
+    expect(body.error).toContain('최대 500');
+    expect(body.error).toContain('501');
+    // 어느 것도 저장되지 않아야 한다 — 부분 저장 방지
+    expect(repo.findByHost('host0.example.com')).toBeUndefined();
+  });
+
+  it('domains 배열 길이가 정확히 500개면 정상 처리된다 (#255)', async () => {
+    const repo = makeRepo();
+    const app = buildApp(repo);
+    const domains = Array.from({ length: 500 }, (_, i) => ({
+      host: `host${i}.example.com`,
+      origin: `https://host${i}.example.com`,
+    }));
+    const res = await app.inject({
+      method: 'POST', url: '/api/domains/bulk',
+      payload: { domains },
+    });
+    expect(res.statusCode).toBe(201);
+  });
+
   it('domains 배열이 없으면 400을 반환한다', async () => {
     const repo = makeRepo();
     const app = buildApp(repo);
