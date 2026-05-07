@@ -364,6 +364,47 @@ test.describe('도메인 관리 — 도메인 목록', () => {
     await page.getByTestId('empty-add-domain-btn').click();
     await expect(page.getByTestId('add-domain-dialog')).toBeVisible();
   });
+
+  /**
+   * 이슈 #242 회귀 방지 — `?enabled` 쿼리 strict 검증
+   * 'true'/'false'/없음만 유효하고, 그 외 임의 값은 silent하게 false로 해석되지 않고
+   * 무시(undefined)되어야 한다. URL 자체에서도 잘못된 enabled가 정리된다.
+   */
+  test('?enabled=invalid 같은 잘못된 쿼리값은 무시되고 전체 목록이 표시된다 (#242)', async ({ page }) => {
+    await setupBaseMocks(page);
+    // mock이 필요한 이유: enabled 파라미터가 undefined로 처리될 때(전체 목록) 응답을 결정하기 위함.
+    // mock이 재현하는 조건: 클라이언트가 enabled 파라미터를 빼고 /domains를 호출하는 경우.
+    // 이 mock이 실제 버그 조건과 동일한 이유: 버그 fix 후 잘못된 enabled는 undefined로 fallback되어
+    // 서버에 enabled 파라미터 없이 전체 목록을 요청하게 된다.
+    await mockApi(page, 'GET', '/domains', createDomains());
+    // 만약 버그가 살아있어 enabled=false로 호출되면 빈 배열을 돌려 테스트가 실패하도록 모킹
+    await mockApi(page, 'GET', '/domains?enabled=false', []);
+
+    await page.goto('/domains?enabled=invalid');
+
+    // 잘못된 값은 무시되어 전체 도메인이 표시되어야 한다
+    await expect(page.getByTestId('domains-table')).toBeVisible();
+    await expect(page.getByTestId('domain-link-textbook.com')).toBeVisible();
+    await expect(page.getByTestId('domain-link-cdn.school.kr')).toBeVisible();
+
+    // URL에서도 잘못된 enabled 파라미터가 제거되어야 한다 (공유 링크 오염 방지)
+    await expect.poll(() => new URL(page.url()).searchParams.get('enabled')).toBeNull();
+  });
+
+  /**
+   * 이슈 #242 — 'True' 같은 대소문자 변형도 strict 비교 대상이므로 무시되어야 한다.
+   */
+  test('?enabled=True (대문자) 도 무시되고 전체 목록이 표시된다 (#242)', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+    await mockApi(page, 'GET', '/domains?enabled=false', []);
+
+    await page.goto('/domains?enabled=True');
+
+    await expect(page.getByTestId('domain-link-textbook.com')).toBeVisible();
+    await expect(page.getByTestId('domain-link-cdn.school.kr')).toBeVisible();
+    await expect.poll(() => new URL(page.url()).searchParams.get('enabled')).toBeNull();
+  });
 });
 
 test.describe('도메인 관리 — 도메인 추가', () => {

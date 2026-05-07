@@ -4,7 +4,7 @@
  * - 기존 사이드패널 + 프록시 테스트 제거
  * - 필터 상태를 useSearchParams로 관리하여 URL에 동기화 (#68)
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogTitle } from '../components/ui/dialog';
@@ -206,16 +206,28 @@ export function DomainsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
 
   /** URL searchParams에서 현재 필터 값을 파생 */
+  // enabled 파라미터 strict 검증 — 'true'/'false'만 허용하고, 그 외 값('invalid', '', '1', 'True' 등)은
+  // silent하게 false로 해석되던 버그(#242)를 막기 위해 undefined로 fallback한다.
+  const enabledRaw = searchParams.get('enabled');
+  const enabledFilter =
+    enabledRaw === 'true' ? true : enabledRaw === 'false' ? false : undefined;
+  // 잘못된 enabled 값은 URL에서 제거 — 사용자가 잘못된 상태로 공유 링크를 만드는 것을 방지
+  const hasInvalidEnabled = enabledRaw !== null && enabledFilter === undefined;
   const filter: DomainsFilter = {
     q: searchParams.get('q') ?? undefined,
-    // enabled 파라미터: 'true' | 'false' → boolean, 없으면 undefined
-    enabled: searchParams.has('enabled')
-      ? searchParams.get('enabled') === 'true'
-      : undefined,
+    enabled: enabledFilter,
     // sort/order: 없으면 undefined (API 기본값 created_at DESC로 동작)
     sort: searchParams.get('sort') ?? undefined,
     order: (searchParams.get('order') as 'asc' | 'desc' | null) ?? undefined,
   };
+
+  // 잘못된 enabled 쿼리값을 URL에서 제거 (마운트/변경 시 1회). replace로 히스토리 오염 방지.
+  useEffect(() => {
+    if (!hasInvalidEnabled) return;
+    const next = new URLSearchParams(searchParams);
+    next.delete('enabled');
+    setSearchParams(next, { replace: true });
+  }, [hasInvalidEnabled, searchParams, setSearchParams]);
 
   /**
    * 필터 변경 시 URL searchParams에 반영 (replace: true로 히스토리 오염 방지).
