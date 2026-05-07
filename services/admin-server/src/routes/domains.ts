@@ -283,7 +283,25 @@ export async function domainRoutes(
     }
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
     if (!url.hostname) return false;
+    // path/query/fragment 거부 — origin URL 은 scheme+host[+port] 만 의미가 있다.
+    // proxy 가 upstream 에 path 를 그대로 prefix 하지 않게 막아 잘못된 라우팅을 방지한다 (#191).
+    // `new URL()` 은 path 가 없으면 pathname 을 '/' 로 자동 채우므로 '/' 만 허용 처리한다.
+    if (url.pathname !== '' && url.pathname !== '/') return false;
+    if (url.search !== '') return false;
+    if (url.hash !== '') return false;
     return true;
+  }
+
+  /**
+   * origin URL 정규화 — 검증을 통과한 입력을 표준 형태(`scheme://host[:port]`)로 환원.
+   * trailing slash, host 대소문자, 자동 채워진 pathname '/' 가 다른 문자열로 저장되는 것을
+   * 막아 동일 origin 이 두 번 저장되는 문제를 방지한다 (#191).
+   *
+   * `URL.origin` 은 hostname 을 자동 lowercase 처리하고 path/query/hash 를 포함하지 않는다.
+   * 호출 전에 `isValidOrigin` 으로 검증된 입력을 가정하므로 여기서는 throw 하지 않는다.
+   */
+  function normalizeOrigin(origin: string): string {
+    return new URL(origin).origin;
   }
 
   /** origin 검증 실패 시 표시할 공통 에러 메시지 — POST/PUT/bulk 공유 */
@@ -314,7 +332,10 @@ export async function domainRoutes(
           return reply.status(400).send({ error: `${ORIGIN_INVALID_MSG} (입력: "${preview}")` });
         }
       }
-      const result = domainRepo.bulkInsert(domains);
+      // origin 정규화 — trailing slash/host 대소문자/path 자동 추가가 동일 origin 을
+      // 다른 문자열로 저장하지 않도록 표준형(`URL.origin`)으로 통일한다 (#191).
+      const normalizedDomains = domains.map((d) => ({ host: d.host, origin: normalizeOrigin(d.origin) }));
+      const result = domainRepo.bulkInsert(normalizedDomains);
       const synced = await syncToProxy(domainRepo);
       if (!synced) {
         return reply.status(502).send({ error: 'Proxy 동기화 실패', result });
@@ -377,7 +398,9 @@ export async function domainRoutes(
       if (!isValidOrigin(origin)) {
         return reply.status(400).send({ error: ORIGIN_INVALID_MSG });
       }
-      domainRepo.upsert(host, origin);
+      // origin 정규화 — `URL.origin` 으로 trailing slash/host casing 표준화 (#191)
+      const normalizedOrigin = normalizeOrigin(origin);
+      domainRepo.upsert(host, normalizedOrigin);
       const synced = await syncToProxy(domainRepo);
       if (!synced) {
         return reply.status(502).send({
@@ -425,6 +448,9 @@ export async function domainRoutes(
     if (origin !== undefined && !isValidOrigin(origin)) {
       return reply.status(400).send({ error: ORIGIN_INVALID_MSG });
     }
+    // origin 정규화 — 검증 통과 시 표준형으로 변환 (#191).
+    // origin 이 undefined 면 그대로 유지(부분 업데이트 의미 보존)하고, 정의되었을 때만 표준화.
+    const normalizedOrigin = origin !== undefined ? normalizeOrigin(origin) : undefined;
     // enabled는 0 또는 1만 허용 — 임의 정수가 DB에 저장되면 UI가 상태를 오판한다 (#156)
     if (enabled !== undefined && enabled !== 0 && enabled !== 1) {
       return reply.status(400).send({ error: 'enabled는 0 또는 1이어야 합니다.' });
@@ -438,7 +464,7 @@ export async function domainRoutes(
     if (!original) {
       return reply.status(404).send({ error: '도메인을 찾을 수 없습니다.' });
     }
-    const updated = domainRepo.update(host, { origin, enabled, description });
+    const updated = domainRepo.update(host, { origin: normalizedOrigin, enabled, description });
     if (!updated) {
       return reply.status(404).send({ error: '도메인을 찾을 수 없습니다.' });
     }

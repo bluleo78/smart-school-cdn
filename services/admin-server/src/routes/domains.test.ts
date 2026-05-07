@@ -283,6 +283,56 @@ describe('POST /api/domains', () => {
     expect(res.statusCode).toBe(400);
     expect(JSON.parse(res.body).error).toContain('유효한 origin URL이 아닙니다');
   });
+
+  /** origin 정규화 — trailing slash/host casing/path 표준화 (#191) */
+  it('trailing slash 가 있는 origin 은 정규화되어 저장된다 (#191)', async () => {
+    const repo = makeRepo();
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'POST', url: '/api/domains',
+      payload: { host: 'a.test', origin: 'https://example.com/' },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(JSON.parse(res.body).origin).toBe('https://example.com');
+    expect(repo.findByHost('a.test')?.origin).toBe('https://example.com');
+  });
+
+  it('대문자 호스트 origin 은 lowercase 로 정규화된다 (#191)', async () => {
+    const repo = makeRepo();
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'POST', url: '/api/domains',
+      payload: { host: 'a.test', origin: 'https://EXAMPLE.com' },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(JSON.parse(res.body).origin).toBe('https://example.com');
+  });
+
+  it('path 가 포함된 origin 은 400 으로 거부된다 (#191)', async () => {
+    const repo = makeRepo();
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'POST', url: '/api/domains',
+      payload: { host: 'a.test', origin: 'https://example.com/api/v2' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).error).toContain('유효한 origin URL이 아닙니다');
+  });
+
+  it('query/hash 가 포함된 origin 은 400 으로 거부된다 (#191)', async () => {
+    const repo = makeRepo();
+    const app = buildApp(repo);
+    const res1 = await app.inject({
+      method: 'POST', url: '/api/domains',
+      payload: { host: 'a.test', origin: 'https://example.com/?x=1' },
+    });
+    expect(res1.statusCode).toBe(400);
+    const res2 = await app.inject({
+      method: 'POST', url: '/api/domains',
+      payload: { host: 'a.test', origin: 'https://example.com/#frag' },
+    });
+    expect(res2.statusCode).toBe(400);
+  });
 });
 
 describe('POST /api/domains/bulk', () => {
@@ -626,6 +676,34 @@ describe('PUT /api/domains/:host', () => {
 
     expect(res.statusCode).toBe(502);
     // DB가 원래 origin으로 롤백되었는지 확인
+    expect(repo.findByHost('httpbin.org')?.origin).toBe('https://httpbin.org');
+  });
+
+  /** origin 정규화 — PUT 도 POST 와 동일하게 표준형으로 저장 (#191) */
+  it('PUT 시 trailing slash/대문자 호스트가 정규화되어 저장된다 (#191)', async () => {
+    const repo = makeRepo();
+    repo.upsert('httpbin.org', 'https://httpbin.org');
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/domains/httpbin.org',
+      payload: { origin: 'https://EXAMPLE.com/' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(repo.findByHost('httpbin.org')?.origin).toBe('https://example.com');
+  });
+
+  it('PUT 시 path 가 포함된 origin 은 400 으로 거부된다 (#191)', async () => {
+    const repo = makeRepo();
+    repo.upsert('httpbin.org', 'https://httpbin.org');
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/domains/httpbin.org',
+      payload: { origin: 'https://example.com/api' },
+    });
+    expect(res.statusCode).toBe(400);
+    // 원본은 유지
     expect(repo.findByHost('httpbin.org')?.origin).toBe('https://httpbin.org');
   });
 });

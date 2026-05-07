@@ -52,6 +52,30 @@ if (!existingCols.includes('enabled')) db.exec('ALTER TABLE domains ADD COLUMN e
 if (!existingCols.includes('description')) db.exec("ALTER TABLE domains ADD COLUMN description TEXT NOT NULL DEFAULT ''");
 if (!existingCols.includes('updated_at')) db.exec('ALTER TABLE domains ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0');
 
+// origin 정규화 마이그레이션 — 이슈 #191
+// 기존에 trailing slash / 대문자 호스트 / path 가 포함된 채 저장된 origin 들을
+// `URL.origin` 형태(scheme://host[:port])로 일괄 정규화한다.
+// path 가 포함된 row 도 host-level origin 만 남기는 의도이며, 정규화 후 동일 host 로
+// 충돌이 발생하면 더 짧은(원형에 가까운) origin 을 keeper 로 두고 나머지는 그대로 둔다 —
+// host 는 PK 라 origin 충돌은 발생하지 않는다.
+{
+  type DomainRow = { host: string; origin: string };
+  const rows = db.prepare('SELECT host, origin FROM domains').all() as DomainRow[];
+  const tx = db.transaction(() => {
+    for (const r of rows) {
+      try {
+        const normalized = new URL(r.origin).origin;
+        if (normalized !== r.origin) {
+          db.prepare('UPDATE domains SET origin = ? WHERE host = ?').run(normalized, r.host);
+        }
+      } catch {
+        // 파싱 실패 row 는 그대로 둔다 (기존 동작 보존, 추후 사용자가 수정).
+      }
+    }
+  });
+  tx();
+}
+
 // domain_stats 테이블 생성
 db.exec(`
   CREATE TABLE IF NOT EXISTS domain_stats (
