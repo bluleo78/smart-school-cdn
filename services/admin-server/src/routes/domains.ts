@@ -109,6 +109,33 @@ export async function syncToProxy(domainRepo: DomainRepository): Promise<boolean
   }
 }
 
+/**
+ * host 단위 직렬화 락 (#192)
+ *
+ * 무엇을: 동일 host에 대한 toggle/PUT/DELETE 요청을 직렬로 실행한다.
+ * 왜: toggle 핸들러가 `toggleEnabled → await syncToProxy → if(!synced) toggleEnabled(롤백)`
+ *     시퀀스를 직렬화하지 않아, 동시에 두 요청이 들어오면 사이에 다른 요청이 끼어들어
+ *     enabled 값이 의도와 어긋나거나 롤백이 다른 요청 결과를 덮어쓰는 race가 발생한다.
+ *
+ * 구현: Map<host, Promise> 체인. 새 요청은 현재 체인 끝에 await로 줄 서고,
+ *      자기 차례가 끝나면 Map에서 자기 promise를 제거한다 (메모리 leak 방지).
+ *      프로세스 단일 인스턴스라는 admin-server 운영 전제하에 유효 (멀티 인스턴스가
+ *      필요해지면 SQLite 단일 트랜잭션 또는 외부 분산 락으로 승격 필요).
+ */
+const hostLocks = new Map<string, Promise<unknown>>();
+async function withHostLock<T>(host: string, fn: () => Promise<T>): Promise<T> {
+  const prev = hostLocks.get(host) ?? Promise.resolve();
+  // 이전 작업의 실패가 다음 대기자에게 전파되지 않도록 catch로 흡수
+  const run = prev.catch(() => undefined).then(() => fn());
+  hostLocks.set(host, run);
+  try {
+    return await run;
+  } finally {
+    // 가장 마지막 등록된 promise가 자신일 때만 정리 (그 사이 다음 요청이 set했으면 보존)
+    if (hostLocks.get(host) === run) hostLocks.delete(host);
+  }
+}
+
 /** gRPC 팬아웃 — tls-service + dns-service에 전체 도메인 목록 push */
 async function fanOutGrpc(
   app: FastifyInstance,
@@ -386,6 +413,8 @@ export async function domainRoutes(
     Body: { origin?: string; enabled?: 0 | 1; description?: string };
   }>('/api/domains/:host', async (request, reply) => {
     const host = decodeURIComponent(request.params.host);
+    // (#192) host 단위 락으로 toggle과 직렬화 — PUT 중 toggle이 끼어들어 일관성이 깨지는 것을 방지
+    return withHostLock(host, async () => {
     const { origin, enabled, description } = request.body ?? {};
     // origin이 전달되었는데 빈 문자열이면 400 — POST와 동일한 필수값 보장
     if (origin !== undefined && origin.trim() === '') {
@@ -425,23 +454,40 @@ export async function domainRoutes(
     }
     await fanOutGrpc(app, domainRepo);
     return updated;
+    });
   });
 
-  /** 도메인 활성/비활성 토글 — 실패 시 롤백 + 502 */
+  /**
+   * 도메인 활성/비활성 토글 — 실패 시 롤백 + 502
+   *
+   * (#192) host 단위 락으로 toggle/PUT/DELETE를 직렬화. 동시 토글 시:
+   * - 이전: toggle → await sync → 롤백 toggle 사이에 다른 요청이 끼어들어 enabled 값이 어긋남
+   * - 이후: 같은 host 요청은 순차 실행되어 race 제거
+   *
+   * 또한 롤백을 `toggleEnabled` 재호출(invert)이 아닌 `update({enabled: original.enabled})`
+   * 형태의 절대값 복원으로 변경 — 락이 없는 경계 케이스에서도 idempotent.
+   */
   app.post<{ Params: { host: string } }>('/api/domains/:host/toggle', async (request, reply) => {
     const host = decodeURIComponent(request.params.host);
-    const toggled = domainRepo.toggleEnabled(host);
-    if (!toggled) {
-      return reply.status(404).send({ error: '도메인을 찾을 수 없습니다.' });
-    }
-    const synced = await syncToProxy(domainRepo);
-    if (!synced) {
-      // 롤백 — 다시 토글하여 원래 상태 복원
-      domainRepo.toggleEnabled(host);
-      return reply.status(502).send({ error: 'Proxy 동기화 실패' });
-    }
-    await fanOutGrpc(app, domainRepo);
-    return toggled;
+    return withHostLock(host, async () => {
+      // 롤백 시 절대값 복원을 위해 변경 전 enabled 값을 먼저 캡처
+      const original = domainRepo.findByHost(host);
+      if (!original) {
+        return reply.status(404).send({ error: '도메인을 찾을 수 없습니다.' });
+      }
+      const toggled = domainRepo.toggleEnabled(host);
+      if (!toggled) {
+        return reply.status(404).send({ error: '도메인을 찾을 수 없습니다.' });
+      }
+      const synced = await syncToProxy(domainRepo);
+      if (!synced) {
+        // 롤백 — 절대값(원본 enabled)으로 복원하여 invert 누적 문제 방지 (#192)
+        domainRepo.update(host, { enabled: original.enabled });
+        return reply.status(502).send({ error: 'Proxy 동기화 실패' });
+      }
+      await fanOutGrpc(app, domainRepo);
+      return toggled;
+    });
   });
 
   /** 도메인 강제 동기화 — Proxy + TLS + DNS 서비스에 전체 목록 재전송 */
@@ -783,6 +829,8 @@ export async function domainRoutes(
   app.delete<{ Params: { host: string } }>('/api/domains/:host', async (request, reply) => {
     // URL 인코딩된 호스트 디코딩 (*.textbook.com → %2A.textbook.com으로 전달됨)
     const host = decodeURIComponent(request.params.host);
+    // (#192) host 단위 락으로 toggle/PUT과 직렬화 — 삭제 중 끼어든 토글이 사라진 도메인을 가리키는 race 방지
+    return withHostLock(host, async () => {
     // 롤백을 위해 삭제 전 원본 값을 먼저 저장한다
     const original = domainRepo.findByHost(host);
     if (!original) {
@@ -809,5 +857,6 @@ export async function domainRoutes(
     const optEventsRepo = new OptimizationEventsRepository(domainRepo.database);
     optEventsRepo.deleteByHost(host);
     return reply.status(204).send();
+    });
   });
 }

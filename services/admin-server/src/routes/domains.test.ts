@@ -1160,3 +1160,61 @@ describe('GET /api/domains/:host/optimization/url-breakdown', () => {
     expect(res.statusCode).toBe(200); // NaN을 우아하게 무시
   });
 });
+
+/**
+ * (#192) 도메인 토글 동시 호출 race condition 회귀 테스트
+ *
+ * 무엇을: 동일 host에 대한 toggle 요청이 거의 동시에 들어오는 상황을 시뮬레이션해
+ *        host 단위 락으로 직렬화되는지, 롤백이 절대값 복원으로 idempotent한지 검증.
+ * 왜: 락이 없던 시절 `toggle → await sync → 롤백 toggle` 사이에 다른 요청이 끼어들면
+ *    enabled 값이 꼬이거나 성공한 다른 요청 결과가 손실됐다.
+ */
+describe('POST /api/domains/:host/toggle 동시성 (#192)', () => {
+  it('동일 host 두 개의 토글이 동시에 도착해도 직렬화되어 enabled가 결정적으로 갱신된다', async () => {
+    const repo = makeRepo();
+    repo.upsert('race.test', 'https://race.test');
+    // 시작 상태: enabled=1
+    const initial = repo.findByHost('race.test');
+    expect(initial?.enabled).toBe(1);
+
+    const app = buildApp(repo);
+    // 두 요청을 거의 동시에 발사 — 락이 없으면 syncToProxy await 사이에 두 번째가 끼어들 수 있음
+    const [r1, r2] = await Promise.all([
+      app.inject({ method: 'POST', url: '/api/domains/race.test/toggle' }),
+      app.inject({ method: 'POST', url: '/api/domains/race.test/toggle' }),
+    ]);
+    expect(r1.statusCode).toBe(200);
+    expect(r2.statusCode).toBe(200);
+    // 두 번 토글되면 원상복귀 — 1 → 0 → 1
+    const finalState = repo.findByHost('race.test');
+    expect(finalState?.enabled).toBe(1);
+  });
+
+  it('syncToProxy 실패 시 절대값 롤백 — 두 동시 요청이 모두 실패해도 원본 enabled로 복원된다', async () => {
+    // axios.post를 실패시켜 syncToProxy → false 경로를 강제
+    const axios = (await import('axios')).default;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const postSpy = (axios.post as any) as ReturnType<typeof vi.fn>;
+    postSpy.mockRejectedValueOnce(new Error('proxy down'));
+    postSpy.mockRejectedValueOnce(new Error('proxy down'));
+
+    const repo = makeRepo();
+    repo.upsert('rollback.test', 'https://rollback.test');
+    expect(repo.findByHost('rollback.test')?.enabled).toBe(1);
+
+    const app = buildApp(repo);
+    const [r1, r2] = await Promise.all([
+      app.inject({ method: 'POST', url: '/api/domains/rollback.test/toggle' }),
+      app.inject({ method: 'POST', url: '/api/domains/rollback.test/toggle' }),
+    ]);
+    // 둘 다 502 (sync 실패)
+    expect(r1.statusCode).toBe(502);
+    expect(r2.statusCode).toBe(502);
+    // 모두 롤백되어 원본 enabled(1)로 돌아와야 한다
+    // (이전 invert 롤백 구현은 절대값 복원이 아니어서 경계 케이스에서 0이 될 수 있었음)
+    expect(repo.findByHost('rollback.test')?.enabled).toBe(1);
+
+    // 다음 테스트를 위해 mock을 기본 성공으로 복원
+    postSpy.mockResolvedValue({ status: 200 });
+  });
+});
