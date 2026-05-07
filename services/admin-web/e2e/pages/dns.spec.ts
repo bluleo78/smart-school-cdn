@@ -174,6 +174,33 @@ test.describe('DNS 관리 페이지', () => {
     ).toEqual(expect.arrayContaining([expect.stringMatching(/^\d{2}\/\d{2}\s\d{2}:\d{2}$/)]));
   });
 
+  test('통계 탭 — 쿼리 추이 차트 Legend가 한국어 4종(전체/매칭/전달/없음)으로 표시된다 (#222)', async ({ page }) => {
+    // KPI 카드 ↔ 라인 색상 매핑 식별 가능해야 한다.
+    // nxdomain>0 버킷을 포함시켜 nxdomain 라인까지 4개가 모두 렌더되도록 한다.
+    await mockApi(page, 'GET', '/dns/status', createDnsStatusOnline());
+    await mockApi(page, 'GET', '/dns/records', createDnsRecords());
+    await mockDnsQuery(page, '/dns/queries', createDnsQueriesMixed());
+    await mockDnsQuery(page, '/dns/metrics', createDnsMetrics([
+      { ts: Date.now() - 60_000, total: 10, matched: 6, nxdomain: 2, forwarded: 2 },
+      { ts: Date.now(), total: 12, matched: 7, nxdomain: 1, forwarded: 4 },
+    ]));
+
+    await page.goto('/dns?tab=stats');
+
+    // Legend 컨테이너가 존재해야 한다 (수정 전에는 부재)
+    const legend = page.locator('.recharts-legend-wrapper');
+    await expect(legend).toBeVisible();
+
+    // 한국어 4종 시리즈 라벨 노출 — Tooltip / Legend 양쪽에서 동일하게 사용됨
+    await expect(legend.getByText('전체', { exact: true })).toBeVisible();
+    await expect(legend.getByText('매칭', { exact: true })).toBeVisible();
+    await expect(legend.getByText('전달', { exact: true })).toBeVisible();
+    await expect(legend.getByText('없음', { exact: true })).toBeVisible();
+
+    // nxdomain 라인이 실제로 그려져야 한다 (이전: 3 → 수정 후: 4)
+    await expect(page.locator('.recharts-line-curve')).toHaveCount(4);
+  });
+
   test('dns-service 오프라인 시 장애 배너가 표시된다', async ({ page }) => {
     await mockApi(page, 'GET', '/dns/status', createDnsStatusOffline());
     await mockApi(page, 'GET', '/dns/records', createDnsRecords());

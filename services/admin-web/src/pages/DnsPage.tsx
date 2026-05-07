@@ -10,6 +10,7 @@ import {
   XAxis,
   YAxis,
   Tooltip as ChartTooltip,
+  Legend,
   ResponsiveContainer,
   CartesianGrid,
 } from 'recharts';
@@ -401,11 +402,19 @@ function StatsTab() {
                     const pad = (n: number) => String(n).padStart(2, '0');
                     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
                   }}
+                  /* 값은 천단위 콤마로 가독성 확보 — KPI 카드 toLocaleString 표기와 일관 (#222) */
+                  formatter={(value: number | string) =>
+                    typeof value === 'number' ? value.toLocaleString() : value
+                  }
                 />
+                {/* Legend — KPI 카드(전체/매칭/전달/없음)와 라인 색상 매핑을 식별 가능하게 노출 (#222).
+                 * Line의 name 속성으로 한국어 라벨을 부여하면 Tooltip 항목명 / Legend 둘 다 동일하게 적용됨. */}
+                <Legend wrapperStyle={{ fontSize: 12 }} />
                 {/* 토큰 기반 stroke — 다크모드에서도 자동 대응 */}
                 <Line
                   type="monotone"
                   dataKey="total"
+                  name="전체"
                   stroke="var(--color-primary)"
                   strokeWidth={2}
                   dot={false}
@@ -414,6 +423,7 @@ function StatsTab() {
                 <Line
                   type="monotone"
                   dataKey="matched"
+                  name="매칭"
                   stroke="var(--color-success)"
                   strokeWidth={2}
                   dot={false}
@@ -421,7 +431,18 @@ function StatsTab() {
                 <Line
                   type="monotone"
                   dataKey="forwarded"
+                  name="전달"
                   stroke="var(--color-muted-foreground)"
+                  strokeWidth={2}
+                  dot={false}
+                />
+                {/* nxdomain 시리즈 — KPI에는 표시되지만 차트에 누락되어 데이터 정합성이 어긋났던 결함 수정 (#222).
+                 * KPI \"없음(NXDOMAIN)\"이 nxdomain>0일 때 destructive 색상이므로 라인도 동일 토큰 사용. */}
+                <Line
+                  type="monotone"
+                  dataKey="nxdomain"
+                  name="없음"
+                  stroke="var(--color-destructive)"
                   strokeWidth={2}
                   dot={false}
                 />
