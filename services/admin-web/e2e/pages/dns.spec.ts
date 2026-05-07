@@ -103,6 +103,31 @@ test.describe('DNS 관리 페이지', () => {
     await req;
   });
 
+  test('통계 탭 — 24시간 범위에서 x축 라벨이 MM/DD HH:mm 형식으로 표시된다 (#198 회귀)', async ({ page }) => {
+    // 어제 22:00 / 오늘 02:00 두 버킷 — HH:mm만으로는 같은 일자 식별 불가
+    const now = Date.now();
+    const yesterday22 = now - 22 * 60 * 60 * 1000; // 24h 윈도우 내, 어제 시점
+    const today02 = now - 2 * 60 * 60 * 1000; // 24h 윈도우 내, 오늘 시점
+    await mockApi(page, 'GET', '/dns/status', createDnsStatusOnline());
+    await mockApi(page, 'GET', '/dns/records', createDnsRecords());
+    await mockDnsQuery(page, '/dns/queries', createDnsQueriesMixed());
+    await mockDnsQuery(page, '/dns/metrics', createDnsMetrics([
+      { ts: yesterday22, total: 10, matched: 5, nxdomain: 0, forwarded: 5 },
+      { ts: today02, total: 20, matched: 10, nxdomain: 0, forwarded: 10 },
+    ]));
+
+    await page.goto('/dns?tab=stats');
+    await page.getByRole('button', { name: '24시간' }).click();
+
+    // x축 라벨이 'MM/DD HH:mm' 패턴(슬래시·공백 포함)이어야 한다.
+    // 1시간 모드의 'HH:mm'만 표기 정책은 24h 경계에서 동일 라벨 충돌 → fail
+    await expect.poll(async () =>
+      page.evaluate(() =>
+        Array.from(document.querySelectorAll('.recharts-xAxis text')).map((t) => t.textContent ?? ''),
+      ),
+    ).toEqual(expect.arrayContaining([expect.stringMatching(/^\d{2}\/\d{2}\s\d{2}:\d{2}$/)]));
+  });
+
   test('dns-service 오프라인 시 장애 배너가 표시된다', async ({ page }) => {
     await mockApi(page, 'GET', '/dns/status', createDnsStatusOffline());
     await mockApi(page, 'GET', '/dns/records', createDnsRecords());

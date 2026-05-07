@@ -327,18 +327,35 @@ function StatsTab() {
               <LineChart
                 data={(metrics ?? []).map(b => ({
                   ...b,
-                  t: new Date(b.ts).toLocaleTimeString('ko-KR', {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    hour12: false,
-                  }),
+                  /* x축 라벨 — 24시간 범위에서는 같은 시각이 어제/오늘 두 번 등장 가능하므로
+                   * 'MM/DD HH:mm'으로 날짜를 함께 표시해 디스앰비귀에이션 (#198).
+                   * 1시간 범위는 5분 버킷이라 'HH:mm'만으로 충분.
+                   * toLocaleString의 ko-KR 포맷('05. 07. 09:00')은 구분자 일관성 부족 → 직접 포맷. */
+                  t: (() => {
+                    const d = new Date(b.ts);
+                    const pad = (n: number) => String(n).padStart(2, '0');
+                    const hhmm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+                    return range === '24h'
+                      ? `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${hhmm}`
+                      : hhmm;
+                  })(),
                 }))}
                 margin={{ top: 5, right: 10, left: -20, bottom: 0 }}
               >
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
                 <XAxis dataKey="t" tick={{ fontSize: 10 }} />
                 <YAxis tick={{ fontSize: 10 }} />
-                <ChartTooltip />
+                {/* 툴팁 헤더는 항상 전체 날짜·시각 노출 — 어떤 범위에서든 정확한 시점 식별 가능 (#198).
+                 * payload[0].payload.ts(epoch ms)로부터 'YYYY-MM-DD HH:mm' 포맷팅. */}
+                <ChartTooltip
+                  labelFormatter={(_label, payload) => {
+                    const ts = (payload?.[0]?.payload as { ts?: number } | undefined)?.ts;
+                    if (typeof ts !== 'number') return _label as string;
+                    const d = new Date(ts);
+                    const pad = (n: number) => String(n).padStart(2, '0');
+                    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+                  }}
+                />
                 {/* 토큰 기반 stroke — 다크모드에서도 자동 대응 */}
                 <Line
                   type="monotone"
