@@ -1824,6 +1824,65 @@ test.describe('도메인 상세 — 설정 탭', () => {
     expect(putCallCount).toBe(0);
   });
 
+  /**
+   * 이슈 #215 회귀 방지 — DomainOptimizerSection 품질/최대 너비 입력값을 모두 지우면
+   * '0'으로 채워지고 dirty 상태로 전환되어 잘못된 검증 토스트·미저장 변경 경고가 발생하던 결함.
+   *
+   * 수정 전: onChange가 Number(e.target.value)로 빈 문자열을 0으로 보정 → input value="0",
+   *          isDirty=true(0!==85), 저장 시 "품질은 1–100 사이여야 합니다." 토스트.
+   * 수정 후: 빈 문자열은 null sentinel로 보존되어 input은 빈 상태 유지, 서버 PUT 호출되지 않음.
+   *
+   * 검증 파이프라인: 설정 탭 진입 → quality 전체 삭제 → input 값이 ''이며 PUT 미호출 확인.
+   */
+  test('최적화 프로파일 — 품질 입력 전체 삭제 시 0으로 보정되지 않고 빈값 유지 (회귀: #215)', async ({
+    page,
+  }) => {
+    await setupDetailMocks(page);
+    let putCallCount = 0;
+    await page.route('**/api/optimizer/profiles/textbook.com', (route) => {
+      if (route.request().method() === 'PUT') putCallCount++;
+      return route.fallback();
+    });
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '설정' }).click();
+
+    const qualityInput = page.getByTestId('optimizer-quality-input');
+    // 초기값(서버 모킹) 표시 확인 후 전체 삭제
+    await expect(qualityInput).not.toHaveValue('');
+    await qualityInput.fill('');
+
+    // 빈값 보정 금지 — input은 비어 있어야 한다 ('0' 금지)
+    await expect(qualityInput).toHaveValue('');
+
+    // 저장 시도 → 클라이언트 검증이 막고 PUT 미호출
+    await page.getByTestId('optimizer-save-btn').click();
+    await expect(page.getByText('품질은 1–100 사이여야 합니다.')).toBeVisible();
+    expect(putCallCount).toBe(0);
+  });
+
+  test('최적화 프로파일 — 최대 너비 입력 전체 삭제 시 0으로 보정되지 않고 빈값 유지 (회귀: #215)', async ({
+    page,
+  }) => {
+    // 수정 전: 빈 입력이 0으로 보정되어 max_width=0(너비 제한 없음)으로 의도치 않게 저장됨
+    // 수정 후: 빈 입력은 null sentinel — 검증에서 막혀 PUT 미호출
+    await setupDetailMocks(page);
+    let putCallCount = 0;
+    await page.route('**/api/optimizer/profiles/textbook.com', (route) => {
+      if (route.request().method() === 'PUT') putCallCount++;
+      return route.fallback();
+    });
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '설정' }).click();
+
+    const maxWidthInput = page.getByTestId('optimizer-max-width-input');
+    await maxWidthInput.fill('');
+    await expect(maxWidthInput).toHaveValue('');
+
+    await page.getByTestId('optimizer-save-btn').click();
+    await expect(page.getByText('최대 너비는 0 이상이어야 합니다.')).toBeVisible();
+    expect(putCallCount).toBe(0);
+  });
+
   test('최적화 프로파일 — 서버 400 에러 시 응답 메시지가 toast에 표시된다 (회귀: #48)', async ({ page }) => {
     // 수정 전: onError 콜백이 고정 문자열만 표시하여 서버 검증 메시지가 누락됨
     // 수정 후: 서버 응답의 message 필드를 toast에 표시해야 한다

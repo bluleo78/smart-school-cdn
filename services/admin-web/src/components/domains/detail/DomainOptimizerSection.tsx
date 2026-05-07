@@ -19,13 +19,21 @@ export function DomainOptimizerSection({ host }: Props) {
   const { data: profile, isLoading } = useOptimizerProfile(host);
   const updateMutation = useUpdateOptimizerProfile();
 
-  // 편집 중인 로컬 상태 — null이면 서버 값 사용 (파생 패턴)
-  const [localQuality, setQuality] = useState<number | null>(null);
-  const [localMaxWidth, setMaxWidth] = useState<number | null>(null);
+  // 편집 중인 로컬 상태.
+  // - undefined: 미편집 (서버 값 사용)
+  // - null: 사용자가 입력을 모두 지움 (빈 input 유지 — 0으로 보정 금지)
+  // - number: 사용자가 입력한 숫자
+  // 빈값 보정으로 0이 들어가면 dirty 오탐·잘못된 검증 토스트·의도치 않은 max_width=0 저장이 발생해(#215),
+  // null sentinel로 "값 미입력"을 명시 보존한다.
+  const [localQuality, setQuality] = useState<number | null | undefined>(undefined);
+  const [localMaxWidth, setMaxWidth] = useState<number | null | undefined>(undefined);
   const [localEnabled, setEnabled] = useState<boolean | null>(null);
 
-  const quality = localQuality ?? profile?.quality ?? 85;
-  const maxWidth = localMaxWidth ?? profile?.max_width ?? 0;
+  // 표시용 값 — null(빈값)이면 ''를 그대로 input에 바인딩해 빈 필드를 유지한다.
+  const qualityDisplay: number | '' =
+    localQuality === undefined ? (profile?.quality ?? 85) : (localQuality ?? '');
+  const maxWidthDisplay: number | '' =
+    localMaxWidth === undefined ? (profile?.max_width ?? 0) : (localMaxWidth ?? '');
   const enabled = localEnabled ?? profile?.enabled ?? true;
 
   /**
@@ -36,8 +44,8 @@ export function DomainOptimizerSection({ host }: Props) {
    */
   const isDirty =
     !!profile &&
-    ((localQuality !== null && localQuality !== profile.quality) ||
-      (localMaxWidth !== null && localMaxWidth !== profile.max_width) ||
+    ((localQuality !== undefined && localQuality !== profile.quality) ||
+      (localMaxWidth !== undefined && localMaxWidth !== profile.max_width) ||
       (localEnabled !== null && localEnabled !== profile.enabled));
 
   // 페이지 이탈 가드 — SPA 내 이동(사이드바/뒤로가기/도메인 행 클릭)은 AlertDialog,
@@ -47,22 +55,25 @@ export function DomainOptimizerSection({ host }: Props) {
 
   /** 저장 — 서버 전송 전 클라이언트 범위 검증으로 불필요한 API 호출을 방지한다 */
   function handleSave() {
-    if (quality < 1 || quality > 100) {
+    // 빈값(null)은 "값 미입력"으로 간주해 NaN 가드와 함께 명시 거부한다 (#215).
+    const q = qualityDisplay;
+    const mw = maxWidthDisplay;
+    if (q === '' || !Number.isFinite(q) || q < 1 || q > 100) {
       toast.error('품질은 1–100 사이여야 합니다.');
       return;
     }
-    if (maxWidth < 0) {
+    if (mw === '' || !Number.isFinite(mw) || mw < 0) {
       toast.error('최대 너비는 0 이상이어야 합니다.');
       return;
     }
     updateMutation.mutate(
-      { domain: host, quality, max_width: maxWidth, enabled },
+      { domain: host, quality: q, max_width: mw, enabled },
       {
         onSuccess: () => {
-          // 저장 후 로컬 state를 null로 리셋해 서버 재동기화를 보장한다.
+          // 저장 후 로컬 state를 undefined로 리셋해 서버 재동기화를 보장한다.
           // — 외부에서 profile이 갱신되어도 stale한 로컬 state가 우선되는 결함 방지 (#137·#172).
-          setQuality(null);
-          setMaxWidth(null);
+          setQuality(undefined);
+          setMaxWidth(undefined);
           setEnabled(null);
         },
       },
@@ -96,8 +107,12 @@ export function DomainOptimizerSection({ host }: Props) {
                 type="number"
                 min={1}
                 max={100}
-                value={quality}
-                onChange={(e) => setQuality(Number(e.target.value))}
+                value={qualityDisplay}
+                onChange={(e) => {
+                  // 빈 문자열은 null로 보존 — Number('')=0 보정으로 인한 dirty 오탐·잘못된 0 저장 방지(#215).
+                  const v = e.target.value;
+                  setQuality(v === '' ? null : Number(v));
+                }}
                 className="h-8 text-sm"
                 data-testid="optimizer-quality-input"
               />
@@ -114,8 +129,12 @@ export function DomainOptimizerSection({ host }: Props) {
                 id="optimizer-max-width"
                 type="number"
                 min={0}
-                value={maxWidth}
-                onChange={(e) => setMaxWidth(Number(e.target.value))}
+                value={maxWidthDisplay}
+                onChange={(e) => {
+                  // 빈 문자열은 null로 보존 — Number('')=0 보정으로 인한 의도치 않은 max_width=0 저장 방지(#215).
+                  const v = e.target.value;
+                  setMaxWidth(v === '' ? null : Number(v));
+                }}
                 className="h-8 text-sm"
                 data-testid="optimizer-max-width-input"
               />
