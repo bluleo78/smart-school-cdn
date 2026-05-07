@@ -176,6 +176,27 @@ describe('usersRoutes', () => {
     expect(ctx.userRepo.findById(other.id)?.disabled_at).not.toBeNull();
   });
 
+  // 이슈 #194 — 이미 비활성 사용자에게 DELETE 재호출 시 disabled_at 변경 없음 (멱등)
+  it('DELETE /api/users/:id — 이미 비활성 사용자 재호출 시 disabled_at 보존', async () => {
+    const other = ctx.userRepo.create('other@x.y', await hashPassword('p'));
+    const r1 = await ctx.app.inject({
+      method: 'DELETE', url: `/api/users/${other.id}`,
+      cookies: ctx.cookies,
+    });
+    expect(r1.statusCode).toBe(200);
+    const firstDisabledAt = ctx.userRepo.findById(other.id)?.disabled_at;
+    expect(firstDisabledAt).not.toBeNull();
+
+    // 시간이 흘러도 덮어쓰지 않도록 강제 — 짧은 딜레이 후 재호출
+    await new Promise((res) => setTimeout(res, 10));
+    const r2 = await ctx.app.inject({
+      method: 'DELETE', url: `/api/users/${other.id}`,
+      cookies: ctx.cookies,
+    });
+    expect(r2.statusCode).toBe(200);
+    expect(ctx.userRepo.findById(other.id)?.disabled_at).toBe(firstDisabledAt);
+  });
+
   it('DELETE /api/users/:id — 자기 자신은 400', async () => {
     const r = await ctx.app.inject({
       method: 'DELETE', url: `/api/users/${ctx.adminId}`,

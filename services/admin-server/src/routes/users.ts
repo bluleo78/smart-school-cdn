@@ -118,8 +118,14 @@ export const usersRoutes: FastifyPluginAsync<{ userRepo: UserRepository }> = asy
     if (req.user && Number(req.user.sub) === id) {
       return reply.code(400).send({ error: 'cannot_disable_self' });
     }
-    if (!userRepo.findById(id)) {
+    const target = userRepo.findById(id);
+    if (!target) {
       return reply.code(404).send({ error: 'user_not_found' });
+    }
+    if (target.disabled_at) {
+      // 이미 비활성 상태인 사용자에게 재호출 시 멱등성 보장 — DB write 생략하여
+      // 최초 disabled_at(audit 가치) 보존 (#194). enable 핸들러와 대칭.
+      return { ok: true };
     }
     userRepo.disable(id);
     return { ok: true };
