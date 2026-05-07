@@ -54,10 +54,16 @@ export async function cacheRoutes(app: FastifyInstance) {
     let disk = { used_bytes: 0, max_bytes: 0, entry_count: 0 };
     try {
       const s = await app.storageClient.stats();
+      // entry_count는 storage proto에 단일 필드가 없으므로 domain_stats[].file_count 합산으로 산출 (#195).
+      // 합산 누락 시 대시보드 '캐시 항목' 카드가 항상 0으로 표시되어 운영 판단을 오도하던 결함을 수정.
+      const totalEntries = (s.domain_stats ?? []).reduce(
+        (sum, d) => sum + Number(d.file_count ?? 0),
+        0,
+      );
       disk = {
         used_bytes:  Number(s.used_bytes   ?? 0),
         max_bytes:   Number(s.total_bytes  ?? 0),
-        entry_count: 0,
+        entry_count: totalEntries,
       };
     } catch {
       // storage offline → 0 폴백

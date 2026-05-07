@@ -37,8 +37,15 @@ const DOMAINS_SCHEMA = `
   );
 `;
 
+/** storage Stats 응답 형태 — domain_stats 포함 (entry_count 합산 검증용 #195) */
+type StatsImpl = () => Promise<{
+  used_bytes: number;
+  total_bytes: number;
+  domain_stats?: Array<{ domain: string; size_bytes: number; file_count: number; hit_rate: number }>;
+}>;
+
 /** storageClient 전체 mock — stats/popular/purge* 포함 */
-function makeStorageMock(statsImpl: () => Promise<{ used_bytes: number; total_bytes: number }>) {
+function makeStorageMock(statsImpl: StatsImpl) {
   return {
     stats:       statsImpl,
     popular:     vi.fn<() => Promise<{ entries: unknown[] }>>(),
@@ -103,7 +110,15 @@ describe('GET /api/cache/stats (재설계)', () => {
 
   it('샘플 데이터에서 비율 정확히 계산 + by_domain 포함', async () => {
     const { app, db } = mkApp({
-      storage: makeStorageMock(async () => ({ used_bytes: 1000, total_bytes: 10000 })),
+      storage: makeStorageMock(async () => ({
+        used_bytes: 1000,
+        total_bytes: 10000,
+        // #195: domain_stats[].file_count 합산이 disk.entry_count로 노출되는지 검증 (12 + 7 = 19)
+        domain_stats: [
+          { domain: 'a.test', size_bytes: 600, file_count: 12, hit_rate: 0.6 },
+          { domain: 'b.test', size_bytes: 400, file_count: 7,  hit_rate: 0.4 },
+        ],
+      })),
     });
     db.prepare(`INSERT INTO domain_stats (
       host, timestamp, requests, cache_hits, cache_misses, bandwidth, avg_response_time,
@@ -123,13 +138,45 @@ describe('GET /api/cache/stats (재설계)', () => {
     expect(body.l1_hit_rate).toBeCloseTo(0.60);
     expect(body.edge_hit_rate).toBeCloseTo(0.70);
     expect(body.bypass_rate).toBeCloseTo(0.20);
-    expect(body.disk).toEqual({ used_bytes: 1000, max_bytes: 10000, entry_count: 0 });
+    expect(body.disk).toEqual({ used_bytes: 1000, max_bytes: 10000, entry_count: 19 });
     expect(body.by_domain).toHaveLength(1);
     expect(body.by_domain[0]).toMatchObject({
       host: 'a.test', requests: 100, l1_hits: 60, l2_hits: 10, bypass_total: 20,
     });
     expect(body.by_domain[0].l1_hit_rate).toBeCloseTo(0.60);
     expect(body.by_domain[0].edge_hit_rate).toBeCloseTo(0.70);
+  });
+
+  it('disk.entry_count는 storage domain_stats[].file_count 합산값 (#195)', async () => {
+    // #195: 이전엔 0 하드코딩으로 대시보드 '캐시 항목' 카드가 항상 0이었다.
+    // domain_stats가 비어있으면 0, 일부 file_count 누락이면 ?? 0으로 안전하게 합산되어야 한다.
+    const { app } = mkApp({
+      storage: makeStorageMock(async () => ({
+        used_bytes: 2048,
+        total_bytes: 4096,
+        domain_stats: [
+          { domain: 'x.test', size_bytes: 1024, file_count: 3, hit_rate: 0.5 },
+          { domain: 'y.test', size_bytes: 1024, file_count: 0, hit_rate: 0 },
+          // file_count 필드 누락 케이스 — undefined → 0 폴백 검증
+          { domain: 'z.test', size_bytes: 0 } as unknown as {
+            domain: string; size_bytes: number; file_count: number; hit_rate: number;
+          },
+        ],
+      })),
+    });
+    const res = await app.inject({ method: 'GET', url: '/api/cache/stats' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().disk).toEqual({ used_bytes: 2048, max_bytes: 4096, entry_count: 3 });
+  });
+
+  it('disk.entry_count — domain_stats가 빈 배열이면 0 (#195)', async () => {
+    const { app } = mkApp({
+      storage: makeStorageMock(async () => ({
+        used_bytes: 100, total_bytes: 200, domain_stats: [],
+      })),
+    });
+    const res = await app.inject({ method: 'GET', url: '/api/cache/stats' });
+    expect(res.json().disk.entry_count).toBe(0);
   });
 
   it('storage gRPC 실패 시 disk는 0, 나머지는 정상', async () => {
