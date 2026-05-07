@@ -267,7 +267,8 @@ test.describe('사용자 관리', () => {
     await otherRow.getByRole('button', { name: '비밀번호 재설정' }).click();
 
     // 비밀번호 재설정 다이얼로그의 입력 필드에 autocomplete="new-password" 속성이 있어야 함
-    const passwordInput = page.locator('input[type=password]');
+    // #211 confirm 필드 도입으로 input[type=password]가 다중 매치 → id 기반 단일 선택자로 한정
+    const passwordInput = page.locator('input#reset-password');
     await expect(passwordInput).toBeVisible();
     const autocomplete = await passwordInput.getAttribute('autocomplete');
     expect(autocomplete).toBe('new-password');
@@ -452,12 +453,13 @@ test.describe('사용자 관리', () => {
     const passwordInput = page.locator('input[name=password]');
     await expect(passwordInput).toHaveAttribute('type', 'password');
 
-    // 토글 버튼 클릭 → type=text (표시 상태)
-    await page.getByRole('button', { name: '비밀번호 표시' }).click();
+    // 새 비밀번호 필드의 토글 버튼만 한정 — #211 confirm 필드 도입으로 토글이 2개 존재
+    const toggleBtn = passwordInput.locator('..').getByRole('button', { name: /비밀번호 (표시|숨기기)/ });
+    await toggleBtn.click();
     await expect(passwordInput).toHaveAttribute('type', 'text');
 
     // 다시 클릭 → type=password (숨김 상태로 복귀)
-    await page.getByRole('button', { name: '비밀번호 숨기기' }).click();
+    await toggleBtn.click();
     await expect(passwordInput).toHaveAttribute('type', 'password');
   });
 
@@ -549,7 +551,9 @@ test.describe('사용자 관리', () => {
     await otherRow.getByRole('button', { name: '비밀번호 재설정' }).click();
 
     const newPassword = 'newpassword1234';
-    await page.fill('input[type=password]', newPassword);
+    await page.fill('input#reset-password', newPassword);
+    // confirmPassword 일치 입력 — 새 확인 필드 도입(#211) 후 mutation 통과 조건
+    await page.fill('input#reset-password-confirm', newPassword);
 
     await page.getByRole('button', { name: '재설정', exact: true }).click();
 
@@ -557,7 +561,7 @@ test.describe('사용자 관리', () => {
     await expect(page.getByRole('dialog')).toBeVisible();
 
     // 입력값이 보존되어야 함
-    await expect(page.locator('input[type=password]')).toHaveValue(newPassword);
+    await expect(page.locator('input#reset-password')).toHaveValue(newPassword);
   });
 
   // 이슈 #77 회귀 방지 — formatDateTime 12시간제(오전/오후) 표기 버그
@@ -648,9 +652,10 @@ test.describe('사용자 관리', () => {
     const myRow = page.getByTestId(`user-row-${TEST_USER.id}`);
     await myRow.getByRole('button', { name: '비밀번호 재설정' }).click();
 
-    // 현재 비밀번호 + 새 비밀번호 입력
+    // 현재 비밀번호 + 새 비밀번호 + 새 비밀번호 확인 입력 (#211 confirm 필드 도입)
     await page.fill('input#current-password', 'currentpass1');
     await page.fill('input#reset-password', 'newpassword1234');
+    await page.fill('input#reset-password-confirm', 'newpassword1234');
 
     await page.getByRole('button', { name: '재설정', exact: true }).click();
 
@@ -765,8 +770,9 @@ test.describe('사용자 관리', () => {
     const myRow = page.getByTestId(`user-row-${TEST_USER.id}`);
     await myRow.getByRole('button', { name: '비밀번호 재설정' }).click();
 
-    // 현재 비밀번호 필드를 비운 채 새 비밀번호만 입력
+    // 현재 비밀번호 필드를 비운 채 새 비밀번호 + 확인만 입력 (#211 confirm 필드 통과)
     await page.fill('input#reset-password', 'newpassword1234');
+    await page.fill('input#reset-password-confirm', 'newpassword1234');
 
     // 제출 — currentPassword 빈값
     await page.getByRole('button', { name: '재설정', exact: true }).click();
@@ -862,7 +868,9 @@ test.describe('사용자 관리', () => {
     const otherRow = page.getByTestId('user-row-2');
     await otherRow.getByRole('button', { name: '비밀번호 재설정' }).click();
 
-    await page.fill('input[type=password]', 'newpassword1234');
+    // #211 confirm 필드 도입 후 password + confirmPassword 둘 다 채워야 mutation 진행
+    await page.fill('input#reset-password', 'newpassword1234');
+    await page.fill('input#reset-password-confirm', 'newpassword1234');
 
     await page.getByRole('button', { name: '재설정', exact: true }).click();
 
@@ -871,6 +879,104 @@ test.describe('사용자 관리', () => {
 
     // 요청 완료
     resolveRequest!(null);
+  });
+
+  /**
+   * 이슈 #211 회귀 방지 — 비밀번호 재설정 다이얼로그 confirm 필드 누락
+   * 수정 전: '새 비밀번호' 단일 필드 → 토글 미사용 시 plaintext 미확인 오타 그대로 저장
+   * 수정 후: '새 비밀번호 확인' 필드 추가, 두 입력 일치 검증 통과해야 mutation 호출
+   */
+  test('비밀번호 재설정 — 새 비밀번호 확인 필드 존재 — 회귀 방지 #211', async ({ page }) => {
+    await mockApi(page, 'GET', '/users', baseUsers);
+
+    await page.goto('/users');
+
+    // other 사용자 비밀번호 재설정 다이얼로그 열기
+    const otherRow = page.getByTestId('user-row-2');
+    await otherRow.getByRole('button', { name: '비밀번호 재설정' }).click();
+
+    // 새 비밀번호 + 새 비밀번호 확인 두 필드 모두 표시되어야 함
+    await expect(page.locator('input#reset-password')).toBeVisible();
+    await expect(page.locator('input#reset-password-confirm')).toBeVisible();
+
+    // 확인 필드 autocomplete="new-password" 동일 적용
+    const confirmAutocomplete = await page.locator('input#reset-password-confirm').getAttribute('autocomplete');
+    expect(confirmAutocomplete).toBe('new-password');
+  });
+
+  test('비밀번호 재설정 — confirm 불일치 시 인라인 에러 + API 미호출 — #211', async ({ page }) => {
+    await mockApi(page, 'GET', '/users', baseUsers);
+
+    // 서버 호출 여부 추적 — 클라이언트 검증이 올바르면 PUT 라우트는 호출되지 않아야 함
+    let passwordApiCalled = false;
+    await page.route('**/api/users/2/password', async (route) => {
+      passwordApiCalled = true;
+      return route.fallback();
+    });
+
+    await page.goto('/users');
+    const otherRow = page.getByTestId('user-row-2');
+    await otherRow.getByRole('button', { name: '비밀번호 재설정' }).click();
+
+    // 의도한 비밀번호와 다른 오타가 confirm 에 들어간 시나리오
+    await page.fill('input#reset-password', 'Passw0rd!');
+    await page.fill('input#reset-password-confirm', 'Passw)rd!');
+
+    await page.getByRole('button', { name: '재설정', exact: true }).click();
+
+    // 인라인 에러 표시
+    await expect(page.getByText('비밀번호가 일치하지 않습니다.')).toBeVisible();
+
+    // 서버 API가 호출되지 않아야 함
+    expect(passwordApiCalled).toBe(false);
+  });
+
+  test('비밀번호 재설정 — confirm 빈값 시 인라인 에러 + API 미호출 — #211', async ({ page }) => {
+    await mockApi(page, 'GET', '/users', baseUsers);
+
+    let passwordApiCalled = false;
+    await page.route('**/api/users/2/password', async (route) => {
+      passwordApiCalled = true;
+      return route.fallback();
+    });
+
+    await page.goto('/users');
+    const otherRow = page.getByTestId('user-row-2');
+    await otherRow.getByRole('button', { name: '비밀번호 재설정' }).click();
+
+    // confirm 빈값
+    await page.fill('input#reset-password', 'newpassword1234');
+    await page.getByRole('button', { name: '재설정', exact: true }).click();
+
+    await expect(page.getByText('비밀번호를 한 번 더 입력해주세요.')).toBeVisible();
+    expect(passwordApiCalled).toBe(false);
+  });
+
+  test('비밀번호 재설정 — confirm 일치 시 정상 mutation 호출 — #211', async ({ page }) => {
+    await mockApi(page, 'GET', '/users', baseUsers);
+
+    let capturedBody: Record<string, unknown> | null = null;
+    await page.route('**/api/users/2/password', async (route) => {
+      if (route.request().method() === 'PUT') {
+        capturedBody = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
+        await route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' });
+      } else {
+        return route.fallback();
+      }
+    });
+
+    await page.goto('/users');
+    const otherRow = page.getByTestId('user-row-2');
+    await otherRow.getByRole('button', { name: '비밀번호 재설정' }).click();
+
+    await page.fill('input#reset-password', 'newpassword1234');
+    await page.fill('input#reset-password-confirm', 'newpassword1234');
+
+    await page.getByRole('button', { name: '재설정', exact: true }).click();
+
+    await expect.poll(() => capturedBody).not.toBeNull();
+    // confirmPassword 는 서버에 전송하지 않음 — password 만 전달
+    expect(capturedBody!['password']).toBe('newpassword1234');
   });
 
   /**
@@ -944,7 +1050,9 @@ test.describe('사용자 관리', () => {
     await page.goto('/users');
     const otherRow = page.getByTestId('user-row-2');
     await otherRow.getByRole('button', { name: '비밀번호 재설정' }).click();
-    await page.fill('input[type=password]', 'newpassword1234');
+    // #211 confirm 필드 도입 후 password + confirmPassword 둘 다 채워야 mutation 진행
+    await page.fill('input#reset-password', 'newpassword1234');
+    await page.fill('input#reset-password-confirm', 'newpassword1234');
     await page.getByRole('button', { name: '재설정', exact: true }).click();
 
     // 제출 중임을 확인

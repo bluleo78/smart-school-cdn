@@ -39,9 +39,14 @@ type CreateFormData = z.infer<typeof createSchema>;
 
 // 비밀번호 재설정 폼: isSelf 여부에 따라 currentPassword 필드 조건부 필수 (이슈 #31)
 // superRefine 대신 옵션 필드로 선언하고 핸들러에서 isSelf 체크
+// confirmPassword: 새 비밀번호 재입력 — 단일 필드 + 토글 미사용 시 plaintext 미확인 오타 저장 방지 (#211)
 const passwordSchema = z.object({
   currentPassword: z.string().optional(),
   password: z.string().min(1, '비밀번호를 입력해주세요.').min(8, '8자 이상 입력해주세요.'),
+  confirmPassword: z.string().min(1, '비밀번호를 한 번 더 입력해주세요.'),
+}).refine((d) => d.password === d.confirmPassword, {
+  path: ['confirmPassword'],
+  message: '비밀번호가 일치하지 않습니다.',
 });
 type PasswordFormData = z.infer<typeof passwordSchema>;
 
@@ -296,6 +301,15 @@ export function UsersPage() {
                *  placeholder — 비밀번호 정책 힌트 노출, 빈 라벨 컨텍스트 보완 (#193) */}
               <PasswordInput id="reset-password" autoComplete="new-password" placeholder="8자 이상" {...passwordForm.register('password')} />
               {passwordForm.formState.errors.password && <p className="text-xs text-destructive">{passwordForm.formState.errors.password.message}</p>}
+            </div>
+            <div>
+              {/* htmlFor/id 연결 — 레이블 클릭 시 입력 필드 포커스·스크린 리더 연동 (#79)
+               *  새 비밀번호 확인 — 단일 필드 + 토글 미사용 시 plaintext 미확인 오타 저장 방지 (#211).
+               *  zod refine 에서 password 와 일치 검증, 불일치 시 인라인 에러 표시 → mutation 차단 */}
+              <Label htmlFor="reset-password-confirm">새 비밀번호 확인</Label>
+              {/* PasswordInput — 표시/숨기기 토글 포함, autocomplete="new-password" 동일 적용 */}
+              <PasswordInput id="reset-password-confirm" autoComplete="new-password" placeholder="새 비밀번호 재입력" {...passwordForm.register('confirmPassword')} />
+              {passwordForm.formState.errors.confirmPassword && <p className="text-xs text-destructive">{passwordForm.formState.errors.confirmPassword.message}</p>}
             </div>
             <div className="flex justify-end gap-2 pt-2">
               {/* 취소 버튼 — 닫기 시 폼 초기화 (dirty state 잔존 방지 #161),
