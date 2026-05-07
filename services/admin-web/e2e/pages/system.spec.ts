@@ -236,6 +236,39 @@ test.describe('발급된 인증서 목록', () => {
 
   // 30초마다 자동 갱신: useTls 훅의 refetchInterval: 30_000 옵션으로 구현됨.
   // E2E에서 타이머 기반 폴링을 직접 검증하는 것은 신뢰성이 낮으므로 생략한다.
+
+  /// 회귀 방지 #210: 인증서 카드가 서버 응답 순서를 그대로 렌더해 만료/임박 인증서가
+  /// 정상 인증서 사이에 섞이는 버그. 클라이언트에서 expires_at 오름차순 정렬해야 한다.
+  /// — 만료(과거) → 임박(가까운 만료) → 일반 순으로 행이 배치되어야 한다
+  test('만료/임박 인증서가 상단에 정렬된다 — 회귀 방지 #210', async ({ page }) => {
+    const now = Date.now();
+    const issued = new Date(now - 86_400_000).toISOString();
+    // 의도적으로 정렬되지 않은 순서(정상 → 만료 → 정상 → 임박 → 정상)로 응답
+    await mockApi(page, 'GET', '/tls/certificates', [
+      { domain: 'normal-a.test', issued_at: issued, expires_at: new Date(now + 60 * 86_400_000).toISOString() },
+      { domain: 'expired-old.test', issued_at: issued, expires_at: new Date(now - 10 * 86_400_000).toISOString() },
+      { domain: 'normal-b.test', issued_at: issued, expires_at: new Date(now + 90 * 86_400_000).toISOString() },
+      { domain: 'expiring-soon.test', issued_at: issued, expires_at: new Date(now + 3 * 86_400_000).toISOString() },
+      { domain: 'normal-c.test', issued_at: issued, expires_at: new Date(now + 80 * 86_400_000).toISOString() },
+    ]);
+    await page.goto('/system');
+
+    await expect(page.getByTestId('certificates-table')).toBeVisible({ timeout: 10000 });
+
+    // tbody의 도메인 순서를 추출 — 만료 → 임박 → 정상(만료일 오름차순) 순이어야 한다
+    const domains = await page
+      .getByTestId('certificates-table')
+      .locator('tbody tr td:first-child')
+      .allTextContents();
+
+    expect(domains).toEqual([
+      'expired-old.test',     // -10일 (가장 과거 만료)
+      'expiring-soon.test',   // +3일 (임박)
+      'normal-a.test',        // +60일
+      'normal-c.test',        // +80일
+      'normal-b.test',        // +90일
+    ]);
+  });
 });
 
 /// 서비스 상태 그리드 — Phase 6 마이크로서비스 헬스체크 UI

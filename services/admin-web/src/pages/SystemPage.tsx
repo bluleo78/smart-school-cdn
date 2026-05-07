@@ -2,7 +2,7 @@
  * Card·Skeleton 기반, 에러 상태 처리, formatUptime 공통 유틸 사용
  * 마이크로서비스 상태 그리드 + 장애 배너 추가
  */
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { AlertTriangle, Monitor, Sun, Moon, CheckCircle2, XCircle } from 'lucide-react';
@@ -57,6 +57,17 @@ export function SystemPage() {
   const { data: status, isLoading: statusLoading, error: statusError } = useProxyStatus();
   const { data: cache, isLoading: cacheLoading, error: cacheError } = useCacheStats();
   const { data: certificates, isLoading: certsLoading, error: certsError } = useCertificates();
+  // 인증서 카드 정렬 (#210): 만료(과거) → 임박(가까운 만료) → 일반 순.
+  // 운영자가 위험 상태 인증서를 한눈에 식별할 수 있도록 expires_at 오름차순으로 정렬한다.
+  // expires_at 값이 없는 항목(방어적 처리)은 가장 하단으로 보낸다.
+  const sortedCertificates = useMemo(() => {
+    if (!certificates) return certificates;
+    return [...certificates].sort((a, b) => {
+      const ax = a.expires_at ? new Date(a.expires_at).getTime() : Number.POSITIVE_INFINITY;
+      const bx = b.expires_at ? new Date(b.expires_at).getTime() : Number.POSITIVE_INFINITY;
+      return ax - bx;
+    });
+  }, [certificates]);
   // isLoading: 첫 요청이 완료되기 전 true — 로딩 중엔 Skeleton으로 대체해
   // systemStatus=undefined 시 ?? true fallback으로 오표시되는 버그(#139) 방지
   const { data: systemStatus, isLoading: systemStatusLoading } = useSystemStatus();
@@ -257,7 +268,7 @@ export function SystemPage() {
             </div>
           ) : certsError ? (
             <p className="text-sm text-destructive">인증서 목록을 불러오지 못했습니다.</p>
-          ) : !certificates || certificates.length === 0 ? (
+          ) : !sortedCertificates || sortedCertificates.length === 0 ? (
             <p data-testid="certificates-empty" className="text-sm text-muted-foreground">
               아직 발급된 인증서가 없습니다. HTTPS 요청이 들어오면 자동으로 발급됩니다.
             </p>
@@ -272,7 +283,7 @@ export function SystemPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {certificates.map((cert) => (
+                {sortedCertificates.map((cert) => (
                   <TableRow key={cert.domain}>
                     {/* 도메인 셀: 클릭 시 도메인 상세 페이지로 이동 — Link 래핑 */}
                     <TableCell className="font-mono">
