@@ -1,7 +1,9 @@
-/// 도메인 통계 탭 — 기간 토글 + 수동 새로고침. 캐시/최적화 2섹션.
+/// 도메인 통계 탭 — 기간 토글 + 자동 갱신 드롭다운 + 수동 새로고침. 캐시/최적화 2섹션.
+import { useEffect } from 'react';
 import { useIsFetching, useQueryClient } from '@tanstack/react-query';
 import { BarChart2, Info } from 'lucide-react';
 import { PeriodSelector, type PeriodValue } from './PeriodSelector';
+import { RefreshIntervalSelect, type RefreshIntervalMs } from './RefreshIntervalSelect';
 import { ManualRefreshButton } from './ManualRefreshButton';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { DomainCacheCards } from './DomainCacheCards';
@@ -16,6 +18,9 @@ interface Props {
   /** 조회 기간 — 부모(DomainDetailTabs)에서 관리하여 탭 전환 시에도 값이 유지된다 (#135) */
   period: PeriodValue;
   onPeriodChange: (v: PeriodValue) => void;
+  /** 자동 갱신 주기 — 부모(DomainDetailTabs)에서 관리하여 탭 전환 시에도 값이 유지된다 (#273) */
+  refresh: RefreshIntervalMs;
+  onRefreshChange: (v: RefreshIntervalMs) => void;
 }
 
 /** PeriodValue → DomainCacheCards/DomainStackedChart 가 기대하는 '1h'|'24h' 로 축약.
@@ -30,7 +35,7 @@ function isSeriesDegraded(p: PeriodValue): boolean {
   return p.period !== '1h' && p.period !== '24h';
 }
 
-export function DomainStatsTab({ host, period, onPeriodChange }: Props) {
+export function DomainStatsTab({ host, period, onPeriodChange, refresh, onRefreshChange }: Props) {
   const qc = useQueryClient();
 
   /**
@@ -39,10 +44,32 @@ export function DomainStatsTab({ host, period, onPeriodChange }: Props) {
    */
   const isFetching = useIsFetching({ queryKey: ['domain', host] }) > 0;
 
-  /** 수동 새로고침 — 이 도메인과 연관된 모든 쿼리 무효화 */
+  /** 수동 새로고침 — 이 도메인과 연관된 모든 쿼리 + 캐시 시계열/전체 최적화 통계 무효화.
+   *  최적화 탭이 사용하는 쿼리 키는 다음 4종류이므로 모두 무효화한다 (#273).
+   *  - ['domain', host, ...]: text-compress-stats / url-optimization
+   *  - ['cache', 'series', range, host]: 캐시 시계열 (DomainCacheCards / DomainStackedChart)
+   *  - ['optimization', 'stats', host]: DomainOptimizationStats 누적 통계
+   */
   function handleRefresh() {
     qc.invalidateQueries({ queryKey: ['domain', host] });
+    qc.invalidateQueries({ queryKey: ['cache', 'series'] });
+    qc.invalidateQueries({ queryKey: ['optimization', 'stats', host] });
   }
+
+  /** 자동 갱신 — 트래픽 탭의 RefreshIntervalSelect 와 동일한 UX (#273).
+   *  DomainLogsTab은 자식 훅에 refetchIntervalMs를 직접 전달하지만, 최적화 탭의 자식 훅들은
+   *  refetchInterval이 하드코딩(10/30초)되어 있어 props로 주입하기 어렵다.
+   *  따라서 부모에서 setInterval로 invalidate를 발사하는 방식으로 동일한 효과를 낸다.
+   *  refresh === 0(Off)이면 setInterval을 만들지 않아 폴링이 멈춘다. */
+  useEffect(() => {
+    if (refresh === 0) return;
+    const id = window.setInterval(() => {
+      qc.invalidateQueries({ queryKey: ['domain', host] });
+      qc.invalidateQueries({ queryKey: ['cache', 'series'] });
+      qc.invalidateQueries({ queryKey: ['optimization', 'stats', host] });
+    }, refresh);
+    return () => window.clearInterval(id);
+  }, [qc, host, refresh]);
 
   // 'custom' 기간은 stats API 미지원 → 텍스트 압축/URL별 최적화도 24h로 silent fallback 되었음 (#226).
   // 어느 섹션이든 24h로 폴백되는 상태이면 상단에 한 번에 안내한다.
@@ -71,7 +98,11 @@ export function DomainStatsTab({ host, period, onPeriodChange }: Props) {
     <div className="space-y-6" data-testid="domain-optimization-tab">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <PeriodSelector value={period} onChange={onPeriodChange} />
-        <ManualRefreshButton onClick={handleRefresh} isRefreshing={isFetching} />
+        {/* 트래픽 탭(DomainLogsTab)과 동일한 컨트롤 묶음 — 갱신 인디케이터 + 드롭다운 + 수동 ↻ (#273). */}
+        <div className="flex items-center gap-2">
+          <RefreshIntervalSelect value={refresh} onChange={onRefreshChange} />
+          <ManualRefreshButton onClick={handleRefresh} isRefreshing={isFetching} />
+        </div>
       </div>
 
       {/* 7d/30d/custom 선택 시 stats/시계열 API가 24h 해상도만 지원함을 통합 안내 (#51, #226).

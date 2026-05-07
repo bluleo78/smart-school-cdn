@@ -61,14 +61,16 @@ export function DomainDetailTabs({ domain }: Props) {
   // 탭별로 prefix(op/tf)를 분리해 두 탭의 period가 서로 덮어쓰지 않게 한다.
   const optimizerPeriod = readPeriod(searchParams, 'op');
   const trafficPeriod = readPeriod(searchParams, 'tf');
-  // tfRefresh 키 — 미존재 시 기본 30초. 존재 시 허용된 RefreshIntervalMs 값만 채택, 그 외 30초 폴백.
-  const tfRefreshParam = searchParams.get('tfRefresh');
-  const trafficRefreshRaw = tfRefreshParam === null ? 30_000 : Number(tfRefreshParam);
-  const trafficRefresh: RefreshIntervalMs = (
-    [0, 10_000, 30_000, 60_000, 300_000] as const
-  ).includes(trafficRefreshRaw as RefreshIntervalMs)
-    ? (trafficRefreshRaw as RefreshIntervalMs)
-    : 30_000;
+  // tfRefresh / opRefresh 키 — 미존재 시 기본 30초. 존재 시 허용된 RefreshIntervalMs 값만 채택, 그 외 30초 폴백.
+  // 탭별로 분리하여 트래픽/최적화 자동 갱신 주기를 독립적으로 제어할 수 있게 한다 (#273).
+  const ALLOWED_REFRESH = [0, 10_000, 30_000, 60_000, 300_000] as const;
+  function readRefresh(key: string): RefreshIntervalMs {
+    const raw = searchParams.get(key);
+    const num = raw === null ? 30_000 : Number(raw);
+    return (ALLOWED_REFRESH as readonly number[]).includes(num) ? (num as RefreshIntervalMs) : 30_000;
+  }
+  const trafficRefresh = readRefresh('tfRefresh');
+  const optimizerRefresh = readRefresh('opRefresh');
 
   /** 탭 전환 시 ?tab=<value> 를 URL에 반영한다.
    *  함수형 업데이트로 기존 period/refresh 파라미터를 보존한다. (#206) */
@@ -110,20 +112,29 @@ export function DomainDetailTabs({ domain }: Props) {
   const handleOptimizerPeriodChange = useCallback((v: PeriodValue) => writePeriod('op', v), [writePeriod]);
   const handleTrafficPeriodChange = useCallback((v: PeriodValue) => writePeriod('tf', v), [writePeriod]);
 
-  /** 트래픽 탭 갱신 주기 변경을 URL에 반영. 기본값(30초)이면 키를 제거해 URL을 깔끔하게 유지. */
-  const handleTrafficRefreshChange = useCallback(
-    (v: RefreshIntervalMs) => {
+  /** 갱신 주기 변경을 URL에 반영. 기본값(30초)이면 키를 제거해 URL을 깔끔하게 유지.
+   *  prefix(tf/op)별로 분리된 키를 사용해 트래픽/최적화 탭이 서로 덮어쓰지 않도록 한다 (#273). */
+  const writeRefresh = useCallback(
+    (key: 'tfRefresh' | 'opRefresh', v: RefreshIntervalMs) => {
       setSearchParams(
         (prev) => {
           const next = new URLSearchParams(prev);
-          if (v === 30_000) next.delete('tfRefresh');
-          else next.set('tfRefresh', String(v));
+          if (v === 30_000) next.delete(key);
+          else next.set(key, String(v));
           return next;
         },
         { replace: true },
       );
     },
     [setSearchParams],
+  );
+  const handleTrafficRefreshChange = useCallback(
+    (v: RefreshIntervalMs) => writeRefresh('tfRefresh', v),
+    [writeRefresh],
+  );
+  const handleOptimizerRefreshChange = useCallback(
+    (v: RefreshIntervalMs) => writeRefresh('opRefresh', v),
+    [writeRefresh],
   );
 
   return (
@@ -142,6 +153,8 @@ export function DomainDetailTabs({ domain }: Props) {
           host={domain.host}
           period={optimizerPeriod}
           onPeriodChange={handleOptimizerPeriodChange}
+          refresh={optimizerRefresh}
+          onRefreshChange={handleOptimizerRefreshChange}
         />
       </TabsContent>
       <TabsContent value="traffic" className="mt-4">
