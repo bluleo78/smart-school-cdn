@@ -296,7 +296,9 @@ export function DomainTable({
               </TableCell>
 
               {/* 상태 배지 */}
-              <TableCell>
+              {/* whitespace-nowrap — 좁은 컬럼(상태 헤더 ~83px)에서 한글 3글자 '비활성'이
+               *  음절 단위로 줄바꿈되어 행 높이가 흔들리는 현상 차단 (#257, UsersPage.tsx:245 동일 패턴) */}
+              <TableCell className="whitespace-nowrap">
                 {/* 비활성 시 outline — DomainDetailHeader·UsersPage와 variant 통일 */}
                 <Badge variant={isEnabled ? 'success' : 'outline'}>
                   {isEnabled ? '활성' : '비활성'}
