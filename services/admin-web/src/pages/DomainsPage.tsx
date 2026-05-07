@@ -140,10 +140,10 @@ function AddDomainDialog({ onClose }: { onClose: () => void }) {
             {submitError}
           </p>
         )}
-        <div className="flex justify-end gap-2 pt-2">
-          <Button type="button" variant="outline" onClick={onClose}>
-            취소
-          </Button>
+        {/* Tab 순서 정정 (#237) — DOM 상 주 액션(추가)을 먼저 두어 입력 → 추가 → 취소 → X 순으로
+            포커스가 흐르게 한다. 시각적으로는 좌:취소, 우:추가 위치를 유지해야 하므로
+            flex-row-reverse 로 배치 순서만 뒤집는다. */}
+        <div className="flex flex-row-reverse justify-start gap-2 pt-2">
           {/* 빈 입력 가드 — toolbar/일괄 삭제·DomainCacheSection 퍼지와 disabled 처리 일관성 유지 (#232).
               인라인 에러는 의도적 입력 후 형식 오류 알림용이며 빈 폼 제출 가드용으로 쓰지 않는다. */}
           <Button
@@ -152,6 +152,9 @@ function AddDomainDialog({ onClose }: { onClose: () => void }) {
             data-testid="add-domain-submit"
           >
             {addDomain.isPending ? '추가 중…' : '추가'}
+          </Button>
+          <Button type="button" variant="outline" onClick={onClose}>
+            취소
           </Button>
         </div>
       </form>

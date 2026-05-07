@@ -431,6 +431,48 @@ test.describe('도메인 관리 — 도메인 추가', () => {
   });
 
   /**
+   * 이슈 #237 회귀 방지 — Tab 키 이동 순서.
+   * host → origin → 추가(submit) → 취소 → 닫기(X) 순으로 흘러야 한다.
+   * 시각적 위치(좌:취소, 우:추가)는 flex-row-reverse 로 유지하되 DOM 상으로는
+   * 주 액션이 먼저 와서 Tab 사이클이 자연스럽도록 한다.
+   */
+  test('Tab 순서가 host → origin → 추가 → 취소 → X 닫기 (#237)', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', []);
+
+    await page.goto('/domains');
+
+    await page.getByTestId('toolbar-add-btn').click();
+    await expect(page.getByTestId('add-domain-dialog')).toBeVisible();
+
+    // 입력 필드 채워야 submit 이 활성화되어 Tab 포커스 사이클에 포함된다
+    await page.getByTestId('add-domain-host').fill('tab.example');
+    await page.getByTestId('add-domain-origin').fill('https://tab.example');
+
+    // host → origin
+    await page.getByTestId('add-domain-host').focus();
+    await page.keyboard.press('Tab');
+    await expect(page.getByTestId('add-domain-origin')).toBeFocused();
+
+    // origin → 추가(주 액션 먼저)
+    await page.keyboard.press('Tab');
+    await expect(page.getByTestId('add-domain-submit')).toBeFocused();
+
+    // 추가 → 취소(보조 액션)
+    await page.keyboard.press('Tab');
+    await expect(page.getByRole('button', { name: '취소' })).toBeFocused();
+
+    // 취소 → 닫기(X) (Radix DialogContent 기본 마지막 자식)
+    await page.keyboard.press('Tab');
+    await expect(page.getByRole('button', { name: '닫기' })).toBeFocused();
+
+    // 시각적 위치는 좌:취소, 우:추가 유지 (flex-row-reverse)
+    const submitBox = await page.getByTestId('add-domain-submit').boundingBox();
+    const cancelBox = await page.getByRole('button', { name: '취소' }).boundingBox();
+    expect(submitBox && cancelBox && submitBox.x > cancelBox.x).toBe(true);
+  });
+
+  /**
    * 이슈 #37 회귀 방지 — host 형식 검증 없음 (특수문자·XSS 허용)
    * XSS 페이로드 입력 시 클라이언트 검증이 차단하여 POST 요청이 전송되지 않아야 한다.
    * 모킹 이유: 클라이언트 검증 통과 후 서버로 실제 요청이 가지 않아야 함을 확인하기 위해
