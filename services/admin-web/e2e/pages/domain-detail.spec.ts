@@ -1920,6 +1920,32 @@ test.describe('도메인 상세 — 설정 탭', () => {
   });
 
   /**
+   * 이슈 #186 회귀 방지 — DomainCacheSection 퍼지 토스트에 freed_bytes(해제 용량) 누락
+   * 수정 후: DashboardPage 전체 퍼지 토스트와 동일하게 `N건 삭제 (X.X MB 해제)` 형식이어야 한다.
+   */
+  test('URL 퍼지 — 성공 토스트에 freed_bytes 해제 용량이 함께 표시된다 (회귀: #186)', async ({ page }) => {
+    // 수정 전: 토스트가 `퍼지 완료 — N건 삭제`만 표시 (freed_bytes 미사용)
+    // 수정 후: `퍼지 완료 — N건 삭제 (X.X MB 해제)` — DashboardPage와 일관된 형식
+    await setupDetailMocks(page);
+
+    // purge API: purged_count + freed_bytes(=2MB)를 명시적으로 응답
+    await page.route('**/api/cache/purge', (route) =>
+      route.fulfill({ json: { purged_count: 5, freed_bytes: 2 * 1024 * 1024 } }),
+    );
+
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '설정' }).click();
+
+    // URL 퍼지 입력 → 퍼지 실행 (도메인이 일치하는 정상 경로)
+    await page.getByTestId('url-purge-input').fill('https://textbook.com/asset.png');
+    await page.getByTestId('url-purge-btn').click();
+
+    // 토스트에 purged_count(5건) + freed_bytes(2.0 MB) 둘 다 표시되어야 한다
+    await expect(page.getByText('5건 삭제')).toBeVisible({ timeout: 3000 });
+    await expect(page.getByText('2.0 MB 해제')).toBeVisible({ timeout: 3000 });
+  });
+
+  /**
    * 이슈 #80 회귀 방지 — 오리진 편집 폼에서 Enter 키 제출·Esc 취소가 동작하지 않던 버그
    * 수정 후:
    * - 오리진 입력 필드에서 Enter 키 누르면 폼이 제출되어야 한다
@@ -2019,7 +2045,7 @@ test.describe('도메인 상세 — 설정 탭', () => {
     let capturedBody: Record<string, unknown> | null = null;
     await page.route('**/api/cache/purge', async (route) => {
       capturedBody = JSON.parse(route.request().postData() ?? '{}');
-      return route.fulfill({ json: { purged_count: 7 } });
+      return route.fulfill({ json: { purged_count: 7, freed_bytes: 1024 * 1024 } });
     });
 
     await page.goto('/domains/textbook.com');
@@ -2032,8 +2058,9 @@ test.describe('도메인 상세 — 설정 탭', () => {
     // 확인 다이얼로그의 퍼지 버튼 클릭 → 퍼지 실행
     await page.getByTestId('domain-purge-confirm-btn').click();
 
-    // 성공 토스트가 표시되어야 한다 (purged_count 반영)
+    // 성공 토스트가 표시되어야 한다 (purged_count + freed_bytes 반영, #186 DashboardPage와 일관)
     await expect(page.getByText('7건 삭제')).toBeVisible({ timeout: 3000 });
+    await expect(page.getByText('1.0 MB 해제')).toBeVisible({ timeout: 3000 });
 
     // purgeMutation 경유로 올바른 type/target payload가 전송되었어야 한다
     expect(capturedBody).toMatchObject({ type: 'domain', target: 'textbook.com' });

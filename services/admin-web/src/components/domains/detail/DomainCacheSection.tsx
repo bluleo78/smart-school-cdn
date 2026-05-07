@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { usePurgeCache } from '../../../hooks/usePurgeCache';
+import { formatBytes } from '../../../lib/format';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
@@ -40,7 +41,8 @@ export function DomainCacheSection({ host }: Props) {
 
     try {
       const result = await purgeMutation.mutateAsync({ type: 'url', target: urlInput.trim() });
-      toast.success(`퍼지 완료 — ${result.purged_count}건 삭제`);
+      // DashboardPage 전체 퍼지 토스트와 동일 형식으로 freed_bytes(해제 용량)도 함께 표시 (#186)
+      toast.success(`퍼지 완료 — ${result.purged_count}건 삭제 (${formatBytes(result.freed_bytes)} 해제)`);
       setUrlInput('');
     } catch {
       toast.error('캐시 퍼지에 실패했습니다.');
@@ -53,7 +55,8 @@ export function DomainCacheSection({ host }: Props) {
     try {
       const result = await purgeMutation.mutateAsync({ type: 'domain', target: host });
       setPurgeDialogOpen(false);
-      toast.success(`도메인 캐시 퍼지 완료 — ${result.purged_count}건 삭제`);
+      // DashboardPage 전체 퍼지 토스트와 동일 형식으로 freed_bytes(해제 용량)도 함께 표시 (#186)
+      toast.success(`도메인 캐시 퍼지 완료 — ${result.purged_count}건 삭제 (${formatBytes(result.freed_bytes)} 해제)`);
     } catch {
       // 실패 시 다이얼로그를 유지하여 사용자가 재시도할 수 있도록 한다
       toast.error('캐시 퍼지에 실패했습니다.');
