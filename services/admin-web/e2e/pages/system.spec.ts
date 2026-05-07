@@ -92,6 +92,34 @@ test.describe('CA 인증서 섹션', () => {
   test('iPad 설치 방법 안내가 표시된다', async ({ page }) => {
     await expect(page.getByText('iPad 설치 방법')).toBeVisible();
   });
+
+  /// 회귀 방지 #187: CA/모바일프로파일 다운로드 실패 시 토스트 등 피드백 없음
+  /// 5xx 응답을 모킹해 mutation onError 토스트가 노출되는지 검증한다.
+  test('CA 인증서 다운로드 실패 시 토스트가 표시된다 — 회귀 방지 #187', async ({ page }) => {
+    await page.route('**/api/tls/ca', (route) =>
+      route.fulfill({ status: 500, body: 'fail' }),
+    );
+    await page.goto('/system');
+
+    await page.getByTestId('ca-download-btn').click();
+
+    await expect(
+      page.getByText('CA 인증서 다운로드에 실패했습니다.'),
+    ).toBeVisible({ timeout: 5000 });
+  });
+
+  test('iOS 프로파일 다운로드 실패 시 토스트가 표시된다 — 회귀 방지 #187', async ({ page }) => {
+    await page.route('**/api/tls/ca/mobileconfig', (route) =>
+      route.fulfill({ status: 500, body: 'fail' }),
+    );
+    await page.goto('/system');
+
+    await page.getByTestId('mobileconfig-download-btn').click();
+
+    await expect(
+      page.getByText('iOS 프로파일 다운로드에 실패했습니다.'),
+    ).toBeVisible({ timeout: 5000 });
+  });
 });
 
 test.describe('발급된 인증서 목록', () => {

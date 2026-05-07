@@ -3,6 +3,8 @@
  * 마이크로서비스 상태 그리드 + 장애 배너 추가
  */
 import { useState } from 'react';
+import { useMutation } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { AlertTriangle, Monitor, Sun, Moon, CheckCircle2, XCircle } from 'lucide-react';
 import { getTheme, setTheme, type Theme } from '../lib/theme';
 import { useProxyStatus } from '../hooks/useProxyStatus';
@@ -40,6 +42,17 @@ export function SystemPage() {
     setTheme(theme);
     setCurrentTheme(theme);
   }
+
+  // CA 인증서/iOS 프로파일 다운로드 mutation — 실패 시 toast.error로 피드백 (#187)
+  // 이전엔 anchor href click만 호출해 4xx/5xx 응답 시 silent 실패했다.
+  const caDownload = useMutation({
+    mutationFn: downloadCACert,
+    onError: () => toast.error('CA 인증서 다운로드에 실패했습니다.'),
+  });
+  const mobileconfigDownload = useMutation({
+    mutationFn: downloadMobileConfig,
+    onError: () => toast.error('iOS 프로파일 다운로드에 실패했습니다.'),
+  });
 
   const { data: status, isLoading: statusLoading, error: statusError } = useProxyStatus();
   const { data: cache, isLoading: cacheLoading, error: cacheError } = useCacheStats();
@@ -202,16 +215,18 @@ export function SystemPage() {
             <Button
               data-testid="ca-download-btn"
               variant="outline"
-              onClick={downloadCACert}
+              onClick={() => caDownload.mutate()}
+              disabled={caDownload.isPending}
             >
-              .crt 다운로드
+              {caDownload.isPending ? '다운로드 중...' : '.crt 다운로드'}
             </Button>
             <Button
               data-testid="mobileconfig-download-btn"
               variant="outline"
-              onClick={downloadMobileConfig}
+              onClick={() => mobileconfigDownload.mutate()}
+              disabled={mobileconfigDownload.isPending}
             >
-              iOS 프로파일 다운로드
+              {mobileconfigDownload.isPending ? '다운로드 중...' : 'iOS 프로파일 다운로드'}
             </Button>
           </div>
           <div className="rounded-md bg-accent p-3 text-sm text-accent-foreground">
