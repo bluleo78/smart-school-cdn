@@ -42,14 +42,48 @@ export function DomainToolbar({
   // 표시할 값: debounce 중이면 로컬, 아니면 부모 filter에서 파생
   const searchValue = localInput ?? (filter.q ?? '');
 
+  // IME 조합 중에는 debounce/fetch를 트리거하지 않기 위해 별도 상태로 추적한다.
+  // onChange 시점의 e.nativeEvent.isComposing은 React 합성 이벤트 처리 순서로 인해
+  // compositionend 직후 false로 보일 수 있어, compositionstart/end 이벤트로 직접 관리한다.
+  const composingRef = useRef(false);
+
+  // 미완성 자모(예: `ㄱ`, `갂`)가 URL/API 필터에 반영되는 것을 막기 위해
+  // IME 조합 중에는 로컬 입력값만 갱신하고 debounce 타이머는 시작하지 않는다 (#189).
+  // 동일 패턴: DomainSettingsTab.tsx:140 (편집 폼 IME 가드).
   const handleSearchChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const value = e.target.value;
       setLocalInput(value);
+      // 표준 가드: e.nativeEvent.isComposing(모던) || keyCode 229(레거시) 또는 ref
+      const ne = e.nativeEvent as InputEvent & { keyCode?: number };
+      if (composingRef.current || ne.isComposing || ne.keyCode === 229) {
+        // 조합 중: 표시값은 갱신했으나 fetch는 보류 — compositionend에서 일괄 트리거
+        return;
+      }
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
         onFilterChange({ ...filter, q: value || undefined });
         setLocalInput(null); // debounce 완료 → 부모 filter에 위임
+      }, 300);
+    },
+    [filter, onFilterChange],
+  );
+
+  // IME 조합 시작 — 진행 중 input 이벤트는 fetch 보류
+  const handleCompositionStart = useCallback(() => {
+    composingRef.current = true;
+  }, []);
+
+  // IME 조합 종료 — 최종 값으로 debounce를 한 번만 트리거하여 검색이 정확히 1회 발사되도록 한다.
+  const handleCompositionEnd = useCallback(
+    (e: React.CompositionEvent<HTMLInputElement>) => {
+      composingRef.current = false;
+      const value = e.currentTarget.value;
+      setLocalInput(value);
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        onFilterChange({ ...filter, q: value || undefined });
+        setLocalInput(null);
       }, 300);
     },
     [filter, onFilterChange],
@@ -100,6 +134,8 @@ export function DomainToolbar({
           placeholder="도메인 검색..."
           value={searchValue}
           onChange={handleSearchChange}
+          onCompositionStart={handleCompositionStart}
+          onCompositionEnd={handleCompositionEnd}
           className="w-full md:w-52"
           data-testid="domain-search"
         />
