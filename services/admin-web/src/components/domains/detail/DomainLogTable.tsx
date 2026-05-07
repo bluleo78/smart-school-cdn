@@ -5,6 +5,7 @@ import { formatBytes, formatDateTime } from '../../../lib/format';
 import { Input } from '../../ui/input';
 import { Button } from '../../ui/button';
 import { Skeleton } from '../../ui/skeleton';
+import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../ui/table';
 import type { StatsPeriod } from '../../../api/domains';
 
@@ -63,14 +64,6 @@ export function DomainLogTable({ host, period, range, refetchIntervalMs = false 
     refetchIntervalMs,
   );
 
-  if (isLoading) {
-    return <Skeleton className="h-40 w-full" />;
-  }
-
-  if (error) {
-    return <p className="text-sm text-destructive">로그 로드 실패</p>;
-  }
-
   const logs = data ?? [];
 
   /** 필터 적용: 검색어만 — errorsOnly는 API 파라미터(status:'error')로 위임하므로 클라이언트 중복 필터 제거 (#134) */
@@ -90,113 +83,123 @@ export function DomainLogTable({ host, period, range, refetchIntervalMs = false 
   }
 
   return (
-    <div className="space-y-3">
-      {/* 필터 바 */}
-      <div className="flex gap-2 items-center">
-        <Input
-          placeholder="경로 검색..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="max-w-xs h-8 text-xs"
-        />
-        <Button
-          variant={errorsOnly ? 'default' : 'outline'}
-          onClick={() => setErrorsOnly((v) => !v)}
-          aria-pressed={errorsOnly}
-          size="sm"
-        >
-          에러만
-        </Button>
-      </div>
-
-      {/* 로그 테이블 */}
-      {filtered.length === 0 ? (
-        // 빈 상태 분기 — 필터 활성/비활성에 따라 안내 메시지 + CTA를 다르게 노출한다 (#227)
-        // (a) 필터 비활성 → "로그가 없습니다" (실제 데이터 0건)
-        // (b) 필터 활성 → 검색어/에러필터 정보가 포함된 안내 + 초기화 버튼
-        hasActiveFilter ? (
-          <div
-            className="flex flex-col items-center gap-2 py-6 text-muted-foreground"
-            data-testid="domain-logs-empty-filter"
+    // 형제 카드(요청 추이/Top URL)와 컨테이너 위계 일관성을 위해 Card 래퍼로 감싼다 (#260)
+    <Card data-testid="domain-log-table-card">
+      <CardHeader>
+        <CardTitle className="text-base font-semibold">요청 로그</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {/* 필터 바 */}
+        <div className="flex gap-2 items-center">
+          <Input
+            placeholder="경로 검색..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="max-w-xs h-8 text-xs"
+          />
+          <Button
+            variant={errorsOnly ? 'default' : 'outline'}
+            onClick={() => setErrorsOnly((v) => !v)}
+            aria-pressed={errorsOnly}
+            size="sm"
           >
-            <p className="text-sm font-medium text-foreground">
-              {search.length > 0 && errorsOnly ? (
-                <>
-                  검색어 <strong>&ldquo;{search}&rdquo;</strong> + &lsquo;에러만&rsquo; 조건에 맞는 로그가 없습니다.
-                </>
-              ) : search.length > 0 ? (
-                <>
-                  검색어 <strong>&ldquo;{search}&rdquo;</strong>에 일치하는 로그가 없습니다.
-                </>
-              ) : (
-                <>&lsquo;에러만&rsquo; 필터에 맞는 로그가 없습니다.</>
-              )}
-            </p>
-            <p className="text-xs">조건을 변경하거나 초기화해 보세요.</p>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleClearFilters}
-              data-testid="domain-logs-clear-filters-btn"
-            >
-              검색·필터 초기화
-            </Button>
-          </div>
-        ) : (
-          <p
-            className="text-sm text-muted-foreground py-4 text-center"
-            data-testid="domain-logs-empty"
-          >
-            로그가 없습니다
-          </p>
-        )
-      ) : (
-        <div className="overflow-x-auto rounded-md border border-border/40">
-          {/* shadcn Table 컴포넌트 사용 — 앱 전체 디자인 시스템 일관성 유지 (#116) */}
-          <Table className="text-xs">
-            <TableHeader>
-              <TableRow className="bg-muted/30">
-                <TableHead className="py-2">시간</TableHead>
-                <TableHead className="py-2">경로</TableHead>
-                <TableHead className="py-2">상태</TableHead>
-                <TableHead className="py-2 text-right">크기</TableHead>
-                <TableHead className="py-2">캐시</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filtered.map((log, i) => (
-                <TableRow key={i}>
-                  {/* 타임스탬프(초) → 날짜+시간 — 날짜 없이 시간만 표시하면 다날에 걸친 로그 판독 불가 (#94) */}
-                  <TableCell className="py-1.5 text-muted-foreground whitespace-nowrap">
-                    {formatDateTime(log.timestamp * 1000)}
-                  </TableCell>
-                  <TableCell className="py-1.5 text-foreground max-w-[320px] truncate">
-                    {log.path}
-                  </TableCell>
-                  <TableCell className={`py-1.5 font-medium ${statusColor(log.status_code)}`}>
-                    {log.status_code}
-                  </TableCell>
-                  <TableCell className="py-1.5 text-right text-muted-foreground">
-                    {formatBytes(log.size)}
-                  </TableCell>
-                  <TableCell className={`py-1.5 font-medium ${cacheColor(log.cache_status)}`}>
-                    {log.cache_status}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      )}
-
-      {/* 더 보기 버튼 — 로그가 limit 이상이면 추가 로드 가능 */}
-      {data && data.length >= limit && (
-        <div className="flex justify-center pt-2">
-          <Button variant="outline" onClick={() => setLimit(prev => prev + 50)}>
-            더 보기
+            에러만
           </Button>
         </div>
-      )}
-    </div>
+
+        {/* 로딩/에러 상태도 카드 컨테이너 내부에서 표현해 위계 유지 */}
+        {isLoading ? (
+          <Skeleton className="h-40 w-full" />
+        ) : error ? (
+          <p className="text-sm text-destructive">로그 로드 실패</p>
+        ) : filtered.length === 0 ? (
+          // 빈 상태 분기 — 필터 활성/비활성에 따라 안내 메시지 + CTA를 다르게 노출한다 (#227)
+          // (a) 필터 비활성 → "로그가 없습니다" (실제 데이터 0건)
+          // (b) 필터 활성 → 검색어/에러필터 정보가 포함된 안내 + 초기화 버튼
+          hasActiveFilter ? (
+            <div
+              className="flex flex-col items-center gap-2 py-6 text-muted-foreground"
+              data-testid="domain-logs-empty-filter"
+            >
+              <p className="text-sm font-medium text-foreground">
+                {search.length > 0 && errorsOnly ? (
+                  <>
+                    검색어 <strong>&ldquo;{search}&rdquo;</strong> + &lsquo;에러만&rsquo; 조건에 맞는 로그가 없습니다.
+                  </>
+                ) : search.length > 0 ? (
+                  <>
+                    검색어 <strong>&ldquo;{search}&rdquo;</strong>에 일치하는 로그가 없습니다.
+                  </>
+                ) : (
+                  <>&lsquo;에러만&rsquo; 필터에 맞는 로그가 없습니다.</>
+                )}
+              </p>
+              <p className="text-xs">조건을 변경하거나 초기화해 보세요.</p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleClearFilters}
+                data-testid="domain-logs-clear-filters-btn"
+              >
+                검색·필터 초기화
+              </Button>
+            </div>
+          ) : (
+            <p
+              className="text-sm text-muted-foreground py-4 text-center"
+              data-testid="domain-logs-empty"
+            >
+              로그가 없습니다
+            </p>
+          )
+        ) : (
+          <div className="overflow-x-auto rounded-md border border-border/40">
+            {/* shadcn Table 컴포넌트 사용 — 앱 전체 디자인 시스템 일관성 유지 (#116) */}
+            <Table className="text-xs">
+              <TableHeader>
+                <TableRow className="bg-muted/30">
+                  <TableHead className="py-2">시간</TableHead>
+                  <TableHead className="py-2">경로</TableHead>
+                  <TableHead className="py-2">상태</TableHead>
+                  <TableHead className="py-2 text-right">크기</TableHead>
+                  <TableHead className="py-2">캐시</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filtered.map((log, i) => (
+                  <TableRow key={i}>
+                    {/* 타임스탬프(초) → 날짜+시간 — 날짜 없이 시간만 표시하면 다날에 걸친 로그 판독 불가 (#94) */}
+                    <TableCell className="py-1.5 text-muted-foreground whitespace-nowrap">
+                      {formatDateTime(log.timestamp * 1000)}
+                    </TableCell>
+                    <TableCell className="py-1.5 text-foreground max-w-[320px] truncate">
+                      {log.path}
+                    </TableCell>
+                    <TableCell className={`py-1.5 font-medium ${statusColor(log.status_code)}`}>
+                      {log.status_code}
+                    </TableCell>
+                    <TableCell className="py-1.5 text-right text-muted-foreground">
+                      {formatBytes(log.size)}
+                    </TableCell>
+                    <TableCell className={`py-1.5 font-medium ${cacheColor(log.cache_status)}`}>
+                      {log.cache_status}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+
+        {/* 더 보기 버튼 — 로그가 limit 이상이면 추가 로드 가능 */}
+        {data && data.length >= limit && (
+          <div className="flex justify-center pt-2">
+            <Button variant="outline" onClick={() => setLimit(prev => prev + 50)}>
+              더 보기
+            </Button>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
