@@ -745,6 +745,41 @@ test.describe('도메인 상세 — Overview 탭', () => {
     await expect(numberEl).toHaveText(/\d+\.\d+ (KB|MB|GB)/);
   });
 
+  /**
+   * 이슈 #271 회귀 방지 — DomainOverviewTab KPI 4-카드 BarSparkline overflow
+   * 수정 전: md:grid-cols-4(768px)부터 4-col 강제 → iPad portrait(810px)에서 카드 폭 ~178px,
+   *          BarSparkline(~117px)이 카드 우측 경계 밖으로 17~96px 비져나옴
+   * 수정 후: lg:grid-cols-4(1024px) + 각 Card overflow-hidden
+   *          - iPad portrait(810px)에서는 2-col 유지, 카드 폭 충분히 확보
+   *          - 만약 폭이 부족해도 overflow-hidden으로 시각 침범 차단
+   */
+  test('Overview — KPI 4-카드 BarSparkline이 카드 경계를 침범하지 않는다 (회귀: #271)', async ({ page }) => {
+    await setupDetailMocks(page);
+    // iPad portrait — 이슈 재현 viewport
+    await page.setViewportSize({ width: 810, height: 1080 });
+    await page.goto('/domains/textbook.com');
+
+    await expect(page.getByTestId('domain-stat-cards')).toBeVisible();
+
+    // 1) 그리드 클래스 — md:grid-cols-4가 아닌 lg:grid-cols-4여야 한다
+    const grid = page.getByTestId('domain-stat-cards');
+    const gridClass = await grid.getAttribute('class');
+    expect(gridClass).toContain('lg:grid-cols-4');
+    expect(gridClass).not.toMatch(/(^| )md:grid-cols-4( |$)/);
+
+    // 2) 시각 검증 — 각 카드의 sparkline(.h-9)이 카드 right 경계를 초과하지 않는다
+    const ids = ['stat-card-requests', 'stat-card-cache-hit', 'stat-card-bandwidth', 'stat-card-response-time'];
+    for (const id of ids) {
+      const card = page.getByTestId(id);
+      const cardBox = await card.boundingBox();
+      const sparkBox = await card.locator('.h-9').first().boundingBox();
+      expect(cardBox, `${id} card box`).not.toBeNull();
+      expect(sparkBox, `${id} spark box`).not.toBeNull();
+      // overflow-hidden으로 클리핑되므로 sparkline의 시각적 right가 카드 right를 초과하지 않음
+      expect(sparkBox!.x + sparkBox!.width).toBeLessThanOrEqual(cardBox!.x + cardBox!.width + 1);
+    }
+  });
+
   test('Overview — Quick Actions 4개 버튼이 동일 y 오프셋에 정렬된다', async ({ page }) => {
     await setupDetailMocks(page);
     await page.goto('/domains/textbook.com');

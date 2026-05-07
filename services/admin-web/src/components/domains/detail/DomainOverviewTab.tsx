@@ -27,10 +27,13 @@ function SummaryCards({ host }: { host: string }) {
   }
 
   if (isLoading) {
+    // 4-카드 그리드 — iPad portrait(810px)/landscape(1180px)에서 4-col로 좁아지면
+    // BarSparkline(약 117px)이 좌측 큰 숫자와 함께 카드 폭을 초과하므로
+    // lg(1024px)부터 4-col 펼침. 그 미만은 sm(640px)부터 2-col 유지 (#271)
     return (
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {[...Array(4)].map((_, i) => (
-          <Card key={i}>
+          <Card key={i} className="overflow-hidden">
             <CardHeader><CardTitle><Skeleton className="h-4 w-24" /></CardTitle></CardHeader>
             <CardContent className="space-y-2">
               <Skeleton className="h-8 w-20" />
@@ -44,9 +47,12 @@ function SummaryCards({ host }: { host: string }) {
   const s = data?.summary;
   const ts = data?.timeseries;
   const hourlyRequests = ts ? ts.hits.map((h, i) => h + (ts.misses[i] ?? 0)) : Array(24).fill(0);
+  // 4-카드 그리드 — md(768px) 4-col 강제 시 BarSparkline이 카드 경계 밖으로 17~96px 오버플로우.
+  // lg(1024px)부터 4-col로 펼치고, 각 Card에 overflow-hidden을 두어 스파크라인 클리핑 (#271,
+  // 선례: DomainSummaryCards의 #71/#129 가드)
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4" data-testid="domain-stat-cards">
-      <Card data-testid="stat-card-requests">
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4" data-testid="domain-stat-cards">
+      <Card data-testid="stat-card-requests" className="overflow-hidden">
         <CardHeader><CardTitle>오늘 요청</CardTitle></CardHeader>
         <CardContent>
           <div className="flex items-end justify-between">
@@ -58,7 +64,7 @@ function SummaryCards({ host }: { host: string }) {
           </div>
         </CardContent>
       </Card>
-      <Card data-testid="stat-card-cache-hit">
+      <Card data-testid="stat-card-cache-hit" className="overflow-hidden">
         <CardHeader><CardTitle>캐시 히트율</CardTitle></CardHeader>
         <CardContent>
           <div className="flex items-end justify-between">
@@ -70,7 +76,7 @@ function SummaryCards({ host }: { host: string }) {
           </div>
         </CardContent>
       </Card>
-      <Card data-testid="stat-card-bandwidth">
+      <Card data-testid="stat-card-bandwidth" className="overflow-hidden">
         <CardHeader><CardTitle>오늘 대역폭</CardTitle></CardHeader>
         <CardContent>
           <div className="flex items-end justify-between">
@@ -85,7 +91,7 @@ function SummaryCards({ host }: { host: string }) {
           </div>
         </CardContent>
       </Card>
-      <Card data-testid="stat-card-response-time">
+      <Card data-testid="stat-card-response-time" className="overflow-hidden">
         <CardHeader><CardTitle>평균 응답시간</CardTitle></CardHeader>
         <CardContent>
           <div className="flex items-end justify-between">
