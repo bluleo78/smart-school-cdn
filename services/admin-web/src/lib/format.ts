@@ -6,8 +6,16 @@ export function formatBytes(bytes: number): string {
   return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
 }
 
-/** 초 단위 업타임을 "N일 N시간 N분" 형식으로 변환 */
+/**
+ * 초 단위 업타임을 "N일 N시간 N분" 형식으로 변환
+ * - 부팅 직후 0~59초는 "N초"로 표시해 카운트가 멈춰 보이지 않도록 한다
+ * - NaN/Infinity/음수 등 비정상 입력은 placeholder("—") 반환 (시계 점프·데이터 누락 방어)
+ */
 export function formatUptime(seconds: number): string {
+  // 비정상 입력 방어: 호출부 일관 정책(SystemPage 등)에서 사용하는 "—" placeholder 반환
+  if (!Number.isFinite(seconds) || seconds < 0) return '—';
+  // 60초 미만 구간은 초 단위로 표시 — 부팅 직후에도 변동이 보이도록
+  if (seconds < 60) return `${Math.floor(seconds)}초`;
   const days = Math.floor(seconds / 86400);
   const hours = Math.floor((seconds % 86400) / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
