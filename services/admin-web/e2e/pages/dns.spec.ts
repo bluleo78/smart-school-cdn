@@ -357,6 +357,72 @@ test.describe('DNS — 탭 URL searchParam 동기화 (#114)', () => {
   });
 });
 
+// ─── 통계 탭 range URL searchParam 동기화 (#228 회귀) ────────
+// 수정 전: StatsTab 내부 useState 가 탭 unmount 시 초기화되어 24h → 1h 로 리셋되었음.
+// 수정 후: range 를 부모(DnsPage)로 lifting 하고 ?range= 로 URL 동기화 → 탭 전환·새로고침에도 유지.
+test.describe('DNS — 통계 탭 range URL 동기화 (#228)', () => {
+  test('24시간 클릭 시 URL에 ?range=24h 가 반영된다', async ({ page }) => {
+    await mockDnsDefaults(page);
+    await page.goto('/dns?tab=stats');
+
+    await page.getByRole('button', { name: '24시간' }).click();
+    await expect(page).toHaveURL(/[?&]range=24h/);
+    await expect(page.getByRole('button', { name: '24시간' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
+
+  test('통계 탭에서 24h 선택 후 다른 탭으로 전환했다가 돌아와도 24h가 유지된다', async ({ page }) => {
+    await mockDnsDefaults(page);
+    await page.goto('/dns?tab=stats');
+
+    // 24시간 선택
+    await page.getByRole('button', { name: '24시간' }).click();
+    await expect(page.getByRole('button', { name: '24시간' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+
+    // 레코드 탭으로 이동 후 통계 탭으로 복귀
+    await page.getByTestId('tab-records').click();
+    await expect(page).toHaveURL(/[?&]tab=records/);
+    // ?range=24h 는 보존되어야 한다
+    await expect(page).toHaveURL(/[?&]range=24h/);
+
+    await page.getByTestId('tab-stats').click();
+    // 24시간 버튼 pressed 상태 유지 — 1h로 초기화되면 안 됨
+    await expect(page.getByRole('button', { name: '24시간' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await expect(page.getByRole('button', { name: '1시간' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+  });
+
+  test('URL ?tab=stats&range=24h 로 직접 진입하면 24시간이 선택된다', async ({ page }) => {
+    await mockDnsDefaults(page);
+    await page.goto('/dns?tab=stats&range=24h');
+
+    await expect(page.getByRole('button', { name: '24시간' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
+
+  test('잘못된 ?range=invalid 값은 1시간으로 폴백된다', async ({ page }) => {
+    await mockDnsDefaults(page);
+    await page.goto('/dns?tab=stats&range=invalid');
+
+    await expect(page.getByRole('button', { name: '1시간' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
+});
+
 // ─── /api/dns/status 에러 처리 (#173 회귀) ───────────────────
 test.describe('DNS — /api/dns/status 에러 처리 (#173)', () => {
   test('status 5xx 시 StatusStrip 에러 카드 + 오프라인 배너(상태 확인 불가)가 표시된다', async ({ page }) => {

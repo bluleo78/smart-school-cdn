@@ -60,6 +60,14 @@ function isValidTab(value: string | null): value is TabValue {
   return VALID_TABS.includes(value as TabValue);
 }
 
+/** 통계 탭 range searchParam 화이트리스트 — 잘못된 값은 1h 기본값으로 폴백 (#228) */
+const VALID_RANGES: readonly DnsMetricRange[] = ['1h', '24h'] as const;
+
+/** URL searchParam ?range= 값이 유효한지 검증하는 타입 가드 */
+function isValidRange(value: string | null): value is DnsMetricRange {
+  return VALID_RANGES.includes(value as DnsMetricRange);
+}
+
 /** DNS 관리 페이지 루트 — 헤더 + 오프라인 배너 + 상태 스트립 + 3탭 */
 export function DnsPage() {
   const { data: status, error: statusError } = useDnsStatus();
@@ -75,9 +83,36 @@ export function DnsPage() {
   const tabParam = searchParams.get('tab');
   const activeTab: TabValue = isValidTab(tabParam) ? tabParam : 'records';
 
-  /** 탭 전환 시 ?tab=<value> 를 URL에 반영한다 */
+  // 통계 탭의 range(1h/24h)도 URL searchParam ?range=... 으로 동기화한다 (#228).
+  // 비활성 탭이 unmount되면서 StatsTab 내부 useState가 초기화되던 문제를 부모로 lifting.
+  // DomainDetailTabs(#135)의 period 동기화 패턴을 동일하게 적용 — 새로고침/공유 시에도 유지.
+  const rangeParam = searchParams.get('range');
+  const statsRange: DnsMetricRange = isValidRange(rangeParam) ? rangeParam : '1h';
+
+  /** 탭 전환 시 ?tab=<value> 를 URL에 반영한다.
+   *  기존 ?range 파라미터는 보존해 통계 탭으로 돌아왔을 때도 동일 range 유지. */
   function handleTabChange(value: string) {
-    setSearchParams({ tab: value }, { replace: false });
+    setSearchParams(
+      prev => {
+        const next = new URLSearchParams(prev);
+        next.set('tab', value);
+        return next;
+      },
+      { replace: false },
+    );
+  }
+
+  /** 통계 탭 range 토글 — ?range=<1h|24h>로 URL에 반영.
+   *  같은 화면 내 필터 조정이므로 history 누적을 막기 위해 replace 사용 (DomainDetailTabs 패턴). */
+  function handleRangeChange(value: DnsMetricRange) {
+    setSearchParams(
+      prev => {
+        const next = new URLSearchParams(prev);
+        next.set('range', value);
+        return next;
+      },
+      { replace: true },
+    );
   }
 
   return (
@@ -123,7 +158,7 @@ export function DnsPage() {
           <TabsTrigger value="queries" data-testid="tab-queries">최근 쿼리</TabsTrigger>
         </TabsList>
         <TabsContent value="records"><RecordsTab /></TabsContent>
-        <TabsContent value="stats"><StatsTab /></TabsContent>
+        <TabsContent value="stats"><StatsTab range={statsRange} onRangeChange={handleRangeChange} /></TabsContent>
         <TabsContent value="queries"><QueriesTab /></TabsContent>
       </Tabs>
     </div>
@@ -299,9 +334,9 @@ function RecordsTab() {
   );
 }
 
-/** 통계 탭 — 카드 4종 + 범위 토글 + 시계열 차트 + Top 10 */
-function StatsTab() {
-  const [range, setRange] = useState<DnsMetricRange>('1h');
+/** 통계 탭 — 카드 4종 + 범위 토글 + 시계열 차트 + Top 10.
+ *  range는 부모(DnsPage)에서 URL searchParam(?range)로 끌어올려 탭 전환·새로고침에도 유지된다 (#228). */
+function StatsTab({ range, onRangeChange }: { range: DnsMetricRange; onRangeChange: (r: DnsMetricRange) => void }) {
   // status 에러 신호는 Top 10 카드에서 분리 노출해야 함 — !status 만 검사하면 5xx 시 "쿼리가 없습니다" 오표시 (#174)
   const { data: status, isLoading: statusLoading, error: statusError } = useDnsStatus();
   const { data: metrics, isLoading, error } = useDnsMetrics(range);
@@ -344,7 +379,7 @@ function StatsTab() {
             <Button
               variant={range === '1h' ? 'default' : 'outline'}
               aria-pressed={range === '1h'}
-              onClick={() => setRange('1h')}
+              onClick={() => onRangeChange('1h')}
               size="xs"
             >
               1시간
@@ -352,7 +387,7 @@ function StatsTab() {
             <Button
               variant={range === '24h' ? 'default' : 'outline'}
               aria-pressed={range === '24h'}
-              onClick={() => setRange('24h')}
+              onClick={() => onRangeChange('24h')}
               size="xs"
             >
               24시간
