@@ -331,6 +331,27 @@ test.describe('사용자 관리', () => {
     expect(autocomplete).toBe('username');
   });
 
+  // 이슈 #218 회귀 방지 — 비활성 사용자 행이 활성 사용자와 시각적으로 구분되어야 함
+  // 행 전체 dimmed 처리(opacity-60 + bg-muted/30) + data-disabled="true" 마커로 검증
+  test('비활성 사용자 행은 dimmed 처리(opacity 60%) + data-disabled 마커', async ({ page }) => {
+    await mockApi(page, 'GET', '/users', usersWithDisabled);
+
+    await page.goto('/users');
+
+    // 활성 행 — data-disabled="false"
+    const activeRow = page.getByTestId(`user-row-${TEST_USER.id}`);
+    await expect(activeRow).toHaveAttribute('data-disabled', 'false');
+    // opacity 무지정(=1) — 컴퓨티드 스타일로 dimmed 아님 확인
+    const activeOpacity = await activeRow.evaluate((el) => getComputedStyle(el).opacity);
+    expect(parseFloat(activeOpacity)).toBeGreaterThan(0.95);
+
+    // 비활성 행 — data-disabled="true" + opacity-60 (=0.6)
+    const disabledRow = page.getByTestId('user-row-2');
+    await expect(disabledRow).toHaveAttribute('data-disabled', 'true');
+    const disabledOpacity = await disabledRow.evaluate((el) => getComputedStyle(el).opacity);
+    expect(parseFloat(disabledOpacity)).toBeLessThan(0.7);
+  });
+
   // 이슈 #106 회귀 방지 — 비활성 사용자 행에 재활성화 버튼 없음
   test('비활성 사용자 행에 재활성화 버튼 표시 (비활성화 버튼 없음)', async ({ page }) => {
     await mockApi(page, 'GET', '/users', usersWithDisabled);

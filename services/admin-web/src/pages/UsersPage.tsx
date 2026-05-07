@@ -180,8 +180,16 @@ export function UsersPage() {
               </TableRow>
             ) : users.map((u) => (
               // hover:bg-muted/50 — 클릭 가능한 행임을 시각적으로 전달 (ByDomainTable 패턴과 일관성)
-              <TableRow key={u.id} className="hover:bg-muted/50 transition-colors" data-testid={`user-row-${u.id}`}>
-                <TableCell className="whitespace-nowrap">{u.username}</TableCell>
+              // 비활성 사용자 행은 opacity-60 + bg-muted/30 + 이메일 text-muted-foreground 로 dimmed 처리.
+              // 활성/비활성을 한눈에 식별 가능하도록 행 전체 시각 차이를 부여 (#218).
+              <TableRow
+                key={u.id}
+                className={`hover:bg-muted/50 transition-colors ${u.disabled_at ? 'bg-muted/30 opacity-60' : ''}`}
+                data-testid={`user-row-${u.id}`}
+                data-disabled={u.disabled_at ? 'true' : 'false'}
+              >
+                {/* 비활성 행은 이메일도 text-muted-foreground 로 톤다운 — Badge 외 텍스트 단서 추가 (#218) */}
+                <TableCell className={`whitespace-nowrap ${u.disabled_at ? 'text-muted-foreground' : ''}`}>{u.username}</TableCell>
                 {/* formatDate/formatDateTime — ko-KR 로케일 명시, 앱 전역 포맷 통일.
                  *  whitespace-nowrap — 좁은 뷰포트에서 timestamp가 글자 단위로 5줄 분할되는 현상 차단 (#177) */}
                 <TableCell className="text-muted-foreground whitespace-nowrap">{formatDate(u.created_at)}</TableCell>
