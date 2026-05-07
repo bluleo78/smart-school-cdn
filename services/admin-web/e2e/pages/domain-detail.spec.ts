@@ -1176,6 +1176,115 @@ test.describe('도메인 상세 — 통계 탭', () => {
   });
 
   /**
+   * 이슈 #249 — DomainUrlOptimizationTable 빈 상태 메시지 분기
+   * 진짜 0건과 "검색/decision 필터로 0건" 두 상황을 구분해야 한다.
+   * - 필터 비활성 → "집계된 이벤트 없음" (data-testid="url-opt-empty")
+   * - 필터 활성 → 검색어/필터 정보 + 초기화 버튼 (data-testid="url-opt-empty-filter")
+   * (#227 DomainLogTable, #231 CacheLogsTable, #241 RecordsTab과 동일 패턴)
+   */
+  test('URL 최적화 표 빈 상태 — 필터 미적용 시 "집계된 이벤트 없음" 메시지가 표시된다 (#249)', async ({
+    page,
+  }) => {
+    await setupDetailMocks(page);
+    // 항상 빈 응답을 반환하도록 오버라이드
+    await page.route('**/api/domains/textbook.com/optimization/url-breakdown*', (route) =>
+      route.fulfill({ json: { total: 0, items: [] } }),
+    );
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '최적화' }).click();
+
+    await expect(page.getByTestId('url-opt-empty')).toBeVisible();
+    await expect(page.getByTestId('url-opt-empty')).toContainText('집계된 이벤트 없음');
+    // 필터 활성 분기는 노출되지 않아야 한다
+    await expect(page.getByTestId('url-opt-empty-filter')).toHaveCount(0);
+  });
+
+  test('URL 최적화 표 빈 상태 — 검색어로 0건 매칭 시 검색어 정보 + 초기화 버튼이 표시된다 (#249)', async ({
+    page,
+  }) => {
+    await setupDetailMocks(page);
+    // 검색어가 있을 때(서버 q 파라미터 포함) 빈 응답 반환
+    await page.route('**/api/domains/textbook.com/optimization/url-breakdown*', (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get('q')) {
+        return route.fulfill({ json: { total: 0, items: [] } });
+      }
+      return route.fulfill({
+        json: {
+          total: 1,
+          items: [
+            {
+              url: '/sample.png',
+              events: 1,
+              total_orig: 100,
+              total_out: 80,
+              savings_ratio: 0.2,
+              decisions: 'optimized',
+            },
+          ],
+        },
+      });
+    });
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '최적화' }).click();
+
+    // 검색어 입력 → 매칭 0건
+    await page.getByTestId('url-opt-search').fill('__no_match__');
+
+    const emptyFilter = page.getByTestId('url-opt-empty-filter');
+    await expect(emptyFilter).toBeVisible();
+    await expect(emptyFilter).toContainText('__no_match__');
+    // 일반 빈 상태(필터 미적용)는 노출되지 않아야 한다
+    await expect(page.getByTestId('url-opt-empty')).toHaveCount(0);
+
+    // 초기화 버튼 클릭 → 검색 입력이 비고 일반 빈 상태로 전환된다
+    await page.getByTestId('url-opt-clear-filters-btn').click();
+    await expect(page.getByTestId('url-opt-search')).toHaveValue('');
+  });
+
+  test('URL 최적화 표 빈 상태 — decision 필터로 0건 매칭 시 필터 안내 + 초기화 버튼이 표시된다 (#249)', async ({
+    page,
+  }) => {
+    await setupDetailMocks(page);
+    // decision=skipped_small 일 때 빈 응답 반환
+    await page.route('**/api/domains/textbook.com/optimization/url-breakdown*', (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get('decision') === 'skipped_small') {
+        return route.fulfill({ json: { total: 0, items: [] } });
+      }
+      return route.fulfill({
+        json: {
+          total: 1,
+          items: [
+            {
+              url: '/sample.png',
+              events: 1,
+              total_orig: 100,
+              total_out: 80,
+              savings_ratio: 0.2,
+              decisions: 'optimized',
+            },
+          ],
+        },
+      });
+    });
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '최적화' }).click();
+
+    // decision 필터 → '스킵 · 너무 작음' 선택 → 0건
+    await page.getByTestId('url-opt-decision').click();
+    await page.getByRole('option', { name: '스킵 · 너무 작음' }).click();
+
+    const emptyFilter = page.getByTestId('url-opt-empty-filter');
+    await expect(emptyFilter).toBeVisible();
+    await expect(emptyFilter).toContainText('결과 필터');
+
+    // 초기화 버튼 클릭 → decision이 'all'로 복귀하여 항목이 다시 보인다
+    await page.getByTestId('url-opt-clear-filters-btn').click();
+    await expect(page.getByTestId('url-optimization-table')).toContainText('/sample.png');
+  });
+
+  /**
    * 이슈 #89 회귀 방지 — 데이터 없을 때 0 값 대신 빈 상태 UI가 표시되어야 한다.
    * total=0 && by_decision=[] 응답 시 "아직 데이터가 없습니다" 메시지가 렌더링되어야 한다.
    */

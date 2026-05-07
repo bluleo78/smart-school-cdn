@@ -214,7 +214,58 @@ export function DomainUrlOptimizationTable({
             </div>
           </>
         ) : (
-          <p className="text-sm text-muted-foreground py-6 text-center">집계된 이벤트 없음</p>
+          // 빈 상태 분기 — 검색어/decision 필터 활성/비활성에 따라 안내 메시지 + 초기화 CTA를
+          // 다르게 노출한다. 진짜 데이터 0건 vs 필터로 인해 0건을 사용자가 구분할 수 있도록 한다 (#249).
+          // (DomainLogTable의 #227 패턴, RecordsTab의 #241 패턴, CacheLogsTable의 #231 패턴 참조)
+          (() => {
+            const hasActiveFilter = q.trim().length > 0 || decision !== 'all';
+            if (!hasActiveFilter) {
+              // 필터 비활성 + 0건 → 실제 데이터 없음
+              return (
+                <p
+                  className="text-sm text-muted-foreground py-6 text-center"
+                  data-testid="url-opt-empty"
+                >
+                  집계된 이벤트 없음
+                </p>
+              );
+            }
+            // 필터 활성 + 0건 → 검색어/decision 조합별 안내 + 초기화 버튼
+            const trimmed = q.trim();
+            return (
+              <div
+                className="flex flex-col items-center gap-2 py-6 text-muted-foreground"
+                data-testid="url-opt-empty-filter"
+              >
+                <p className="text-sm font-medium text-foreground">
+                  {trimmed.length > 0 && decision !== 'all' ? (
+                    <>
+                      검색어 <strong>&ldquo;{trimmed}&rdquo;</strong> + 결과 필터 조건에 맞는 항목이 없습니다.
+                    </>
+                  ) : trimmed.length > 0 ? (
+                    <>
+                      검색어 <strong>&ldquo;{trimmed}&rdquo;</strong>에 일치하는 항목이 없습니다.
+                    </>
+                  ) : (
+                    <>선택한 결과 필터에 맞는 항목이 없습니다.</>
+                  )}
+                </p>
+                <p className="text-xs">조건을 변경하거나 초기화해 보세요.</p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setQ('');
+                    setDecision('all');
+                    setOffset(0);
+                  }}
+                  data-testid="url-opt-clear-filters-btn"
+                >
+                  검색·필터 초기화
+                </Button>
+              </div>
+            );
+          })()
         )}
       </CardContent>
     </Card>
