@@ -175,6 +175,43 @@ test.describe('대시보드 — CacheHitRateChart Tooltip 포맷 (#86)', () => {
   });
 });
 
+// ─── 24시간 범위 x축 라벨 날짜 포함 (#202 회귀) ────────────────
+test.describe('대시보드 — CacheHitRateChart 24시간 범위 x축 라벨 (#202)', () => {
+  test('24시간 토글 시 x축 라벨이 MM/DD HH:mm 형식으로 표시된다 (#202)', async ({ page }) => {
+    // 어제/오늘 같은 시각 두 버킷 — HH:MM:SS만으로는 동일 라벨로 충돌 가능
+    const now = Date.now();
+    const yesterday22 = now - 22 * 60 * 60 * 1000;
+    const today02 = now - 2 * 60 * 60 * 1000;
+    await mockApi(page, 'GET', '/proxy/status', { status: 'online', uptime: 3600, total_requests: 42 });
+    await mockApi(page, 'GET', '/proxy/requests', []);
+    await mockApi(page, 'GET', '/cache/stats', createCacheStats());
+    await mockApi(page, 'GET', '/cache/popular', createPopularContent());
+    await page.route('**/api/cache/series*', (route) =>
+      route.fulfill({
+        json: {
+          buckets: [
+            { ts: yesterday22, l1_hits: 50, l2_hits: 5, miss: 10, bypass: 5 },
+            { ts: today02, l1_hits: 70, l2_hits: 5, miss: 10, bypass: 5 },
+          ],
+        },
+      }),
+    );
+
+    await page.goto('/');
+    await page.getByTestId('cache-range-24h').click();
+
+    // x축 라벨에 'MM/DD HH:mm'(슬래시·공백) 패턴이 등장해야 한다.
+    // 이전 'H시 m분 s초' 또는 'HH:MM:SS' 단독 표기 → 어제/오늘 동일 시각 라벨 충돌 → fail
+    await expect.poll(async () =>
+      page.evaluate(() =>
+        Array.from(
+          document.querySelectorAll('[data-testid=cache-stacked-chart] .recharts-xAxis text'),
+        ).map((t) => t.textContent ?? ''),
+      ),
+    ).toEqual(expect.arrayContaining([expect.stringMatching(/^\d{2}\/\d{2}\s\d{2}:\d{2}$/)]));
+  });
+});
+
 // ─── BYPASS 사유 한국어 통일 (#93 회귀) ──────────────────────
 test.describe('대시보드 — BYPASS 사유 세부 한국어 통일 (#93)', () => {
   test('BYPASS 사유 레이블이 한국어로 표시된다 — 영문 잔존 없음', async ({ page }) => {

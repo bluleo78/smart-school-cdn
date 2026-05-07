@@ -23,17 +23,28 @@ export function CacheHitRateChart() {
   const [range, setRange] = useState<CacheSeriesRange>('1h');
   const { data: buckets, isLoading, error } = useCacheSeries(range);
 
-  /** 버킷 epoch-ms → 현지 HH:MM:SS 문자열 변환 + Recharts 친화적 키로 평탄화 */
+  /** 버킷 epoch-ms → 라벨 문자열 변환 + Recharts 친화적 키로 평탄화.
+   * 24h 범위에서는 어제/오늘 동일 시각 라벨 충돌 방지를 위해 'MM/DD HH:mm'으로 날짜 포함 (#202).
+   * 1h 범위는 5분 버킷 단위라 'HH:mm'만으로 충분. ts(epoch ms) 원본은 보존해 툴팁 풀 포맷 변환에 사용. */
   const data = useMemo(
     () =>
-      (buckets ?? []).map((b) => ({
-        t: new Date(b.ts).toLocaleTimeString('ko-KR', { hour12: false }),
-        l1_hits: b.l1_hits,
-        l2_hits: b.l2_hits,
-        miss: b.miss,
-        bypass: b.bypass,
-      })),
-    [buckets],
+      (buckets ?? []).map((b) => {
+        const d = new Date(b.ts);
+        const pad = (n: number) => String(n).padStart(2, '0');
+        const hhmm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        return {
+          ts: b.ts,
+          t:
+            range === '24h'
+              ? `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${hhmm}`
+              : hhmm,
+          l1_hits: b.l1_hits,
+          l2_hits: b.l2_hits,
+          miss: b.miss,
+          bypass: b.bypass,
+        };
+      }),
+    [buckets, range],
   );
 
   return (
@@ -84,8 +95,18 @@ export function CacheHitRateChart() {
                 tick={{ fontSize: 10 }}
               />
               {/* stackOffset="expand" 사용 시 Recharts 내부값이 0~1 소수로 정규화됨.
-                  YAxis tickFormatter와 동일하게 백분율(%) 문자열로 변환해야 한다. */}
-              <ChartTooltip formatter={(v: number) => `${Math.round(v * 100)}%`} />
+                  YAxis tickFormatter와 동일하게 백분율(%) 문자열로 변환해야 한다.
+                  툴팁 헤더는 항상 'YYYY-MM-DD HH:mm' 풀 포맷으로 노출 — 어떤 범위에서든 시점 정확 식별 (#202). */}
+              <ChartTooltip
+                formatter={(v: number) => `${Math.round(v * 100)}%`}
+                labelFormatter={(label, payload) => {
+                  const ts = (payload?.[0]?.payload as { ts?: number } | undefined)?.ts;
+                  if (typeof ts !== 'number') return label as string;
+                  const d = new Date(ts);
+                  const pad = (n: number) => String(n).padStart(2, '0');
+                  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+                }}
+              />
               <Legend wrapperStyle={{ fontSize: 12 }} />
               <Area
                 type="monotone"
