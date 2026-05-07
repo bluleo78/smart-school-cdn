@@ -1746,3 +1746,61 @@ test.describe('도메인 관리 — 일괄 삭제 부분 실패 분리 안내 (#
     await expect(toast).toContainText('1건이 삭제되었습니다');
   });
 });
+
+/**
+ * 이슈 #219 회귀 방지 — DomainBulkAddDialog 큰 입력 시 줄 수/도메인 개수 미리보기
+ * 1000줄 등 대량 입력을 붙여넣었을 때 사용자가 등록 예정 개수를 즉시 인지할 수 있어야 한다.
+ * - textarea 아래 미리보기 텍스트(`bulk-add-preview`)에 "N줄 / 도메인 M개" 표시
+ * - 제출 버튼 라벨이 동적으로 "일괄 추가 (M건)"으로 변경
+ */
+test.describe('도메인 관리 — 일괄 추가 미리보기 (#219)', () => {
+  test('빈 입력일 때는 안내 문구가 보이고 제출 버튼은 정적 라벨이다', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+
+    await page.goto('/domains');
+    await page.getByRole('button', { name: '일괄 추가' }).click();
+    await expect(page.getByTestId('bulk-add-dialog')).toBeVisible();
+
+    // 빈 입력일 때 미리보기 안내 + 제출 버튼 정적 라벨
+    await expect(page.getByTestId('bulk-add-preview')).toHaveText('입력된 도메인이 없습니다.');
+    await expect(page.getByTestId('bulk-add-submit')).toHaveText('일괄 추가');
+  });
+
+  test('여러 줄 입력 시 줄 수/도메인 개수 미리보기와 동적 버튼 라벨이 표시된다 (#219)', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+
+    await page.goto('/domains');
+    await page.getByRole('button', { name: '일괄 추가' }).click();
+    await expect(page.getByTestId('bulk-add-dialog')).toBeVisible();
+
+    // 3줄 입력 (모두 유효한 도메인 형식, 빈 줄 없음)
+    await page
+      .getByTestId('bulk-add-textarea')
+      .fill('a.example.com https://a.example.com\nb.example.com https://b.example.com\nc.example.com https://c.example.com');
+
+    // 줄 수와 도메인 개수가 정확히 표시되어야 한다 (#219 핵심)
+    await expect(page.getByTestId('bulk-add-preview')).toHaveText('3줄 / 도메인 3개');
+    // 제출 버튼 라벨이 동적으로 변경되어야 한다 (#219 핵심)
+    await expect(page.getByTestId('bulk-add-submit')).toHaveText('일괄 추가 (3건)');
+  });
+
+  test('빈 줄이 섞인 입력은 줄 수와 도메인 개수가 분리되어 표시된다 (#219)', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+
+    await page.goto('/domains');
+    await page.getByRole('button', { name: '일괄 추가' }).click();
+    await expect(page.getByTestId('bulk-add-dialog')).toBeVisible();
+
+    // 5줄(빈 줄 2개 포함) — 도메인 줄은 3개
+    await page
+      .getByTestId('bulk-add-textarea')
+      .fill('a.example.com https://a.example.com\n\nb.example.com https://b.example.com\n\nc.example.com https://c.example.com');
+
+    // 전체 줄 수 5, 도메인 줄 3 — 두 지표가 별도로 표시되어 사용자가 트림된 결과를 인지할 수 있다
+    await expect(page.getByTestId('bulk-add-preview')).toHaveText('5줄 / 도메인 3개');
+    await expect(page.getByTestId('bulk-add-submit')).toHaveText('일괄 추가 (3건)');
+  });
+});

@@ -15,6 +15,15 @@ export function DomainBulkAddDialog({ open, onOpenChange }: DomainBulkAddDialogP
   const [parseError, setParseError] = useState<string | null>(null);
   const bulkAdd = useBulkAddDomains();
 
+  /**
+   * 입력 미리보기 — 큰 입력(예: 1000줄)을 붙여넣었을 때 사용자가 등록 예정 개수를 즉시 인지할 수 있게 한다 (#219).
+   * - 줄 수: 빈 줄 포함 전체 줄 수 (사용자가 텍스트 양을 가늠하는 일차 지표)
+   * - 도메인 개수: 공백 trim 후 비어있지 않은 줄만 카운트 (실제 등록 시도 대상에 가까움)
+   * 파싱 단계에서 형식 검증을 하므로 여기서는 단순 카운트만 — 제출 버튼/textarea 라벨에 표시.
+   */
+  const totalLines = text === '' ? 0 : text.split('\n').length;
+  const domainCount = text.split('\n').filter((l) => l.trim().length > 0).length;
+
   /** 각 줄을 공백으로 split하여 { host, origin } 파싱 */
   function parseLines(): Array<{ host: string; origin: string }> | null {
     const lines = text
@@ -100,6 +109,16 @@ export function DomainBulkAddDialog({ open, onOpenChange }: DomainBulkAddDialogP
           placeholder={"textbook.com https://textbook.com\ncdn.school.kr https://origin.school.kr"}
           data-testid="bulk-add-textarea"
         />
+        {/* 입력 미리보기 — 큰 입력(예: 1000줄) 붙여넣었을 때 의도치 않은 대량 등록 방지용 카운트 표시 (#219) */}
+        <p
+          className="text-xs text-muted-foreground mt-1"
+          data-testid="bulk-add-preview"
+          aria-live="polite"
+        >
+          {domainCount === 0
+            ? '입력된 도메인이 없습니다.'
+            : `${totalLines}줄 / 도메인 ${domainCount}개`}
+        </p>
         {parseError && (
           <p className="text-xs text-destructive" data-testid="bulk-add-error">
             {parseError}
@@ -114,7 +133,11 @@ export function DomainBulkAddDialog({ open, onOpenChange }: DomainBulkAddDialogP
             disabled={bulkAdd.isPending}
             data-testid="bulk-add-submit"
           >
-            {bulkAdd.isPending ? '추가 중…' : '일괄 추가'}
+            {bulkAdd.isPending
+              ? '추가 중…'
+              : domainCount > 0
+                ? `일괄 추가 (${domainCount}건)`
+                : '일괄 추가'}
           </Button>
         </div>
       </DialogContent>
