@@ -320,6 +320,19 @@ export async function domainRoutes(
     return new URL(origin).origin;
   }
 
+  /**
+   * host 입력 정규화 — DNS 호스트네임은 RFC 1035 §2.3.3에 의해 case-insensitive 이고
+   * Proxy 캐시 키·라우팅도 lowercase 호스트를 가정한다. 같은 도메인이 대소문자만 다른
+   * 별도 행으로 저장되는 것을 막기 위해 모든 입력 경계(POST 단건/bulk, PUT/GET/DELETE/toggle/sync/purge/통계)에서
+   * `trim().toLowerCase()` 로 통일한다 (#190 username 정규화 패턴, #191 origin 정규화와 짝).
+   *
+   * 검증(`DOMAIN_RE`)은 정규화 후 수행해 `Example.COM` 같은 입력이 통과되도록 한다.
+   * (DOMAIN_RE 자체는 /i 플래그라 검증은 통과하지만 저장은 lowercase 형태로만 일관 유지)
+   */
+  function normalizeHost(input: string): string {
+    return input.trim().toLowerCase();
+  }
+
   /** origin 검증 실패 시 표시할 공통 에러 메시지 — POST/PUT/bulk 공유 */
   const ORIGIN_INVALID_MSG = '유효한 origin URL이 아닙니다. (예: https://example.com, 최대 2083자)';
 
@@ -327,20 +340,27 @@ export async function domainRoutes(
   app.post<{ Body: { domains?: Array<{ host: string; origin: string }> } }>(
     '/api/domains/bulk',
     async (request, reply) => {
-      const { domains } = request.body ?? {};
+      const rawBody = request.body ?? {};
+      const domains = Array.isArray(rawBody.domains) ? rawBody.domains : undefined;
       if (!Array.isArray(domains) || domains.length === 0) {
         return reply.status(400).send({ error: 'domains 배열은 필수 항목입니다.' });
       }
+      // host 정규화 (#201) — DNS case-insensitive. 정규화 후 검증/저장 모두 lowercase 입력으로 일관.
+      // 입력값을 직접 mutate 하면 호출 측 객체에 영향이 가므로 새 배열을 만들고 이후 단계에 전달한다.
+      const normalizedHostDomains = domains.map((d) => ({
+        host: typeof d.host === 'string' ? normalizeHost(d.host) : d.host,
+        origin: d.origin,
+      }));
       // host 형식 검증 — RFC-1123 DOMAIN_RE 적용 (#152)
       // 단일 추가(/api/domains)와 동일한 검증을 적용하여 비정상 host가 DB에 저장되는 것을 방지
-      for (const d of domains) {
+      for (const d of normalizedHostDomains) {
         if (typeof d.host !== 'string' || !DOMAIN_RE.test(d.host)) {
           return reply.status(400).send({ error: `유효한 도메인 형식이 아닙니다: "${d.host}"` });
         }
       }
       // 각 도메인의 origin URL 형식 검증 — scheme/host/길이/공백 종합 검증 (#167)
       // javascript:, file://, ftp:// 등 비정상 scheme + `http://`(빈 host) + 5000자 + 공백 포함 host 모두 차단
-      for (const d of domains) {
+      for (const d of normalizedHostDomains) {
         if (!isValidOrigin(d.origin)) {
           // 에러 메시지에 입력값 일부를 포함 — 5000자 폭주 방지 위해 80자로 잘라낸다
           const raw: unknown = d.origin;
@@ -350,7 +370,7 @@ export async function domainRoutes(
       }
       // origin 정규화 — trailing slash/host 대소문자/path 자동 추가가 동일 origin 을
       // 다른 문자열로 저장하지 않도록 표준형(`URL.origin`)으로 통일한다 (#191).
-      const normalizedDomains = domains.map((d) => ({ host: d.host, origin: normalizeOrigin(d.origin) }));
+      const normalizedDomains = normalizedHostDomains.map((d) => ({ host: d.host, origin: normalizeOrigin(d.origin) }));
       // (#197) bulkInsert 는 added/skipped/failed 를 분리 반환한다.
       // skipped: 이미 존재하는 host (origin 보존), failed: SQL 실패. 클라이언트는 added 만 신규 추가로 안내.
       const result = domainRepo.bulkInsert(normalizedDomains);
@@ -365,7 +385,7 @@ export async function domainRoutes(
         ...result.failed.map((f) => f.host),
         ...result.skipped.map((s) => s.host),
       ]);
-      const addedHosts = domains.map((d) => d.host).filter((h) => !skippedOrFailed.has(h));
+      const addedHosts = normalizedHostDomains.map((d) => d.host).filter((h): h is string => typeof h === 'string' && !skippedOrFailed.has(h));
       await Promise.allSettled(
         addedHosts.map(async (host) => {
           try {
@@ -383,10 +403,13 @@ export async function domainRoutes(
   app.delete<{ Body: { hosts?: string[] } }>(
     '/api/domains/bulk',
     async (request, reply) => {
-      const { hosts } = request.body ?? {};
-      if (!Array.isArray(hosts) || hosts.length === 0) {
+      const rawHosts = request.body?.hosts;
+      if (!Array.isArray(rawHosts) || rawHosts.length === 0) {
         return reply.status(400).send({ error: 'hosts 배열은 필수 항목입니다.' });
       }
+      // host 정규화 (#201) — 같은 도메인의 대소문자 변형이 섞여 들어와도 일관되게 lowercase 키로 삭제.
+      // 비문자열 항목이 섞이면 안전하게 그대로 두고 bulkDelete 가 미일치로 무시하게 둔다.
+      const hosts = rawHosts.map((h) => (typeof h === 'string' ? normalizeHost(h) : h));
       const deleted = domainRepo.bulkDelete(hosts);
       const synced = await syncToProxy(domainRepo);
       if (!synced) {
@@ -407,7 +430,11 @@ export async function domainRoutes(
   app.post<{ Body: { host?: string; origin?: string } }>(
     '/api/domains',
     async (request, reply) => {
-      const { host, origin } = request.body ?? {};
+      const rawBody = request.body ?? {};
+      // host 정규화 — DNS case-insensitive 규약에 맞춰 lowercase 통일 (#201).
+      // 정규화 후에도 빈 문자열이면 필수값 누락으로 처리.
+      const host = typeof rawBody.host === 'string' ? normalizeHost(rawBody.host) : rawBody.host;
+      const origin = rawBody.origin;
       if (!host || !origin) {
         return reply.status(400).send({ error: 'host와 origin은 필수 항목입니다.' });
       }
@@ -443,7 +470,7 @@ export async function domainRoutes(
 
   /** 단일 도메인 상세 조회 */
   app.get<{ Params: { host: string } }>('/api/domains/:host', async (request, reply) => {
-    const host = decodeURIComponent(request.params.host);
+    const host = normalizeHost(decodeURIComponent(request.params.host));
     const domain = domainRepo.findByHost(host);
     if (!domain) {
       return reply.status(404).send({ error: '도메인을 찾을 수 없습니다.' });
@@ -457,7 +484,7 @@ export async function domainRoutes(
     // enabled는 0|1만 허용 — TypeScript 타입으로 좁혀 런타임 검증과 일관성 유지 (#156)
     Body: { origin?: string; enabled?: 0 | 1; description?: string };
   }>('/api/domains/:host', async (request, reply) => {
-    const host = decodeURIComponent(request.params.host);
+    const host = normalizeHost(decodeURIComponent(request.params.host));
     // (#192) host 단위 락으로 toggle과 직렬화 — PUT 중 toggle이 끼어들어 일관성이 깨지는 것을 방지
     return withHostLock(host, async () => {
     const { origin, enabled, description } = request.body ?? {};
@@ -516,7 +543,7 @@ export async function domainRoutes(
    * 형태의 절대값 복원으로 변경 — 락이 없는 경계 케이스에서도 idempotent.
    */
   app.post<{ Params: { host: string } }>('/api/domains/:host/toggle', async (request, reply) => {
-    const host = decodeURIComponent(request.params.host);
+    const host = normalizeHost(decodeURIComponent(request.params.host));
     return withHostLock(host, async () => {
       // 롤백 시 절대값 복원을 위해 변경 전 enabled 값을 먼저 캡처
       const original = domainRepo.findByHost(host);
@@ -540,7 +567,7 @@ export async function domainRoutes(
 
   /** 도메인 강제 동기화 — Proxy + TLS + DNS 서비스에 전체 목록 재전송 */
   app.post<{ Params: { host: string } }>('/api/domains/:host/sync', async (request, reply) => {
-    const host = decodeURIComponent(request.params.host);
+    const host = normalizeHost(decodeURIComponent(request.params.host));
     const domain = domainRepo.findByHost(host);
     if (!domain) {
       return reply.status(404).send({ error: '도메인을 찾을 수 없습니다.' });
@@ -566,7 +593,7 @@ export async function domainRoutes(
 
   /** 도메인 캐시 퍼지 — Proxy에 POST 요청 */
   app.post<{ Params: { host: string } }>('/api/domains/:host/purge', async (request, reply) => {
-    const host = decodeURIComponent(request.params.host);
+    const host = normalizeHost(decodeURIComponent(request.params.host));
     const domain = domainRepo.findByHost(host);
     if (!domain) {
       return reply.status(404).send({ error: '도메인을 찾을 수 없습니다.' });
@@ -587,7 +614,7 @@ export async function domainRoutes(
   app.get<{ Params: { host: string } }>(
     '/api/domains/:host/summary',
     async (request, reply) => {
-      const host = decodeURIComponent(request.params.host);
+      const host = normalizeHost(decodeURIComponent(request.params.host));
       const domain = domainRepo.findByHost(host);
       if (!domain) {
         return reply.status(404).send({ error: '도메인을 찾을 수 없습니다.' });
@@ -613,7 +640,7 @@ export async function domainRoutes(
   }>(
     '/api/domains/:host/stats',
     async (request, reply) => {
-      const host = decodeURIComponent(request.params.host);
+      const host = normalizeHost(decodeURIComponent(request.params.host));
       const domain = domainRepo.findByHost(host);
       if (!domain) {
         return reply.status(404).send({ error: '도메인을 찾을 수 없습니다.' });
@@ -683,7 +710,7 @@ export async function domainRoutes(
       q?: string;
     };
   }>('/api/domains/:host/logs', async (request, reply) => {
-    const host = decodeURIComponent(request.params.host);
+    const host = normalizeHost(decodeURIComponent(request.params.host));
     const domain = domainRepo.findByHost(host);
     if (!domain) {
       return reply.status(404).send({ error: '도메인을 찾을 수 없습니다.' });
@@ -792,7 +819,7 @@ export async function domainRoutes(
     async (request, reply) => {
       // 와일드카드 도메인(*.example.com)은 프론트엔드에서 encodeURIComponent로 인코딩되어 전달되므로
       // 다른 핸들러와 동일하게 디코딩해야 DB 조회가 정상 동작함
-      const host = decodeURIComponent(request.params.host);
+      const host = normalizeHost(decodeURIComponent(request.params.host));
       const q = request.query;
       // limit 방어: 1~20, 기본 5
       const limit = Math.min(Math.max(Number(q.limit ?? 5) || 5, 1), 20);
@@ -854,7 +881,7 @@ export async function domainRoutes(
     Querystring: { period?: string; sort?: string; decision?: string; q?: string; limit?: string; offset?: string };
   }>('/api/domains/:host/optimization/url-breakdown', async (req) => {
     // 와일드카드 호스트(`*.textbook.com`)는 URL 인코딩되어 `%2A.textbook.com`로 들어오므로 디코딩 필요
-    const host = decodeURIComponent(req.params.host);
+    const host = normalizeHost(decodeURIComponent(req.params.host));
     const periodMap: Record<string, number> = { '1h': 3600, '24h': 86400, '7d': 604800, '30d': 2592000 };
     const periodSec = periodMap[req.query.period ?? '24h'] ?? 86400;
     const sort = (['savings', 'orig_size', 'events'] as const).find((s) => s === req.query.sort) ?? 'savings';
@@ -876,7 +903,7 @@ export async function domainRoutes(
   /** 도메인 삭제 */
   app.delete<{ Params: { host: string } }>('/api/domains/:host', async (request, reply) => {
     // URL 인코딩된 호스트 디코딩 (*.textbook.com → %2A.textbook.com으로 전달됨)
-    const host = decodeURIComponent(request.params.host);
+    const host = normalizeHost(decodeURIComponent(request.params.host));
     // (#192) host 단위 락으로 toggle/PUT과 직렬화 — 삭제 중 끼어든 토글이 사라진 도메인을 가리키는 race 방지
     return withHostLock(host, async () => {
     // 롤백을 위해 삭제 전 원본 값을 먼저 저장한다

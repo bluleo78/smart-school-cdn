@@ -44,7 +44,10 @@ export function DomainBulkAddDialog({ open, onOpenChange }: DomainBulkAddDialogP
         setParseError(`잘못된 origin: "${line}" — http:// 또는 https://로 시작해야 합니다.`);
         return null;
       }
-      result.push({ host: parts[0], origin });
+      // host 정규화 — DNS 호스트네임은 case-insensitive (RFC 1035 §2.3.3) 이고 서버도 lowercase
+      // 로 통일 저장하므로(#201), 클라이언트도 입력 시 lowercase 로 통일해 동일 도메인이 대소문자
+      // 차이만으로 별도 행처럼 보이지 않도록 한다.
+      result.push({ host: parts[0].toLowerCase(), origin });
     }
     return result;
   }

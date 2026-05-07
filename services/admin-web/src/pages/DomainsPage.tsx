@@ -54,7 +54,9 @@ function AddDomainDialog({ onClose }: { onClose: () => void }) {
     setOriginError(null);
     setSubmitError(null);
 
-    const h = host.trim();
+    // host 정규화 — DNS 호스트네임은 RFC 1035 §2.3.3 case-insensitive 이고 서버도 lowercase 로
+    // 통일 저장하므로(#201), 클라이언트도 동일 규칙을 적용해 검증·전송 일관성을 맞춘다.
+    const h = host.trim().toLowerCase();
     const o = origin.trim();
 
     // 필드별 유효성 검사 — 오류를 해당 필드 에러 상태에 개별 반영
@@ -97,7 +99,9 @@ function AddDomainDialog({ onClose }: { onClose: () => void }) {
           <Input
             id="add-host"
             value={host}
-            onChange={(e) => { setHost(e.target.value); setHostError(null); }}
+            // 입력 즉시 lowercase 로 표시 — DNS host 가 case-insensitive 이므로 사용자가 친 대문자도
+            // 소문자로 보이도록 즉각 정규화 (#201). 서버는 어차피 lowercase 로 저장한다.
+            onChange={(e) => { setHost(e.target.value.toLowerCase()); setHostError(null); }}
             placeholder="textbook.com 또는 *.textbook.com"
             data-testid="add-domain-host"
             // autoFocus 제거 — Radix DialogContent의 onOpenAutoFocus가 첫 포커스를 처리한다.

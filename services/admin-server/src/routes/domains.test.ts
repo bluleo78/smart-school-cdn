@@ -406,6 +406,35 @@ describe('POST /api/domains', () => {
     });
     expect(res2.statusCode).toBe(400);
   });
+
+  it('대문자가 섞인 host 는 lowercase 로 정규화되어 저장된다 (#201)', async () => {
+    const repo = makeRepo();
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'POST', url: '/api/domains',
+      payload: { host: 'Example.COM', origin: 'https://example.com' },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(JSON.parse(res.body).host).toBe('example.com');
+    // 같은 도메인 대소문자 변형으로 두 번째 POST 시 별도 행 생성 없이 upsert 동작
+    const res2 = await app.inject({
+      method: 'POST', url: '/api/domains',
+      payload: { host: 'EXAMPLE.com', origin: 'https://example.com' },
+    });
+    expect(res2.statusCode).toBe(201);
+    expect(repo.findAll().filter((d) => d.host.toLowerCase() === 'example.com')).toHaveLength(1);
+  });
+
+  it('host 앞뒤 공백은 trim 되고 lowercase 로 정규화된다 (#201)', async () => {
+    const repo = makeRepo();
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'POST', url: '/api/domains',
+      payload: { host: '  Foo.Bar.com  ', origin: 'https://foo.bar.com' },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(JSON.parse(res.body).host).toBe('foo.bar.com');
+  });
 });
 
 describe('POST /api/domains/bulk', () => {
@@ -537,6 +566,23 @@ describe('POST /api/domains/bulk', () => {
     // 기존 호스트 origin 은 변경되면 안 된다 — 안전 우선 정책 (#197)
     expect(repo.findByHost('exists.com')?.origin).toBe('https://exists.original');
     expect(repo.findByHost('newfresh.com')?.origin).toBe('https://newfresh.com');
+  });
+
+  it('대문자가 섞인 host 는 lowercase 로 정규화되어 저장된다 (#201)', async () => {
+    const repo = makeRepo();
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'POST', url: '/api/domains/bulk',
+      payload: { domains: [
+        { host: 'Foo.COM', origin: 'https://foo.com' },
+        { host: '  Bar.COM  ', origin: 'https://bar.com' },
+      ] },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(repo.findByHost('foo.com')).toBeTruthy();
+    expect(repo.findByHost('bar.com')).toBeTruthy();
+    // 원본 대소문자 host 로는 조회되지 않아야 함 (lowercase 단일 키)
+    expect(repo.findByHost('Foo.COM')).toBeFalsy();
   });
 });
 
@@ -806,6 +852,19 @@ describe('PUT /api/domains/:host', () => {
     expect(res.statusCode).toBe(400);
     // 원본은 유지
     expect(repo.findByHost('httpbin.org')?.origin).toBe('https://httpbin.org');
+  });
+
+  it('대문자 path param 은 lowercase 로 정규화되어 같은 도메인을 가리킨다 (#201)', async () => {
+    const repo = makeRepo();
+    repo.upsert('httpbin.org', 'https://httpbin.org');
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/domains/HTTPBIN.org',
+      payload: { origin: 'https://updated.example.com' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(repo.findByHost('httpbin.org')?.origin).toBe('https://updated.example.com');
   });
 });
 
