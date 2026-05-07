@@ -975,6 +975,56 @@ test.describe('도메인 관리 — 검색 필터 URL 동기화 (#68)', () => {
 });
 
 /**
+ * 이슈 #213 회귀 방지 — 검색 입력 클리어(X) 버튼
+ * DomainToolbar 검색 입력에 값이 있으면 X 버튼이 노출되고,
+ * 클릭 시 입력값과 URL ?q= 파라미터가 즉시 비워져야 한다.
+ */
+test.describe('도메인 관리 — 검색 클리어 버튼 (#213)', () => {
+  test('검색어 입력 전에는 X 버튼이 보이지 않는다', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+
+    await page.goto('/domains');
+    await expect(page.getByTestId('domains-table')).toBeVisible();
+
+    // 입력값이 없으면 클리어 버튼은 렌더링되지 않아야 한다
+    await expect(page.getByTestId('domain-search-clear')).toHaveCount(0);
+  });
+
+  test('검색어 입력 시 X 버튼이 노출되고, 클릭 시 입력과 URL이 모두 비워진다', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+    await mockApi(page, 'GET', '/domains?q=textbook', createDomains());
+
+    await page.goto('/domains');
+
+    // 검색어 입력 (debounce 300ms 대기)
+    await page.getByTestId('domain-search').fill('textbook');
+    await page.waitForTimeout(400);
+
+    // X 버튼이 노출되고, URL은 ?q=textbook 상태
+    await expect(page.getByTestId('domain-search-clear')).toBeVisible();
+    expect(page.url()).toContain('q=textbook');
+
+    // X 클릭 → 입력값/URL 즉시 비워짐 (debounce 대기 없이)
+    await page.getByTestId('domain-search-clear').click();
+    await expect(page.getByTestId('domain-search')).toHaveValue('');
+    expect(page.url()).not.toContain('q=');
+    // 비워졌으므로 X 버튼 자체도 사라져야 한다
+    await expect(page.getByTestId('domain-search-clear')).toHaveCount(0);
+  });
+
+  test('X 버튼은 aria-label로 식별 가능하다', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+
+    await page.goto('/domains');
+    await page.getByTestId('domain-search').fill('a');
+    await expect(page.getByRole('button', { name: '검색 지우기' })).toBeVisible();
+  });
+});
+
+/**
  * 이슈 #70 회귀 방지 — 토글/퍼지 버튼 뮤테이션 진행 중 disabled 미처리
  * toggleMutation 또는 purgeMutation이 isPending 상태일 때,
  * 토글/퍼지 버튼이 disabled 처리되어 중복 클릭이 불가능해야 한다.
