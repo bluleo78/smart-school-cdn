@@ -78,19 +78,27 @@ function OriginSection({ domain }: { domain: Domain }) {
 
   /** 저장 — origin 빈값·스킴 클라이언트 검증 후 뮤테이션 호출, 편집 모드 해제 */
   function handleSave() {
+    // 입력값 정규화 — leading/trailing 공백을 제거한 뒤 모든 검증·전송에 사용한다.
+    // raw origin으로 검증하면 leading 공백이 있을 때 scheme 검사가 false가 되어
+    // "https://로 시작해야 합니다" 같은 오해 소지 메시지가 노출되고, trailing 공백은
+    // 클라 검증을 통과해 서버 거부로 일반 실패 토스트만 보이는 문제가 있었다 (#229).
+    // AddDomainDialog(pages/DomainsPage.tsx)와 동일한 trim-then-validate 패턴 적용.
+    const o = origin.trim();
+    const d = description.trim();
+
     // 오리진 빈값 검증 — 서버로 보내기 전에 차단하여 데이터 무결성 보장
-    if (!origin.trim()) {
+    if (!o) {
       toast.error('오리진 URL을 입력해 주세요.');
       return;
     }
     // 오리진 스킴 검증 — http:// 또는 https://로 시작해야 Proxy가 올바르게 업스트림에 연결 가능
     // AddDomainDialog와 동일한 이중 방어 적용 (#103)
-    if (!origin.startsWith('http://') && !origin.startsWith('https://')) {
+    if (!o.startsWith('http://') && !o.startsWith('https://')) {
       toast.error('오리진 URL은 http:// 또는 https://로 시작해야 합니다.');
       return;
     }
     updateMutation.mutate(
-      { host: domain.host, body: { origin, description } },
+      { host: domain.host, body: { origin: o, description: d } },
       {
         onSuccess: (data) => {
           // 서버 응답값으로 로컬 state를 명시적으로 동기화

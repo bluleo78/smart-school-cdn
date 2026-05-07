@@ -1700,6 +1700,78 @@ test.describe('도메인 상세 — 설정 탭', () => {
     await expect(page.getByTestId('save-domain-btn')).toBeVisible();
   });
 
+  /**
+   * 이슈 #229 회귀 방지 — OriginSection handleSave가 origin/description을 trim 하지 않아
+   * leading/trailing 공백 입력 시 오해 소지 에러 또는 일반 실패 토스트만 노출되던 버그.
+   *
+   * 수정 후:
+   *   1) leading 공백 + 정상 https URL → trim 후 스킴 검사 통과 → PUT 호출 + trim된 값 전송
+   *   2) trailing 공백 + 정상 https URL → trim 후 PUT 호출 + trim된 값 전송
+   *
+   * 모킹 이유: 서버로 실제 전송되는 origin 값이 trim 되어 있는지를 PUT 요청 본문으로 직접 검증한다.
+   * mock이 재현하는 조건: 사용자가 입력란에 공백이 포함된 URL을 넣고 저장을 누르는 상황.
+   * 이 mock이 실제 버그 조건과 동일한 이유: handleSave는 mutate에 origin을 그대로 전달하므로
+   * PUT body의 origin 값이 trim된 문자열과 일치해야만 정규화가 클라이언트에서 일어났음을 보장한다.
+   */
+  test('OriginSection — origin/description leading·trailing 공백 trim 후 저장 (#229)', async ({ page }) => {
+    await setupDetailMocks(page);
+
+    // 가장 최근 PUT 요청 본문을 보관 — trim 검증용
+    let lastPutBody: { origin?: string; description?: string } | null = null;
+    await page.route('**/api/domains/textbook.com', (route) => {
+      if (route.request().method() === 'PUT') {
+        try {
+          lastPutBody = JSON.parse(route.request().postData() ?? '{}') as {
+            origin?: string;
+            description?: string;
+          };
+        } catch {
+          lastPutBody = null;
+        }
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            ...createDomain(),
+            origin: lastPutBody?.origin ?? 'https://textbook.com',
+            description: lastPutBody?.description ?? '',
+          }),
+        });
+      }
+      return route.fallback();
+    });
+
+    await page.goto('/domains/textbook.com?tab=settings');
+    await expect(page.getByTestId('domain-settings-tab')).toBeVisible();
+
+    // (1) leading 공백 — 수정 전이면 스킴 오류 토스트가 뜨고 PUT이 호출되지 않음.
+    //     수정 후엔 trim 되어 정상 저장되어야 한다.
+    await page.getByTestId('edit-domain-btn').click();
+    await page.getByTestId('origin-input').fill('  https://textbook.com');
+    await page.locator('#description-input').fill('  설명입니다  ');
+    await page.getByTestId('save-domain-btn').click();
+
+    // 저장 성공 → 편집 모드 해제
+    await expect(page.getByTestId('edit-domain-btn')).toBeVisible();
+    // 스킴 오류 토스트가 뜨지 않아야 한다
+    await expect(
+      page.getByText('오리진 URL은 http:// 또는 https://로 시작해야 합니다.'),
+    ).toBeHidden();
+    // PUT body의 origin/description이 trim 되어 전송되었는지 검증
+    expect(lastPutBody?.origin).toBe('https://textbook.com');
+    expect(lastPutBody?.description).toBe('설명입니다');
+
+    // (2) trailing 공백 — 수정 전이면 서버 거부로 일반 실패 토스트만.
+    //     수정 후엔 trim 되어 정상 전송되어야 한다.
+    lastPutBody = null;
+    await page.getByTestId('edit-domain-btn').click();
+    await page.getByTestId('origin-input').fill('https://textbook2.com  ');
+    await page.getByTestId('save-domain-btn').click();
+
+    await expect(page.getByTestId('edit-domain-btn')).toBeVisible();
+    expect(lastPutBody?.origin).toBe('https://textbook2.com');
+  });
+
   test('Origin 편집이 동작한다', async ({ page }) => {
     await setupDetailMocks(page);
     await mockApi(page, 'PUT', '/domains/textbook.com', {
