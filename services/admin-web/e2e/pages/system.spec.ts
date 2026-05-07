@@ -442,6 +442,24 @@ test.describe('서비스 상태 그리드', () => {
     await expect(page.getByTestId('service-status-card')).toHaveCount(5, { timeout: 5000 });
     await expect(skeletons).toHaveCount(0);
   });
+
+  /// 회귀 방지 #269: 810×1080(iPad portrait)에서 5개 카드가 3-col 그리드로 배치되어
+  /// 마지막 행에 빈 슬롯이 생기던 버그. md(768px+)부터 5-col 단일 행으로 정렬되어야 한다.
+  test('810×1080에서 5개 카드가 단일 행에 배치된다 — 회귀 방지 #269', async ({ page }) => {
+    await page.setViewportSize({ width: 810, height: 1080 });
+    await mockApi(page, 'GET', '/system/status', allOnlineStatus);
+    await page.goto('/system');
+
+    const cards = page.getByTestId('service-status-card');
+    await expect(cards).toHaveCount(5);
+
+    // 모든 카드의 top y 좌표가 동일하면 단일 행으로 배치된 것
+    // (3-col 그리드였다면 4번째/5번째 카드는 두 번째 행으로 내려가 y가 달라짐)
+    const ys = await cards.evaluateAll((els) =>
+      els.map((el) => Math.round(el.getBoundingClientRect().top)),
+    );
+    expect(new Set(ys).size).toBe(1);
+  });
 });
 
 /// LogViewer — Phase 8-3 실시간 로그 뷰어 통합 테스트

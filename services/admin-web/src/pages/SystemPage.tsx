@@ -114,10 +114,12 @@ export function SystemPage() {
 
       {/* 마이크로서비스 상태 그리드
        * 로딩 중: Skeleton 카드 5개 표시 — 실제 데이터 오기 전 온라인 오표시(#139) 방지
-       * 로드 후: 실제 online/latency_ms 값 사용 (fallback ?? true 제거) */}
+       * 로드 후: 실제 online/latency_ms 값 사용 (fallback ?? true 제거)
+       * 그리드 분할: 카드 수가 5개로 고정이므로 3의 배수 그리드(3-col)는 항상 dangling 행 발생.
+       *   → mobile 2-col(2+2+1), md(768px+) 5-col 단일 행으로 단순화하여 빈 슬롯 제거 (#269) */}
       <div
         data-testid="service-status-grid"
-        className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5"
+        className="grid grid-cols-2 gap-4 md:grid-cols-5"
       >
         {systemStatusLoading || !systemStatus ? (
           [...Array(5)].map((_, i) => (
