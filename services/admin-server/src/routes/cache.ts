@@ -196,6 +196,8 @@ export async function cacheRoutes(app: FastifyInstance) {
 
     // URL 퍼지 시 대상 URL의 hostname이 등록된 도메인에 속하는지 검증한다.
     // 등록되지 않은 외부 도메인에 대한 크로스 도메인 퍼지를 방지한다 (#36).
+    // 와일드카드 도메인(`*.base`)에 대해서는 base 자체 또는 base의 한 단계 이상 깊은 서브도메인을
+    // 매칭으로 허용한다 — URL에 리터럴 `*`이 들어갈 수 없기 때문 (#234).
     if (body.type === 'url') {
       let hostname: string;
       try {
@@ -203,9 +205,24 @@ export async function cacheRoutes(app: FastifyInstance) {
       } catch {
         return reply.status(400).send({ error: '유효하지 않은 URL 형식입니다.' });
       }
-      const registered = app.db
+      // 1) 정확히 일치하는 일반 도메인 확인
+      const exact = app.db
         .prepare('SELECT 1 FROM domains WHERE host = ? LIMIT 1')
         .get(hostname);
+      let registered = !!exact;
+      if (!registered) {
+        // 2) 와일드카드 매칭 — hostname의 suffix(부모 도메인)에 대응하는 *.suffix가 등록되어 있는지 확인
+        const candidates: string[] = [`*.${hostname}`];
+        const parts = hostname.split('.');
+        for (let i = 1; i < parts.length; i++) {
+          candidates.push(`*.${parts.slice(i).join('.')}`);
+        }
+        const placeholders = candidates.map(() => '?').join(',');
+        const wildcardHit = app.db
+          .prepare(`SELECT 1 FROM domains WHERE host IN (${placeholders}) LIMIT 1`)
+          .get(...candidates);
+        registered = !!wildcardHit;
+      }
       if (!registered) {
         return reply.status(400).send({ error: `${hostname}은(는) 등록된 도메인이 아닙니다.` });
       }

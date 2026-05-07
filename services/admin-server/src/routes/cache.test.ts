@@ -331,6 +331,53 @@ describe('DELETE /api/cache/purge', () => {
     expect(mock.purgeUrl).not.toHaveBeenCalled();
   });
 
+  // 와일드카드 도메인 매칭 검증 (#234) — `*.base` 등록 시 base 또는 base.* 서브도메인이 hostname이면 통과
+  it('url 타입 + hostname이 등록된 와일드카드 도메인의 하위 도메인이면 purgeUrl을 호출한다 (#234)', async () => {
+    const purgeResult = { purged_files: 2, freed_bytes: 1024 };
+    const mock = makeStorageMock(async () => ({ used_bytes: 0, total_bytes: 0 }));
+    mock.purgeUrl.mockResolvedValueOnce(purgeResult);
+    // *.cdn.edu.kr 와일드카드 등록 → app.cdn.edu.kr 하위 도메인 URL 허용
+    const { app } = mkApp({ storage: mock, domains: ['*.cdn.edu.kr'] });
+
+    const res = await app.inject({
+      method: 'DELETE', url: '/api/cache/purge',
+      headers: { 'content-type': 'application/json' },
+      payload: { type: 'url', target: 'https://app.cdn.edu.kr/foo.png' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ purged_count: 2, freed_bytes: 1024 });
+    expect(mock.purgeUrl).toHaveBeenCalledWith('https://app.cdn.edu.kr/foo.png');
+  });
+
+  it('url 타입 + hostname이 와일드카드 도메인의 베이스(cdn.edu.kr)면 purgeUrl을 호출한다 (#234)', async () => {
+    const purgeResult = { purged_files: 1, freed_bytes: 256 };
+    const mock = makeStorageMock(async () => ({ used_bytes: 0, total_bytes: 0 }));
+    mock.purgeUrl.mockResolvedValueOnce(purgeResult);
+    const { app } = mkApp({ storage: mock, domains: ['*.cdn.edu.kr'] });
+
+    const res = await app.inject({
+      method: 'DELETE', url: '/api/cache/purge',
+      headers: { 'content-type': 'application/json' },
+      payload: { type: 'url', target: 'https://cdn.edu.kr/x' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(mock.purgeUrl).toHaveBeenCalledWith('https://cdn.edu.kr/x');
+  });
+
+  it('url 타입 + hostname이 와일드카드 베이스와 무관하면 400을 반환한다 (#234)', async () => {
+    const mock = makeStorageMock(async () => ({ used_bytes: 0, total_bytes: 0 }));
+    const { app } = mkApp({ storage: mock, domains: ['*.cdn.edu.kr'] });
+
+    const res = await app.inject({
+      method: 'DELETE', url: '/api/cache/purge',
+      headers: { 'content-type': 'application/json' },
+      payload: { type: 'url', target: 'https://other.example.com/x' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toContain('등록된 도메인');
+    expect(mock.purgeUrl).not.toHaveBeenCalled();
+  });
+
   it('url 타입 + 유효하지 않은 URL이면 400을 반환한다 (#36)', async () => {
     const mock = makeStorageMock(async () => ({ used_bytes: 0, total_bytes: 0 }));
     const { app } = mkApp({ storage: mock });

@@ -13,6 +13,20 @@ interface Props {
   host: string;
 }
 
+/**
+ * 입력 URL의 hostname이 도메인 host에 매칭되는지 확인한다.
+ * - 일반 도메인: 정확히 일치해야 한다.
+ * - 와일드카드 도메인(`*.base`): base 자체 또는 base의 한 단계 이상 깊은 서브도메인을 허용한다.
+ *   URL에는 리터럴 `*` 문자가 들어갈 수 없으므로 단순 동등 비교로는 어떤 입력도 통과시킬 수 없다 (#234).
+ */
+function hostMatches(parsedHost: string, host: string): boolean {
+  if (host.startsWith('*.')) {
+    const base = host.slice(2);
+    return parsedHost === base || parsedHost.endsWith('.' + base);
+  }
+  return parsedHost === host;
+}
+
 export function DomainCacheSection({ host }: Props) {
   /** URL 퍼지 입력값 */
   const [urlInput, setUrlInput] = useState('');
@@ -34,8 +48,12 @@ export function DomainCacheSection({ host }: Props) {
       toast.error('유효한 URL을 입력해 주세요.');
       return;
     }
-    if (parsedHost !== host) {
-      toast.error(`퍼지 URL은 ${host} 도메인 소속이어야 합니다.`);
+    if (!hostMatches(parsedHost, host)) {
+      // 와일드카드 도메인은 패턴 안내 메시지로 분기하여 사용자가 입력 형식을 이해하도록 돕는다 (#234)
+      const message = host.startsWith('*.')
+        ? `퍼지 URL은 ${host} 패턴의 하위 도메인이어야 합니다.`
+        : `퍼지 URL은 ${host} 도메인 소속이어야 합니다.`;
+      toast.error(message);
       return;
     }
 

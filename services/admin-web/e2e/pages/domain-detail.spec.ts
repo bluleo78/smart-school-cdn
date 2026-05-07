@@ -3109,3 +3109,119 @@ test.describe('도메인 상세 — 설정 탭 TLS 수동 갱신 (#102)', () => 
     await expect(page.getByText('px 단위, 0 입력 시 너비 제한 없음')).toBeVisible();
   });
 });
+
+/**
+ * 이슈 #234 회귀 방지 — DomainCacheSection 와일드카드 도메인 URL 퍼지 hostname 매칭
+ *
+ * 와일드카드 호스트(`*.cdn.edu.kr`)는 단순 동등 비교로 어떤 URL도 통과시킬 수 없다.
+ * 수정 후: `*.base` 패턴은 base 또는 base의 서브도메인 hostname을 매칭으로 허용해야 한다.
+ */
+test.describe('도메인 상세 — 설정 탭 와일드카드 URL 퍼지 (#234)', () => {
+  /** 와일드카드 도메인 상세 페이지에 필요한 mock 등록 */
+  async function setupWildcardMocks(page: Page) {
+    const host = '*.cdn.edu.kr';
+    const encoded = encodeURIComponent(host); // %2A.cdn.edu.kr
+    const wildcardDomain = {
+      host,
+      origin: 'https://cdn.edu.kr',
+      enabled: 1,
+      description: '와일드카드 CDN',
+      created_at: 1700000000,
+      updated_at: 1700000000,
+    };
+    await mockApi(page, 'GET', '/proxy/status', createProxyStatusOnline());
+    await mockApi(page, 'GET', '/proxy/requests', []);
+    await mockApi(page, 'GET', '/domains/summary', createDomainSummary());
+    await page.route(`**/api/domains/${encoded}`, (route) => {
+      const req = route.request();
+      if (req.method() === 'GET') return route.fulfill({ json: wildcardDomain });
+      return route.fallback();
+    });
+    await page.route(`**/api/domains/${encoded}/stats*`, (route) =>
+      route.request().method() === 'GET'
+        ? route.fulfill({ json: { ...createDomainStats(), host } })
+        : route.fallback(),
+    );
+    await page.route(`**/api/domains/${encoded}/logs*`, (route) =>
+      route.fulfill({ json: createDomainLogs() }),
+    );
+    await page.route(`**/api/domains/${encoded}/summary*`, (route) =>
+      route.fulfill({ json: createDomainHostSummary() }),
+    );
+    await page.route(`**/api/domains/${encoded}/top-urls*`, (route) =>
+      route.fulfill({ json: { urls: [] } }),
+    );
+    await page.route(`**/api/domains/${encoded}/optimization/url-breakdown*`, (route) =>
+      route.fulfill({ json: { total: 0, items: [] } }),
+    );
+    await mockApi(page, 'GET', '/tls/certificates', createCertificates());
+    await mockApi(page, 'GET', '/cache/popular', createPopularContent());
+    await mockApi(page, 'GET', '/stats/optimization', createOptimizationStats());
+    await mockApi(page, 'GET', '/optimizer/profiles', createOptimizerProfile());
+    await page.route('**/api/cache/series*', (route) =>
+      route.fulfill({ json: { buckets: [] } }),
+    );
+    await page.route('**/api/optimization/stats*', (route) =>
+      route.fulfill({ json: createTextCompressStats() }),
+    );
+  }
+
+  test('와일드카드 호스트의 매칭되는 하위 도메인 URL은 purge API를 호출한다 (#234)', async ({ page }) => {
+    await setupWildcardMocks(page);
+    let purgeCallCount = 0;
+    let lastTarget = '';
+    await page.route('**/api/cache/purge', async (route) => {
+      purgeCallCount++;
+      lastTarget = (route.request().postDataJSON() as { target?: string }).target ?? '';
+      return route.fulfill({ json: { purged_count: 3, freed_bytes: 1024 } });
+    });
+
+    await page.goto(`/domains/${encodeURIComponent('*.cdn.edu.kr')}?tab=settings`);
+
+    // 하위 도메인 URL 입력 → 퍼지 클릭 → API 호출되어야 한다
+    await page.getByTestId('url-purge-input').fill('https://app.cdn.edu.kr/foo.png');
+    await page.getByTestId('url-purge-btn').click();
+
+    // 성공 토스트 + API가 정확한 target으로 1회 호출되었는지 검증
+    await expect(page.getByText('3건 삭제')).toBeVisible({ timeout: 3000 });
+    expect(purgeCallCount).toBe(1);
+    expect(lastTarget).toBe('https://app.cdn.edu.kr/foo.png');
+  });
+
+  test('와일드카드 호스트의 베이스 도메인 URL도 매칭으로 허용된다 (#234)', async ({ page }) => {
+    // *.cdn.edu.kr 등록 시 cdn.edu.kr 자체도 허용 — 베이스 케이스
+    await setupWildcardMocks(page);
+    let purgeCallCount = 0;
+    await page.route('**/api/cache/purge', (route) => {
+      purgeCallCount++;
+      return route.fulfill({ json: { purged_count: 1, freed_bytes: 100 } });
+    });
+
+    await page.goto(`/domains/${encodeURIComponent('*.cdn.edu.kr')}?tab=settings`);
+
+    await page.getByTestId('url-purge-input').fill('https://cdn.edu.kr/x');
+    await page.getByTestId('url-purge-btn').click();
+
+    await expect(page.getByText('1건 삭제')).toBeVisible({ timeout: 3000 });
+    expect(purgeCallCount).toBe(1);
+  });
+
+  test('와일드카드 호스트와 매칭되지 않는 외부 도메인 URL은 패턴 안내 토스트로 거부된다 (#234)', async ({ page }) => {
+    await setupWildcardMocks(page);
+    let purgeCallCount = 0;
+    await page.route('**/api/cache/purge', (route) => {
+      purgeCallCount++;
+      return route.fulfill({ json: { purged_count: 0 } });
+    });
+
+    await page.goto(`/domains/${encodeURIComponent('*.cdn.edu.kr')}?tab=settings`);
+
+    // 베이스 도메인과 무관한 외부 hostname은 거부되어야 한다
+    await page.getByTestId('url-purge-input').fill('https://other.example.com/x');
+    await page.getByTestId('url-purge-btn').click();
+
+    // 와일드카드 분기의 패턴 안내 메시지가 표시되어야 한다
+    await expect(page.getByText('*.cdn.edu.kr 패턴의 하위 도메인이어야 합니다')).toBeVisible();
+    expect(purgeCallCount).toBe(0);
+  });
+});
