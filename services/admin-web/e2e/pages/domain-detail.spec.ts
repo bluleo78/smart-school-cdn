@@ -239,6 +239,60 @@ test.describe('도메인 상세 — Overview 탭', () => {
     await expect(page.getByTestId('force-sync')).toBeVisible();
   });
 
+  /**
+   * 이슈 #203 회귀 방지 — 비활성 도메인에서 QuickActions 4개 버튼이 안내 없이 실행되던 버그
+   * 수정 전: domain.enabled=0 이어도 4개 버튼 모두 활성, 클릭 시 raw 에러 노출
+   * 수정 후: 4개 버튼 모두 disabled + title 툴팁 + 상단 안내 배너 표시
+   */
+  test('비활성 도메인에서 QuickActions 4개 버튼이 disabled되고 안내 배너가 표시된다 (회귀: #203)', async ({ page }) => {
+    await setupDetailMocks(page);
+    // 비활성 도메인으로 mock 오버라이드 (enabled=0)
+    await mockApi(page, 'GET', '/domains/textbook.com', {
+      host: 'textbook.com',
+      origin: 'https://textbook.com',
+      enabled: 0,
+      description: '교과서 CDN',
+      created_at: 1700000000,
+      updated_at: 1700000000,
+    });
+    await page.goto('/domains/textbook.com');
+
+    // 비활성 안내 배너가 노출되어야 한다
+    const notice = page.getByTestId('domain-quick-actions-inactive-notice');
+    await expect(notice).toBeVisible();
+    await expect(notice).toContainText('비활성 도메인');
+
+    // 4개 액션 버튼이 모두 disabled 상태여야 한다
+    await expect(page.getByTestId('proxy-test-open')).toBeDisabled();
+    await expect(page.getByTestId('purge-cache-open')).toBeDisabled();
+    await expect(page.getByTestId('tls-renew')).toBeDisabled();
+    await expect(page.getByTestId('force-sync')).toBeDisabled();
+
+    // 각 버튼에 안내 툴팁(title 속성)이 부여되어야 한다
+    const expectedTitle = '비활성 도메인입니다. 활성화 후 사용 가능합니다.';
+    await expect(page.getByTestId('proxy-test-open')).toHaveAttribute('title', expectedTitle);
+    await expect(page.getByTestId('purge-cache-open')).toHaveAttribute('title', expectedTitle);
+    await expect(page.getByTestId('tls-renew')).toHaveAttribute('title', expectedTitle);
+    await expect(page.getByTestId('force-sync')).toHaveAttribute('title', expectedTitle);
+  });
+
+  /**
+   * 이슈 #203 회귀 방지 — 활성 도메인에서는 기존처럼 4개 버튼이 정상 동작해야 한다
+   */
+  test('활성 도메인에서는 QuickActions 4개 버튼이 활성 상태이며 안내 배너가 없다 (회귀: #203)', async ({ page }) => {
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com');
+
+    // 활성 도메인이므로 안내 배너는 없어야 한다
+    await expect(page.getByTestId('domain-quick-actions-inactive-notice')).toHaveCount(0);
+
+    // 4개 액션 버튼은 모두 활성 상태(클릭 가능)여야 한다
+    await expect(page.getByTestId('proxy-test-open')).toBeEnabled();
+    await expect(page.getByTestId('purge-cache-open')).toBeEnabled();
+    await expect(page.getByTestId('tls-renew')).toBeEnabled();
+    await expect(page.getByTestId('force-sync')).toBeEnabled();
+  });
+
   test('캐시 퍼지 Quick Action이 동작한다', async ({ page }) => {
     await setupDetailMocks(page);
     await mockApi(page, 'POST', '/domains/textbook.com/purge', { ok: true });

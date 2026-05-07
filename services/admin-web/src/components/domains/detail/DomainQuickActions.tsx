@@ -253,6 +253,13 @@ export function DomainQuickActions({ domain }: Props) {
   const tlsRenewMutation = useTlsRenew();
   const syncMutation = useSyncDomain();
 
+  // 비활성 도메인에서 4개 액션을 모두 비활성화한다 (#203).
+  // - 비활성 도메인은 프록시 라우팅이 등록돼있지 않을 가능성이 압도적이라 프록시 테스트는 OpenSSL raw 에러로 끝남
+  // - 캐시 퍼지/TLS 갱신/강제 동기화 또한 비활성 상태에서 의미가 모호해 사용자 혼란을 유발함
+  // 따라서 disabled + title 툴팁으로 "활성화 후 사용 가능"임을 명시적으로 안내한다.
+  const isInactive = !domain.enabled;
+  const inactiveTitle = '비활성 도메인입니다. 활성화 후 사용 가능합니다.';
+
   async function handlePurgeConfirm() {
     try {
       await purgeMutation.mutateAsync(domain.host);
@@ -264,6 +271,16 @@ export function DomainQuickActions({ domain }: Props) {
 
   return (
     <>
+      {/* 비활성 도메인 안내 배너 — 4개 액션이 비활성화된 이유를 사용자에게 명시적으로 전달 (#203) */}
+      {isInactive && (
+        <div
+          className="mb-3 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning"
+          role="status"
+          data-testid="domain-quick-actions-inactive-notice"
+        >
+          비활성 도메인입니다. 활성화 후 빠른 액션을 사용할 수 있습니다.
+        </div>
+      )}
       {/* mobile-first: 375px 단일 열 → sm(640px) 이상 2열 → lg(1024px) 이상 4열 */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" data-testid="domain-quick-actions">
         {/* 프록시 테스트 */}
@@ -274,6 +291,8 @@ export function DomainQuickActions({ domain }: Props) {
         >
           <Button
             onClick={() => setProxyTestOpen(true)}
+            disabled={isInactive}
+            title={isInactive ? inactiveTitle : undefined}
             data-testid="proxy-test-open"
           >
             테스트
@@ -289,6 +308,8 @@ export function DomainQuickActions({ domain }: Props) {
           <Button
             variant="destructive"
             onClick={() => setPurgeOpen(true)}
+            disabled={isInactive}
+            title={isInactive ? inactiveTitle : undefined}
             data-testid="purge-cache-open"
           >
             퍼지
@@ -303,7 +324,8 @@ export function DomainQuickActions({ domain }: Props) {
         >
           <Button
             onClick={() => tlsRenewMutation.mutate(domain.host)}
-            disabled={tlsRenewMutation.isPending}
+            disabled={tlsRenewMutation.isPending || isInactive}
+            title={isInactive ? inactiveTitle : undefined}
             data-testid="tls-renew"
           >
             {tlsRenewMutation.isPending ? '갱신 중…' : '갱신'}
@@ -318,7 +340,8 @@ export function DomainQuickActions({ domain }: Props) {
         >
           <Button
             onClick={() => syncMutation.mutate(domain.host)}
-            disabled={syncMutation.isPending}
+            disabled={syncMutation.isPending || isInactive}
+            title={isInactive ? inactiveTitle : undefined}
             data-testid="force-sync"
           >
             {syncMutation.isPending ? '동기화 중…' : '동기화'}
