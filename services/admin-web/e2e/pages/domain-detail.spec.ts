@@ -2418,6 +2418,42 @@ test.describe('도메인 상세 — DomainStackedChart empty state (#21)', () =>
   });
 });
 
+// ─── X축 시각 라벨 포맷 (#221 회귀) ─────────────────────────
+test.describe('도메인 상세 — DomainStackedChart X축 시각 라벨 포맷 (#221)', () => {
+  /**
+   * 이슈 #221 회귀 방지 — toLocaleTimeString('ko-KR')가 '9시 0분 0초' 같은 풀 표기를 출력하던 버그.
+   * 수정 후: 24h 범위는 'MM/DD HH:mm', 1h 범위는 'HH:mm' 표기여야 한다.
+   * 검증 포인트: 차트 X축 SVG text 노드에 '시'/'분'/'초' 한글이 절대 포함되지 않아야 한다.
+   */
+  test('X축 라벨이 한글 시각 표기 대신 짧은 숫자 포맷을 사용한다', async ({ page }) => {
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '최적화' }).click();
+
+    const chart = page.getByTestId('domain-overview-stacked-chart');
+    await expect(chart).toBeVisible();
+
+    // 차트 SVG 안의 모든 text 노드 텍스트 수집
+    const tickTexts = await chart
+      .locator('.recharts-cartesian-axis-tick text')
+      .allTextContents();
+
+    // 최소 1개 이상의 X축 라벨이 있어야 한다 (mocks 데이터 기반)
+    expect(tickTexts.length).toBeGreaterThan(0);
+
+    // 한글 시간 단위(시/분/초)가 라벨에 포함되면 안 된다
+    for (const t of tickTexts) {
+      expect(t).not.toMatch(/[시분초]/);
+    }
+
+    // 라벨 중 하나는 'HH:mm' 또는 'MM/DD HH:mm' 패턴이어야 한다
+    const valid = tickTexts.some((t) =>
+      /^(\d{2}\/\d{2} )?\d{2}:\d{2}$/.test(t.trim()),
+    );
+    expect(valid).toBe(true);
+  });
+});
+
 // ─── 존재하지 않는 도메인 접근 (#66 회귀) ──────────────────────────
 test.describe('도메인 상세 — 존재하지 않는 도메인 접근 (#66)', () => {
   /**

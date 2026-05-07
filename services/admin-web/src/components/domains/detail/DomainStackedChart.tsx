@@ -26,17 +26,29 @@ export function DomainStackedChart({ host, range }: Props) {
   // isError를 함께 destructure하여 API 실패 시 에러 상태를 명시적으로 처리한다 (#154)
   const { data: buckets, isLoading, isError } = useCacheSeries(range, host);
 
-  /** API 응답을 차트 데이터 형태로 변환 */
+  /** API 응답을 차트 데이터 형태로 변환.
+   * X축 라벨은 ko-KR `9시 0분 0초` 풀 포맷 대신 짧은 시각 표기 사용 (#221).
+   * - 1h 범위: 5분 버킷이라 'HH:mm'으로 충분
+   * - 24h 범위: 어제/오늘 동일 시각 충돌 방지를 위해 'MM/DD HH:mm'으로 날짜 포함
+   *   (대시보드 CacheHitRateChart 의 #202 처리와 동일 패턴) */
   const data = useMemo(
     () =>
-      (buckets ?? []).map((b) => ({
-        t: new Date(b.ts).toLocaleTimeString('ko-KR', { hour12: false }),
-        l1_hits: b.l1_hits,
-        l2_hits: b.l2_hits,
-        miss: b.miss,
-        bypass: b.bypass,
-      })),
-    [buckets],
+      (buckets ?? []).map((b) => {
+        const d = new Date(b.ts);
+        const pad = (n: number) => String(n).padStart(2, '0');
+        const hhmm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        return {
+          t:
+            range === '24h'
+              ? `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${hhmm}`
+              : hhmm,
+          l1_hits: b.l1_hits,
+          l2_hits: b.l2_hits,
+          miss: b.miss,
+          bypass: b.bypass,
+        };
+      }),
+    [buckets, range],
   );
 
   return (
