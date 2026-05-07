@@ -214,8 +214,10 @@ export function UsersPage() {
       )}
 
       {/* 사용자 추가 다이얼로그 */}
-      <Dialog open={createOpen} onClose={() => setCreateOpen(false)}>
-        <DialogContent>
+      {/* onClose — mutation 진행 중이면 ESC/백드롭 닫기 차단 (#188, #165 패턴) */}
+      <Dialog open={createOpen} onClose={() => { if (!createMut.isPending) setCreateOpen(false); }}>
+        {/* disableClose — mutation 진행 중 X 버튼 비활성화 (#188, #165 패턴) */}
+        <DialogContent disableClose={createMut.isPending}>
           <DialogTitle>사용자 추가</DialogTitle>
           <form onSubmit={createForm.handleSubmit((d) => { createMut.mutate(d); })} className="space-y-3">
             <div>
@@ -233,7 +235,8 @@ export function UsersPage() {
               {createForm.formState.errors.password && <p className="text-xs text-destructive">{createForm.formState.errors.password.message}</p>}
             </div>
             <div className="flex justify-end gap-2 pt-2">
-              <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>취소</Button>
+              {/* 취소 버튼 — mutation 진행 중 disabled (#188, #165 패턴) */}
+              <Button type="button" variant="outline" onClick={() => setCreateOpen(false)} disabled={createMut.isPending}>취소</Button>
               {/* isPending 중 disabled + 로딩 텍스트 — 중복 제출 방지 */}
               <Button type="submit" disabled={createMut.isPending}>{createMut.isPending ? '추가 중…' : '추가'}</Button>
             </div>
@@ -242,9 +245,11 @@ export function UsersPage() {
       </Dialog>
 
       {/* 비밀번호 재설정 다이얼로그 */}
-      {/* onClose — Escape/backdrop 클릭 포함 모든 닫기 경로에서 폼 초기화 (#161) */}
-      <Dialog open={!!passwordTarget} onClose={() => { setPasswordTarget(null); passwordForm.reset(); }}>
-        <DialogContent>
+      {/* onClose — Escape/backdrop 클릭 포함 모든 닫기 경로에서 폼 초기화 (#161),
+       *           mutation 진행 중이면 닫기 차단 (#188, #165 패턴) */}
+      <Dialog open={!!passwordTarget} onClose={() => { if (!passwordMut.isPending) { setPasswordTarget(null); passwordForm.reset(); } }}>
+        {/* disableClose — mutation 진행 중 X 버튼 비활성화 (#188, #165 패턴) */}
+        <DialogContent disableClose={passwordMut.isPending}>
           <DialogTitle>{passwordTarget?.username} 비밀번호 재설정</DialogTitle>
           <form
             onSubmit={passwordForm.handleSubmit((d) => {
@@ -291,8 +296,9 @@ export function UsersPage() {
               {passwordForm.formState.errors.password && <p className="text-xs text-destructive">{passwordForm.formState.errors.password.message}</p>}
             </div>
             <div className="flex justify-end gap-2 pt-2">
-              {/* 취소 버튼 — 닫기 시 폼 초기화 (dirty state 잔존 방지 #161) */}
-              <Button type="button" variant="outline" onClick={() => { setPasswordTarget(null); passwordForm.reset(); }}>취소</Button>
+              {/* 취소 버튼 — 닫기 시 폼 초기화 (dirty state 잔존 방지 #161),
+               *              mutation 진행 중 disabled (#188, #165 패턴) */}
+              <Button type="button" variant="outline" onClick={() => { setPasswordTarget(null); passwordForm.reset(); }} disabled={passwordMut.isPending}>취소</Button>
               {/* isPending 중 disabled + 로딩 텍스트 — 중복 제출 방지 */}
               <Button type="submit" disabled={passwordMut.isPending}>{passwordMut.isPending ? '재설정 중…' : '재설정'}</Button>
             </div>

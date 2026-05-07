@@ -854,4 +854,100 @@ test.describe('사용자 관리', () => {
     // 요청 완료
     resolveRequest!(null);
   });
+
+  /**
+   * 이슈 #188 회귀 방지 — 사용자 추가 Dialog mutation 진행 중 ESC/백드롭/취소 닫기 차단
+   * 수정 전: createMut.isPending 가드 누락 → 진행 중 닫기 가능 → 백그라운드 mutation race
+   * 수정 후: onClose 가드 + DialogContent disableClose + 취소 버튼 disabled (#165 패턴 답습)
+   */
+  test('사용자 추가 — 제출 중 ESC/백드롭/취소 닫기 차단 — 회귀 방지 #188', async ({ page }) => {
+    let resolveRequest: (value: unknown) => void;
+    const requestPromise = new Promise((resolve) => { resolveRequest = resolve; });
+
+    await page.route('**/api/users', async (route) => {
+      if (route.request().method() === 'POST') {
+        // 요청을 의도적으로 보류해 isPending 상태를 유지
+        await requestPromise;
+        await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify(baseUsers[0]) });
+      } else {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(baseUsers) });
+      }
+    });
+
+    await page.goto('/users');
+    await page.getByRole('button', { name: '+ 사용자 추가' }).click();
+    await page.fill('input[type=email]', 'pending@example.com');
+    await page.fill('input[type=password]', 'password1234');
+    await page.getByRole('button', { name: '추가', exact: true }).click();
+
+    // 제출 중임을 확인
+    await expect(page.getByRole('button', { name: '추가 중…' })).toBeDisabled();
+
+    const dialog = page.getByRole('dialog', { name: '사용자 추가' });
+    await expect(dialog).toBeVisible();
+
+    // 1. ESC 닫기 차단
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeVisible();
+
+    // 2. 취소 버튼 disabled
+    await expect(dialog.getByRole('button', { name: '취소' })).toBeDisabled();
+
+    // 3. 백드롭 클릭 닫기 차단 — Radix Dialog overlay 직접 클릭
+    await page.locator('[data-slot="dialog-overlay"], [role=dialog]').first();
+    // 백드롭은 dialog 영역 외 좌표를 클릭. dialog 외부 좌상단 (10, 10)
+    await page.mouse.click(10, 10);
+    await expect(dialog).toBeVisible();
+
+    // 요청 완료 — 정상 닫기 검증
+    resolveRequest!(null);
+    await expect(dialog).not.toBeVisible();
+  });
+
+  /**
+   * 이슈 #188 회귀 방지 — 비밀번호 재설정 Dialog mutation 진행 중 ESC/백드롭/취소 닫기 차단
+   */
+  test('비밀번호 재설정 — 제출 중 ESC/백드롭/취소 닫기 차단 — 회귀 방지 #188', async ({ page }) => {
+    await mockApi(page, 'GET', '/users', baseUsers);
+
+    let resolveRequest: (value: unknown) => void;
+    const requestPromise = new Promise((resolve) => { resolveRequest = resolve; });
+
+    await page.route('**/api/users/2/password', async (route) => {
+      if (route.request().method() === 'PUT') {
+        // 요청을 의도적으로 보류해 isPending 상태를 유지
+        await requestPromise;
+        await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+      } else {
+        return route.fallback();
+      }
+    });
+
+    await page.goto('/users');
+    const otherRow = page.getByTestId('user-row-2');
+    await otherRow.getByRole('button', { name: '비밀번호 재설정' }).click();
+    await page.fill('input[type=password]', 'newpassword1234');
+    await page.getByRole('button', { name: '재설정', exact: true }).click();
+
+    // 제출 중임을 확인
+    await expect(page.getByRole('button', { name: '재설정 중…' })).toBeDisabled();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+
+    // 1. ESC 닫기 차단
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeVisible();
+
+    // 2. 취소 버튼 disabled
+    await expect(dialog.getByRole('button', { name: '취소' })).toBeDisabled();
+
+    // 3. 백드롭 클릭 닫기 차단
+    await page.mouse.click(10, 10);
+    await expect(dialog).toBeVisible();
+
+    // 요청 완료 — 정상 닫기 검증
+    resolveRequest!(null);
+    await expect(dialog).not.toBeVisible();
+  });
 });
