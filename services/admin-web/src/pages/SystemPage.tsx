@@ -72,9 +72,14 @@ export function SystemPage() {
     cache && cache.disk.max_bytes > 0
       ? cache.disk.used_bytes / cache.disk.max_bytes
       : 0;
+  // Math.floor + 99% 캡: 99.5%~99.99% 구간이 Math.round로 100%로 올림되어 "100% 사용 중"으로
+  // misleading 표시되던 버그(#204) 방지. ratio가 정확히 1 이상일 때만(used >= max) 100% 표시한다.
   // Math.min(..., 100): used_bytes > max_bytes 이상 케이스(마이그레이션·설정 변경 등)에서
   // bar width가 100% 초과하여 컨테이너 밖으로 삐져나오는 overflow 방지 (#140)
-  const diskUsagePercent = Math.min(Math.round(diskUsageRatio * 100), 100);
+  const diskUsagePercent =
+    diskUsageRatio >= 1
+      ? 100
+      : Math.min(Math.floor(diskUsageRatio * 100), 99);
   const isDiskWarning = diskUsageRatio >= 0.9;
 
   const diskUsedGB = cache ? (cache.disk.used_bytes / 1024 ** 3).toFixed(1) : '-';

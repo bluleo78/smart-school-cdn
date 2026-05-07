@@ -51,6 +51,34 @@ test.describe('시스템 페이지', () => {
     await expect(link).toHaveAttribute('href', '/');
   });
 
+  /// 회귀 방지 #204: 99.5%~99.99% 구간이 Math.round로 100%로 misleading 표시되던 버그
+  /// used < max 인 한 표시값은 99% 이하여야 하고, "100% 사용 중" 텍스트가 노출되어선 안 된다.
+  test('used < max 일 때 "100% 사용 중"으로 misleading 표시되지 않는다 — 회귀 방지 #204', async ({ page }) => {
+    // 99.5GB / 100GB = 99.5% — Math.round 시 100, Math.floor + 99 cap 시 99로 표시되어야 한다
+    await mockApi(page, 'GET', '/cache/stats', {
+      requests: 0, l1_hits: 0, l2_hits: 0, miss: 0, bypass_total: 0,
+      bypass: { method: 0, nocache: 0, size: 0, other: 0, total: 0 },
+      l1_hit_rate: 0, edge_hit_rate: 0, bypass_rate: 0,
+      disk: { used_bytes: 99_500_000_000, max_bytes: 100_000_000_000, entry_count: 0 },
+      by_domain: [],
+    });
+    await page.goto('/system');
+
+    // "99% 사용 중"이 보여야 하고, "100% 사용 중"은 보여서는 안 된다 (used < max인데 100% 오표시)
+    await expect(page.getByText('99% 사용 중')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText('100% 사용 중')).toHaveCount(0);
+
+    // 경고 배너도 동일 변수 참조 — 99% 표시 (100%로 misleading 금지)
+    await expect(page.getByText('캐시 디스크 사용량이 99%입니다.')).toBeVisible();
+    await expect(page.getByText('캐시 디스크 사용량이 100%입니다.')).toHaveCount(0);
+
+    // bar width도 99로 설정되어야 한다
+    const barWidth = await page.getByTestId('disk-usage-bar').locator('div').first().evaluate(
+      (el) => parseFloat((el as HTMLElement).style.width),
+    );
+    expect(barWidth).toBe(99);
+  });
+
   /// 회귀 방지 #140: diskUsagePercent 100% clamp 없어 progress bar overflow 가능
   /// used_bytes > max_bytes 시 bar width가 100%를 초과하지 않아야 한다
   test('used_bytes > max_bytes 이어도 progress bar width가 100% 이하다 — 회귀 방지 #140', async ({ page }) => {
