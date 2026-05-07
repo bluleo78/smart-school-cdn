@@ -244,4 +244,58 @@ describe('DomainRepository', () => {
       expect(repo.findAll()).toHaveLength(3);
     });
   });
+
+  /**
+   * findAll limit/offset 페이지네이션 (#199)
+   * - 미지정 시 기존 동작(전체 반환) 유지로 admin-web 호환
+   * - 양의 정수만 적용, 음수/NaN/0은 silent 무시 (#199에서 silent ignore 자체가 문제이지만,
+   *   라우트 레벨에서 검증을 통과해 repo로 들어온 값은 신뢰 가능한 값으로 가정)
+   */
+  describe('findAll — limit/offset 페이지네이션 (#199)', () => {
+    beforeEach(() => {
+      // 8건 등록 — created_at DESC 정렬이 기본이므로 가장 늦게 upsert된 host8이 첫 번째에 위치한다.
+      // SQLite의 strftime('%s','now') 해상도가 초 단위라 동일 초 등록 시 정렬 순서가 모호해질 수 있어
+      // 명시적으로 created_at을 직접 갱신하여 결정적인 순서를 만든다.
+      for (let i = 1; i <= 8; i++) {
+        repo.upsert(`host${i}.test`, `https://host${i}.test`);
+        db.prepare('UPDATE domains SET created_at = ? WHERE host = ?').run(1_700_000_000 + i, `host${i}.test`);
+      }
+    });
+
+    it('limit/offset 미지정 시 전체 8건을 반환한다 (기존 동작 유지)', () => {
+      expect(repo.findAll()).toHaveLength(8);
+    });
+
+    it('limit=2 → 상위 2건만 반환', () => {
+      const rows = repo.findAll({ limit: 2 });
+      expect(rows).toHaveLength(2);
+      // created_at DESC 기본 정렬 → host8, host7 순
+      expect(rows[0].host).toBe('host8.test');
+      expect(rows[1].host).toBe('host7.test');
+    });
+
+    it('limit=2&offset=1 → 두 번째부터 2건', () => {
+      const rows = repo.findAll({ limit: 2, offset: 1 });
+      expect(rows).toHaveLength(2);
+      expect(rows[0].host).toBe('host7.test');
+      expect(rows[1].host).toBe('host6.test');
+    });
+
+    it('offset=10000 → 빈 배열', () => {
+      expect(repo.findAll({ limit: 2, offset: 10000 })).toEqual([]);
+    });
+
+    it('offset만 지정해도 동작한다 (LIMIT -1 보정)', () => {
+      const rows = repo.findAll({ offset: 6 });
+      expect(rows).toHaveLength(2);
+      expect(rows[0].host).toBe('host2.test');
+      expect(rows[1].host).toBe('host1.test');
+    });
+
+    it('q 필터와 함께 limit/offset 적용', () => {
+      // host1~host8 모두 매칭, limit=3 → 상위 3건
+      const rows = repo.findAll({ q: 'host', limit: 3 });
+      expect(rows).toHaveLength(3);
+    });
+  });
 });

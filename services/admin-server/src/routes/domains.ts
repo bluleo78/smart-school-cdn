@@ -161,16 +161,32 @@ export async function domainRoutes(
   // DomainRepository.database getter를 통해 DB 인스턴스에 안전하게 접근
   const statsRepo = new DomainStatsRepository(domainRepo.database);
 
-  /** 전체 도메인 목록 조회 — q/enabled/sort/order 쿼리 파라미터 지원 */
-  app.get<{ Querystring: { q?: string; enabled?: string; sort?: string; order?: string } }>(
+  /**
+   * 전체 도메인 목록 조회 — q/enabled/sort/order/limit/offset 쿼리 파라미터 지원
+   *
+   * 페이지네이션(#199):
+   * - limit/offset 미지정 시 기존과 동일하게 전체 도메인 배열을 반환 (admin-web 호환)
+   * - limit/offset 지정 시 음수/NaN은 무시하고 양의 정수만 적용 (silent ignore 방지)
+   * - 응답 형태는 기존과 동일한 Domain[] 배열을 유지하여 클라이언트 호환성 보존
+   */
+  app.get<{
+    Querystring: { q?: string; enabled?: string; sort?: string; order?: string; limit?: string; offset?: string };
+  }>(
     '/api/domains',
     async (request) => {
       const { q, enabled, sort, order } = request.query;
+      // limit/offset: 문자열 → 숫자 변환. NaN/음수/0은 undefined로 처리해 페이지네이션을 적용하지 않는다.
+      const rawLimit  = request.query.limit  !== undefined ? Number(request.query.limit)  : NaN;
+      const rawOffset = request.query.offset !== undefined ? Number(request.query.offset) : NaN;
+      const limit  = Number.isFinite(rawLimit)  && rawLimit  > 0 ? rawLimit  : undefined;
+      const offset = Number.isFinite(rawOffset) && rawOffset > 0 ? rawOffset : undefined;
       return domainRepo.findAll({
         q,
         enabled: enabled !== undefined ? enabled === 'true' || enabled === '1' : undefined,
         sort,
         order,
+        limit,
+        offset,
       });
     },
   );

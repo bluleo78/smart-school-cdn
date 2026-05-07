@@ -40,6 +40,16 @@ export interface FindAllOptions {
   sort?: string;
   /** 정렬 방향 — 'asc' | 'desc' (기본값: desc) */
   order?: string;
+  /**
+   * 페이지네이션 LIMIT (#199) — 양의 정수만 적용. undefined/0 이하면 전체 반환(기존 동작 유지).
+   * 호출자(라우트)에서 음수/NaN 클램프 후 전달한다.
+   */
+  limit?: number;
+  /**
+   * 페이지네이션 OFFSET (#199) — 0 이상 정수만 적용. limit 없이 단독 지정 시 SQLite는 OFFSET을 적용하려면
+   * LIMIT가 필수이므로, offset만 들어오면 LIMIT -1(무제한 의미)로 보정해 OFFSET이 동작하도록 한다.
+   */
+  offset?: number;
 }
 
 /**
@@ -121,10 +131,27 @@ export class DomainRepository {
       : 'DESC';
     const orderBy = `ORDER BY ${sortCol} ${sortDir}`;
 
+    // limit/offset (#199) — 양의 정수만 적용. limit 미지정 + offset 지정 시 SQLite는 OFFSET을
+    // LIMIT 없이 받지 않으므로 LIMIT -1(무제한 의미)을 함께 넘긴다.
+    const hasLimit  = typeof options?.limit  === 'number' && Number.isFinite(options.limit)  && options.limit  > 0;
+    const hasOffset = typeof options?.offset === 'number' && Number.isFinite(options.offset) && options.offset > 0;
+    let pagination = '';
+    if (hasLimit && hasOffset) {
+      pagination = 'LIMIT ? OFFSET ?';
+      params.push(Math.floor(options!.limit!), Math.floor(options!.offset!));
+    } else if (hasLimit) {
+      pagination = 'LIMIT ?';
+      params.push(Math.floor(options!.limit!));
+    } else if (hasOffset) {
+      // LIMIT -1: SQLite에서 "무제한"으로 동작하여 OFFSET만 적용 가능
+      pagination = 'LIMIT -1 OFFSET ?';
+      params.push(Math.floor(options!.offset!));
+    }
+
     return this.db
       .prepare(
         `SELECT host, origin, enabled, description, created_at, updated_at
-         FROM domains ${where} ${orderBy}`,
+         FROM domains ${where} ${orderBy} ${pagination}`,
       )
       .all(...params) as Domain[];
   }

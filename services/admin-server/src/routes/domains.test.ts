@@ -92,6 +92,79 @@ describe('GET /api/domains', () => {
     expect(body).toHaveLength(1);
     expect(body[0].host).toBe('httpbin.org');
   });
+
+  /**
+   * limit/offset 페이지네이션 (#199)
+   *
+   * 라우트 핸들러가 limit/offset 쿼리스트링을 받아 repo.findAll에 전달하는지 검증.
+   * 응답 형태는 기존과 동일한 Domain[] 배열이며 admin-web 호환을 위해 변경하지 않는다.
+   */
+  describe('limit/offset 페이지네이션 (#199)', () => {
+    /** 8건 등록 + 결정적 created_at 부여 */
+    function seedEightDomains(repo: DomainRepository) {
+      for (let i = 1; i <= 8; i++) {
+        repo.upsert(`host${i}.test`, `https://host${i}.test`);
+        repo.database
+          .prepare('UPDATE domains SET created_at = ? WHERE host = ?')
+          .run(1_700_000_000 + i, `host${i}.test`);
+      }
+    }
+
+    it('limit/offset 미지정 시 전체 도메인 배열을 반환한다 (기존 동작 + 응답 형태 유지)', async () => {
+      const repo = makeRepo();
+      seedEightDomains(repo);
+      const app = buildApp(repo);
+      const res = await app.inject({ method: 'GET', url: '/api/domains' });
+      const body = JSON.parse(res.body);
+      expect(res.statusCode).toBe(200);
+      expect(Array.isArray(body)).toBe(true);
+      expect(body).toHaveLength(8);
+    });
+
+    it('?limit=2 → 상위 2건만 반환 (silent ignore 회귀 방지)', async () => {
+      const repo = makeRepo();
+      seedEightDomains(repo);
+      const app = buildApp(repo);
+      const res = await app.inject({ method: 'GET', url: '/api/domains?limit=2' });
+      const body = JSON.parse(res.body);
+      expect(res.statusCode).toBe(200);
+      expect(body).toHaveLength(2);
+      expect(body[0].host).toBe('host8.test');
+      expect(body[1].host).toBe('host7.test');
+    });
+
+    it('?limit=2&offset=1 → 두 번째부터 2건', async () => {
+      const repo = makeRepo();
+      seedEightDomains(repo);
+      const app = buildApp(repo);
+      const res = await app.inject({ method: 'GET', url: '/api/domains?limit=2&offset=1' });
+      const body = JSON.parse(res.body);
+      expect(res.statusCode).toBe(200);
+      expect(body).toHaveLength(2);
+      expect(body[0].host).toBe('host7.test');
+      expect(body[1].host).toBe('host6.test');
+    });
+
+    it('?limit=2&offset=10000 → 빈 배열', async () => {
+      const repo = makeRepo();
+      seedEightDomains(repo);
+      const app = buildApp(repo);
+      const res = await app.inject({ method: 'GET', url: '/api/domains?limit=2&offset=10000' });
+      expect(res.statusCode).toBe(200);
+      expect(JSON.parse(res.body)).toEqual([]);
+    });
+
+    it('음수/NaN limit는 무시되어 전체 반환 — silent ignore 가 아니라 의도적 정상화', async () => {
+      const repo = makeRepo();
+      seedEightDomains(repo);
+      const app = buildApp(repo);
+      const res = await app.inject({ method: 'GET', url: '/api/domains?limit=-5&offset=abc' });
+      const body = JSON.parse(res.body);
+      expect(res.statusCode).toBe(200);
+      // 음수 limit / 비정수 offset 모두 클램프되어 페이지네이션 미적용 (전체 반환)
+      expect(body).toHaveLength(8);
+    });
+  });
 });
 
 describe('POST /api/domains', () => {
