@@ -1,6 +1,6 @@
 /// 도메인 상세 탭 — Overview / Optimizer / Traffic / Settings.
 /// URL searchParam(?tab=...)과 탭 상태를 동기화하여 뒤로가기/북마크/공유 링크가 올바른 탭을 유지한다.
-import { useState } from 'react';
+import { useCallback } from 'react';
 import { useSearchParams } from 'react-router';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../ui/tabs';
 import type { Domain } from '../../../api/domain-types';
@@ -8,7 +8,7 @@ import { DomainOverviewTab } from './DomainOverviewTab';
 import { DomainStatsTab } from './DomainStatsTab';
 import { DomainLogsTab } from './DomainLogsTab';
 import { DomainSettingsTab } from './DomainSettingsTab';
-import type { PeriodValue } from './PeriodSelector';
+import type { Period, PeriodValue } from './PeriodSelector';
 import type { RefreshIntervalMs } from './RefreshIntervalSelect';
 
 /** 허용된 탭 값 목록 — 잘못된 파라미터가 들어올 경우 overview로 폴백한다.
@@ -16,8 +16,33 @@ import type { RefreshIntervalMs } from './RefreshIntervalSelect';
 const VALID_TABS = ['overview', 'optimizer', 'traffic', 'settings'] as const;
 type TabValue = (typeof VALID_TABS)[number];
 
+/** PeriodSelector가 허용하는 period 키 화이트리스트 — 잘못된 URL 파라미터를 방어 */
+const VALID_PERIODS = ['1h', '24h', '7d', '30d', 'custom'] as const;
+
 function isValidTab(value: string | null): value is TabValue {
   return VALID_TABS.includes(value as TabValue);
+}
+
+function isValidPeriod(value: string | null): value is Period {
+  return VALID_PERIODS.includes(value as Period);
+}
+
+/** URL searchParams에서 PeriodValue를 복원한다.
+ *  탭별 prefix(`op` / `tf`)를 사용해 최적화/트래픽 탭의 period 가 충돌하지 않도록 분리.
+ *  custom 기간일 때 from/to 도 함께 읽어 새로고침 후에도 동일 범위 유지. */
+function readPeriod(params: URLSearchParams, prefix: 'op' | 'tf'): PeriodValue {
+  const period = params.get(`${prefix}Period`);
+  if (!isValidPeriod(period)) return { period: '24h' };
+  if (period !== 'custom') return { period };
+  // custom: from/to 미입력 상태(커스텀 버튼만 클릭한 직후)도 그대로 표현 — pressed 표시 유지
+  const fromRaw = params.get(`${prefix}From`);
+  const toRaw = params.get(`${prefix}To`);
+  if (fromRaw === null || toRaw === null) return { period: 'custom' };
+  const from = Number(fromRaw);
+  const to = Number(toRaw);
+  // 잘못된 from/to 가 들어 있으면 from/to 없는 custom 상태로 폴백 (NaN이 API에 흘러가지 않게)
+  if (!isFinite(from) || !isFinite(to) || from <= 0 || to <= from) return { period: 'custom' };
+  return { period: 'custom', from, to };
 }
 
 interface Props {
@@ -31,17 +56,75 @@ export function DomainDetailTabs({ domain }: Props) {
   const tabParam = searchParams.get('tab');
   const activeTab: TabValue = isValidTab(tabParam) ? tabParam : 'overview';
 
-  // 최적화·트래픽 탭의 조회 기간·갱신 주기 상태를 여기서 관리한다.
-  // 각 탭이 비활성 시 언마운트되면 로컬 state가 초기화되기 때문에,
-  // 부모 컴포넌트로 끌어올려 탭 전환과 무관하게 값을 유지한다. (#133, #135)
-  const [optimizerPeriod, setOptimizerPeriod] = useState<PeriodValue>({ period: '24h' });
-  const [trafficPeriod, setTrafficPeriod] = useState<PeriodValue>({ period: '24h' });
-  const [trafficRefresh, setTrafficRefresh] = useState<RefreshIntervalMs>(30_000);
+  // 최적화·트래픽 탭의 조회 기간·갱신 주기 상태를 URL searchParam과 동기화한다.
+  // 새로고침/뒤로가기/북마크/공유 링크로도 동일한 기간/갱신 주기로 복원되도록 한다. (#206)
+  // 탭별로 prefix(op/tf)를 분리해 두 탭의 period가 서로 덮어쓰지 않게 한다.
+  const optimizerPeriod = readPeriod(searchParams, 'op');
+  const trafficPeriod = readPeriod(searchParams, 'tf');
+  // tfRefresh 키 — 미존재 시 기본 30초. 존재 시 허용된 RefreshIntervalMs 값만 채택, 그 외 30초 폴백.
+  const tfRefreshParam = searchParams.get('tfRefresh');
+  const trafficRefreshRaw = tfRefreshParam === null ? 30_000 : Number(tfRefreshParam);
+  const trafficRefresh: RefreshIntervalMs = (
+    [0, 10_000, 30_000, 60_000, 300_000] as const
+  ).includes(trafficRefreshRaw as RefreshIntervalMs)
+    ? (trafficRefreshRaw as RefreshIntervalMs)
+    : 30_000;
 
-  /** 탭 전환 시 ?tab=<value> 를 URL에 반영한다 */
+  /** 탭 전환 시 ?tab=<value> 를 URL에 반영한다.
+   *  함수형 업데이트로 기존 period/refresh 파라미터를 보존한다. (#206) */
   function handleTabChange(value: string) {
-    setSearchParams({ tab: value }, { replace: false });
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set('tab', value);
+        return next;
+      },
+      { replace: false },
+    );
   }
+
+  /** PeriodValue 변경을 URL에 반영한다.
+   *  custom일 때만 from/to 키를 같이 쓰고, 그 외에는 제거해 URL을 간결하게 유지. */
+  const writePeriod = useCallback(
+    (prefix: 'op' | 'tf', value: PeriodValue) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set(`${prefix}Period`, value.period);
+          if (value.period === 'custom' && value.from && value.to) {
+            next.set(`${prefix}From`, String(value.from));
+            next.set(`${prefix}To`, String(value.to));
+          } else {
+            next.delete(`${prefix}From`);
+            next.delete(`${prefix}To`);
+          }
+          return next;
+        },
+        // period 변경은 같은 화면 내 필터 조정이므로 history 엔트리 누적을 막기 위해 replace 사용
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+
+  const handleOptimizerPeriodChange = useCallback((v: PeriodValue) => writePeriod('op', v), [writePeriod]);
+  const handleTrafficPeriodChange = useCallback((v: PeriodValue) => writePeriod('tf', v), [writePeriod]);
+
+  /** 트래픽 탭 갱신 주기 변경을 URL에 반영. 기본값(30초)이면 키를 제거해 URL을 깔끔하게 유지. */
+  const handleTrafficRefreshChange = useCallback(
+    (v: RefreshIntervalMs) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (v === 30_000) next.delete('tfRefresh');
+          else next.set('tfRefresh', String(v));
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
 
   return (
     <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full" data-testid="domain-detail-tabs">
@@ -58,16 +141,16 @@ export function DomainDetailTabs({ domain }: Props) {
         <DomainStatsTab
           host={domain.host}
           period={optimizerPeriod}
-          onPeriodChange={setOptimizerPeriod}
+          onPeriodChange={handleOptimizerPeriodChange}
         />
       </TabsContent>
       <TabsContent value="traffic" className="mt-4">
         <DomainLogsTab
           host={domain.host}
           period={trafficPeriod}
-          onPeriodChange={setTrafficPeriod}
+          onPeriodChange={handleTrafficPeriodChange}
           refresh={trafficRefresh}
-          onRefreshChange={setTrafficRefresh}
+          onRefreshChange={handleTrafficRefreshChange}
         />
       </TabsContent>
       <TabsContent value="settings" className="mt-4">

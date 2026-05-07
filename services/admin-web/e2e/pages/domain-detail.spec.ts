@@ -2456,6 +2456,96 @@ test.describe('도메인 상세 — 탭 URL searchParam 동기화 (#61)', () => 
   });
 });
 
+// ─── 최적화/트래픽 탭 period URL 동기화 (#206 회귀) ───────────────────────
+test.describe('도메인 상세 — period URL 동기화 (#206)', () => {
+  /**
+   * 최적화/트래픽 탭의 기간(period) 선택값을 URL searchParam과 동기화한다.
+   * 수정 전: useState로만 관리 — 새로고침 시 24h로 초기화
+   * 수정 후: ?opPeriod=/?tfPeriod= 키로 URL 영속화 — 새로고침 후에도 유지
+   */
+  test('트래픽 탭에서 7일 선택 후 새로고침해도 7일이 유지된다', async ({ page }) => {
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com?tab=traffic');
+
+    // 7일 버튼 클릭 → URL에 tfPeriod=7d 가 반영되어야 한다
+    await page.getByTestId('period-7d').click();
+    await expect(page).toHaveURL(/tfPeriod=7d/);
+    await expect(page.getByTestId('period-7d')).toHaveAttribute('aria-pressed', 'true');
+
+    // 새로고침
+    await page.reload();
+
+    // 새로고침 후에도 7d가 pressed 상태로 유지되어야 한다 (24h로 리셋되면 안 됨)
+    await expect(page.getByTestId('period-7d')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByTestId('period-24h')).toHaveAttribute('aria-pressed', 'false');
+    // 트래픽 탭이 그대로 활성화되어 있어야 한다
+    await expect(page.getByTestId('domain-traffic-tab')).toBeVisible();
+  });
+
+  test('최적화 탭에서 30일 선택 후 새로고침해도 30일이 유지된다', async ({ page }) => {
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com?tab=optimizer');
+
+    await page.getByTestId('period-30d').click();
+    await expect(page).toHaveURL(/opPeriod=30d/);
+    await expect(page.getByTestId('period-30d')).toHaveAttribute('aria-pressed', 'true');
+
+    await page.reload();
+
+    // 최적화 탭의 30d가 유지되어야 한다
+    await expect(page.getByTestId('period-30d')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByTestId('period-24h')).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  test('탭 전환 시 다른 탭의 period 파라미터가 보존된다', async ({ page }) => {
+    // 함수형 setSearchParams 사용 검증 — 탭 전환이 기존 period 키를 덮어쓰지 않아야 한다
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com?tab=optimizer');
+
+    // 최적화 탭에서 7일 선택
+    await page.getByTestId('period-7d').click();
+    await expect(page).toHaveURL(/opPeriod=7d/);
+
+    // 트래픽 탭으로 전환
+    await page.getByRole('tab', { name: '트래픽' }).click();
+    // opPeriod 가 유지되어야 한다 (탭 전환이 기존 파라미터를 덮어쓰지 않음)
+    await expect(page).toHaveURL(/opPeriod=7d/);
+    await expect(page).toHaveURL(/tab=traffic/);
+
+    // 다시 최적화 탭으로 돌아왔을 때 7d가 그대로 pressed
+    await page.getByRole('tab', { name: '최적화' }).click();
+    await expect(page.getByTestId('period-7d')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  test('최적화/트래픽 탭의 period가 서로 독립적으로 유지된다', async ({ page }) => {
+    // op/tf prefix 분리 검증 — 한쪽 탭의 period 변경이 다른 탭에 영향 없어야 한다
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com?tab=optimizer');
+
+    await page.getByTestId('period-7d').click();
+    await page.getByRole('tab', { name: '트래픽' }).click();
+    await page.getByTestId('period-30d').click();
+
+    // URL에 두 prefix가 모두 들어 있어야 한다
+    await expect(page).toHaveURL(/opPeriod=7d/);
+    await expect(page).toHaveURL(/tfPeriod=30d/);
+
+    // 새로고침 후에도 양쪽 모두 유지
+    await page.reload();
+    await expect(page.getByTestId('period-30d')).toHaveAttribute('aria-pressed', 'true');
+    await page.getByRole('tab', { name: '최적화' }).click();
+    await expect(page.getByTestId('period-7d')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  test('잘못된 ?tfPeriod 값은 24h로 폴백된다', async ({ page }) => {
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com?tab=traffic&tfPeriod=invalid');
+
+    // 잘못된 값은 무시되고 기본값 24h가 pressed
+    await expect(page.getByTestId('period-24h')).toHaveAttribute('aria-pressed', 'true');
+  });
+});
+
 // ─── 설정 탭 TLS 수동 갱신 (#102 회귀) ───────────────────────────────
 test.describe('도메인 상세 — isError 에러 처리 (#154)', () => {
   /**
