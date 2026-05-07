@@ -597,6 +597,24 @@ test.describe('사용자 관리', () => {
     expect(autocomplete).toBe('current-password');
   });
 
+  // 이슈 #193 회귀 방지 — 비밀번호 재설정 다이얼로그 입력 placeholder 누락
+  // 빈 placeholder는 비밀번호 매니저/스크린리더 보조 라벨에서 무시되어 컨텍스트가 약함
+  test('비밀번호 재설정 다이얼로그 — 현재/새 비밀번호 입력에 placeholder 존재', async ({ page }) => {
+    await mockApi(page, 'GET', '/users', baseUsers);
+
+    await page.goto('/users');
+
+    // 자기 자신 행: 현재 비밀번호 + 새 비밀번호 두 필드 모두 placeholder 검증
+    const myRow = page.getByTestId(`user-row-${TEST_USER.id}`);
+    await myRow.getByRole('button', { name: '비밀번호 재설정' }).click();
+
+    const currentPlaceholder = await page.locator('input#current-password').getAttribute('placeholder');
+    expect(currentPlaceholder?.length ?? 0).toBeGreaterThan(0);
+
+    const newPlaceholder = await page.locator('input#reset-password').getAttribute('placeholder');
+    expect(newPlaceholder?.length ?? 0).toBeGreaterThan(0);
+  });
+
   // 이슈 #31 회귀 방지 — 다른 사용자 비밀번호 재설정 시 현재 비밀번호 필드 미표시
   test('다른 사용자 비밀번호 재설정 다이얼로그 — 현재 비밀번호 필드 없음', async ({ page }) => {
     await mockApi(page, 'GET', '/users', baseUsers);

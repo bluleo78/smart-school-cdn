@@ -281,8 +281,9 @@ export function UsersPage() {
               <div>
                 {/* htmlFor/id 연결 — 레이블 클릭 시 입력 필드 포커스·스크린 리더 연동 */}
                 <Label htmlFor="current-password">현재 비밀번호</Label>
-                {/* autocomplete="current-password" — 비밀번호 매니저 연동 (프로젝트 autocomplete 정책 준수) */}
-                <PasswordInput id="current-password" autoComplete="current-password" {...passwordForm.register('currentPassword')} />
+                {/* autocomplete="current-password" — 비밀번호 매니저 연동 (프로젝트 autocomplete 정책 준수)
+                 *  placeholder — 빈 라벨로 컨텍스트 부족 문제 보완 (#193) */}
+                <PasswordInput id="current-password" autoComplete="current-password" placeholder="현재 사용 중인 비밀번호" {...passwordForm.register('currentPassword')} />
                 {passwordForm.formState.errors.currentPassword && (
                   <p className="text-xs text-destructive">{passwordForm.formState.errors.currentPassword.message}</p>
                 )}
@@ -291,8 +292,9 @@ export function UsersPage() {
             <div>
               {/* htmlFor/id 연결 — 레이블 클릭 시 입력 필드 포커스·스크린 리더 연동 (#79) */}
               <Label htmlFor="reset-password">새 비밀번호</Label>
-              {/* PasswordInput — 표시/숨기기 토글 포함, autocomplete="new-password"로 자동완성 힌트 유지 (#76) */}
-              <PasswordInput id="reset-password" autoComplete="new-password" {...passwordForm.register('password')} />
+              {/* PasswordInput — 표시/숨기기 토글 포함, autocomplete="new-password"로 자동완성 힌트 유지 (#76)
+               *  placeholder — 비밀번호 정책 힌트 노출, 빈 라벨 컨텍스트 보완 (#193) */}
+              <PasswordInput id="reset-password" autoComplete="new-password" placeholder="8자 이상" {...passwordForm.register('password')} />
               {passwordForm.formState.errors.password && <p className="text-xs text-destructive">{passwordForm.formState.errors.password.message}</p>}
             </div>
             <div className="flex justify-end gap-2 pt-2">
