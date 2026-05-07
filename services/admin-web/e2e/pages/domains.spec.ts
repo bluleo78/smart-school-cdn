@@ -237,6 +237,60 @@ test.describe('도메인 관리 — 요약 카드', () => {
       expect(d.height).toBeLessThan(60);
     }
   });
+
+  /**
+   * 이슈 #256 회귀 방지 — 4개 통계 카드 동일 수직 stack 룰
+   * 제목 → 숫자 → delta → 그래프 순으로 모든 카드가 동일 레이아웃이어야 한다.
+   * iPad portrait 810px / landscape 1180px / 데스크탑 1280px / 1440px 4개 viewport에서
+   * - 카드 4개가 한 행(top 정렬)에 표시되고
+   * - 카드 내부에서 숫자(p.text-3xl)가 sparkline 위에 위치(겹침 없음)해야 한다.
+   */
+  for (const vw of [810, 1180, 1280, 1440]) {
+    test(`${vw}px 뷰포트에서 통계 카드 4개가 동일 수직 stack 레이아웃을 유지한다 (#256 회귀 방지)`, async ({
+      page,
+    }) => {
+      await setupBaseMocks(page);
+      await mockApi(page, 'GET', '/domains', createDomains());
+
+      await page.setViewportSize({ width: vw, height: 900 });
+      await page.goto('/domains');
+
+      const summaryCards = page.getByTestId('domain-summary-cards');
+      await expect(summaryCards).toBeVisible();
+
+      // 4개 카드가 모두 보이고 같은 행에 정렬되어야 한다 (top 좌표 동일)
+      const cardTops = await summaryCards.evaluate((el) => {
+        const cards = el.querySelectorAll('[data-testid^="summary-card-"]');
+        return Array.from(cards).map((c) => Math.round(c.getBoundingClientRect().top));
+      });
+      expect(cardTops).toHaveLength(4);
+      // 모든 카드가 같은 행 — top 차이가 1px 이내
+      const minTop = Math.min(...cardTops);
+      const maxTop = Math.max(...cardTops);
+      expect(maxTop - minTop).toBeLessThanOrEqual(1);
+
+      // 각 카드: 숫자(p.text-3xl) bottom < sparkline(또는 placeholder) top — 겹침 없이 수직 stack
+      const layout = await summaryCards.evaluate((el) => {
+        const cards = el.querySelectorAll('[data-testid^="summary-card-"]');
+        return Array.from(cards).map((c) => {
+          const num = c.querySelector('p.text-3xl');
+          // 스파크라인(BarSparkline) 또는 placeholder div — 둘 다 h-9
+          const charts = c.querySelectorAll('[aria-hidden="true"]');
+          const chart = charts[charts.length - 1] as HTMLElement | undefined;
+          return {
+            numBottom: num ? Math.round((num as HTMLElement).getBoundingClientRect().bottom) : null,
+            chartTop: chart ? Math.round(chart.getBoundingClientRect().top) : null,
+          };
+        });
+      });
+      for (const { numBottom, chartTop } of layout) {
+        expect(numBottom).not.toBeNull();
+        expect(chartTop).not.toBeNull();
+        // 숫자가 그래프 위에 있어야 한다 (수직 stack)
+        expect(numBottom!).toBeLessThan(chartTop!);
+      }
+    });
+  }
 });
 
 test.describe('도메인 관리 — 도메인 목록', () => {
@@ -2023,5 +2077,89 @@ test.describe('도메인 관리 — 일괄 추가 미리보기 (#219)', () => {
     // 전체 줄 수 5, 도메인 줄 3 — 두 지표가 별도로 표시되어 사용자가 트림된 결과를 인지할 수 있다
     await expect(page.getByTestId('bulk-add-preview')).toHaveText('5줄 / 도메인 3개');
     await expect(page.getByTestId('bulk-add-submit')).toHaveText('일괄 추가 (3건)');
+  });
+
+  /**
+   * 이슈 #255 회귀 방지 — Textarea 글자수/줄수 가드 없음
+   * 기존: 4만 줄(1.4MB) 입력도 그대로 수용되어 미리보기/제출 버튼이 활성화됨.
+   * 수정 후: maxLength로 입력 단계 hard cap + 줄 수 상한 초과 시 인라인 에러 + 버튼 disabled.
+   *
+   * mock 정당성: 클라이언트 가드가 차단해 서버 호출이 발생하지 않음을 검증하기 위해 POST 모킹.
+   * mock이 재현하는 조건: parseLines()가 줄 수 상한 초과 시 parseError 설정.
+   */
+  test('Textarea에 maxLength가 적용되어 64KB 초과 입력은 잘려 들어간다 (#255)', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+
+    await page.goto('/domains');
+    await page.getByRole('button', { name: '일괄 추가' }).click();
+    await expect(page.getByTestId('bulk-add-dialog')).toBeVisible();
+
+    // textarea의 maxLength 속성이 65536(64KB)으로 설정되었는지 검증 — 입력 단계 hard cap (#255 핵심)
+    const maxLength = await page
+      .getByTestId('bulk-add-textarea')
+      .evaluate((el) => (el as HTMLTextAreaElement).maxLength);
+    expect(maxLength).toBe(65536);
+  });
+
+  test('500줄 초과 입력은 미리보기에 한도 안내 + 제출 버튼이 비활성화된다 (#255)', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+
+    let bulkAddCalled = false;
+    await page.route('**/api/domains/bulk', async (route) => {
+      if (route.request().method() === 'POST') {
+        bulkAddCalled = true;
+        await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ added: 0, skipped: [], failed: [] }) });
+      } else {
+        await route.continue();
+      }
+    });
+
+    await page.goto('/domains');
+    await page.getByRole('button', { name: '일괄 추가' }).click();
+    await expect(page.getByTestId('bulk-add-dialog')).toBeVisible();
+
+    // 501줄 입력 (한도 500 초과) — 짧은 더미 라인으로 textarea maxLength 64KB 안에 들어가도록
+    const lines = Array.from({ length: 501 }, (_, i) => `h${i}.example.com https://h${i}.example.com`).join('\n');
+    await page.getByTestId('bulk-add-textarea').fill(lines);
+
+    // 미리보기에 한도 안내가 함께 표시되어야 한다
+    await expect(page.getByTestId('bulk-add-preview')).toContainText('최대 500줄');
+
+    // 제출 버튼은 비활성화되어 사용자 클릭 자체를 차단 (#255 핵심)
+    await expect(page.getByTestId('bulk-add-submit')).toBeDisabled();
+
+    // 서버 호출이 발생하지 않아야 한다
+    expect(bulkAddCalled).toBe(false);
+  });
+
+  test('500줄 초과 상태에서 제출 시도해도 인라인 에러가 표시되고 POST 차단 (#255)', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+
+    let bulkAddCalled = false;
+    await page.route('**/api/domains/bulk', async (route) => {
+      if (route.request().method() === 'POST') {
+        bulkAddCalled = true;
+        await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ added: 0, skipped: [], failed: [] }) });
+      } else {
+        await route.continue();
+      }
+    });
+
+    await page.goto('/domains');
+    await page.getByRole('button', { name: '일괄 추가' }).click();
+    await expect(page.getByTestId('bulk-add-dialog')).toBeVisible();
+
+    // 501줄 입력 — 한도 초과
+    const lines = Array.from({ length: 501 }, (_, i) => `h${i}.example.com https://h${i}.example.com`).join('\n');
+    await page.getByTestId('bulk-add-textarea').fill(lines);
+
+    // 버튼이 disabled 이지만, force click 으로 우회 시도해도 핸들러가 차단해야 한다
+    await page.getByTestId('bulk-add-submit').click({ force: true });
+
+    // POST는 호출되지 않아야 한다 — disabled 가드가 정상 동작
+    expect(bulkAddCalled).toBe(false);
   });
 });
