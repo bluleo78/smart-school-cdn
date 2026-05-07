@@ -204,8 +204,11 @@ function StatusStrip() {
         </div>
         {/* 업타임 */}
         <StripStat label="가동 시간" value={formatUptime(status.uptime_secs)} />
-        {/* 누적 쿼리 */}
-        <StripStat label="전체" value={status.total.toLocaleString()} />
+        {/* 누적 쿼리 — status.total은 dns-service gRPC 라이브 카운터(서비스 부팅 후 누적).
+         *  통계 탭 KPI '전체(1시간/24시간)'는 SQLite 시계열 합계로 데이터 소스/집계 범위가 다르므로
+         *  같은 '전체' 라벨을 쓰면 사용자가 두 값(예: 0 vs 6,395)이 같은 의미라고 오해한다 (#240).
+         *  라벨을 '라이브 누적'으로 구체화해 데이터 소스 의미를 분리한다. */}
+        <StripStat label="라이브 누적" value={status.total.toLocaleString()} />
         {/* QPS */}
         <StripStat label="QPS (직전 1분)" value={qpsRecent.toFixed(2)} />
       </CardContent>
@@ -358,10 +361,12 @@ function StatsTab({ range, onRangeChange }: { range: DnsMetricRange; onRangeChan
 
   return (
     <div className="space-y-6">
-      {/* KPI 카드 4장 — DomainSummaryCards 의 text-3xl font-bold 패턴 */}
+      {/* KPI 카드 4장 — DomainSummaryCards 의 text-3xl font-bold 패턴.
+       *  '전체' 라벨에 현재 range(1시간/24시간)를 명시 — 상단 strip의 '라이브 누적'(status.total)과
+       *  데이터 소스/집계 범위가 다른데 같은 라벨을 쓰면 사용자가 어느 값이 정답인지 판단 불가 (#240). */}
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         {/* 한국어 UI 통일 — 이슈 #19 */}
-        <StatCard label="전체" value={totals.total} />
+        <StatCard label={range === '1h' ? '전체 (1시간)' : '전체 (24시간)'} value={totals.total} />
         <StatCard label="매칭" value={totals.matched} accent="text-success" />
         <StatCard label="전달" value={totals.forwarded} accent="text-muted-foreground" />
         {/* NXDOMAIN > 0일 때만 destructive 색상 적용 — 0이면 정상 상태이므로 기본 색 사용 */}
