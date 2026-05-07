@@ -136,6 +136,39 @@ test.describe('DNS 관리 페이지', () => {
     await expect(page.getByText('"ㅎ"에 일치하는 레코드가 없습니다.')).toBeVisible();
   });
 
+  /**
+   * 이슈 #241 회귀 방지 — RecordsTab 검색 input의 앞뒤 공백 미트림으로 정상 호스트가 0건 처리.
+   * 사용자가 호스트명을 복사·붙여넣을 때 한 칸 앞 공백이 함께 들어오면 host 문자열에는 공백이
+   * 포함되지 않으므로 항상 0건 매칭으로 떨어졌다. 수정: q.trim().toLowerCase()로 정규화.
+   */
+  test('레코드 탭 — 검색어 앞뒤 공백을 trim하여 필터한다 (회귀: #241)', async ({ page }) => {
+    await mockApi(page, 'GET', '/dns/status', createDnsStatusOnline());
+    await mockApi(page, 'GET', '/dns/records', createDnsRecords([
+      { host: 'api.school.kr', target: '10.0.0.1', rtype: 'A', source: 'override' },
+      { host: 'cdn.school.kr', target: '10.0.0.2', rtype: 'A', source: 'override' },
+      { host: 'img.school.kr', target: '10.0.0.3', rtype: 'A', source: 'override' },
+      { host: 'other.test', target: '10.0.0.9', rtype: 'A', source: 'override' },
+    ]));
+    await mockDnsQuery(page, '/dns/queries', createDnsQueriesMixed());
+    await mockDnsQuery(page, '/dns/metrics', createDnsMetrics());
+
+    await page.goto('/dns?tab=records');
+
+    // 앞 공백 포함 검색어 — 트림 적용 시 'school' 부분 일치 3건이 표시되어야 함
+    await page.getByTestId('records-filter').fill(' school');
+
+    await expect(page.getByText('api.school.kr')).toBeVisible();
+    await expect(page.getByText('cdn.school.kr')).toBeVisible();
+    await expect(page.getByText('img.school.kr')).toBeVisible();
+    await expect(page.getByText('other.test')).not.toBeVisible();
+    // "검색어 0건" 메시지 미노출 확인
+    await expect(page.getByText('일치하는 레코드가 없습니다.')).not.toBeVisible();
+
+    // 양 끝 공백 — 동일하게 3건 매칭, 빈 결과 메시지 q도 trim된 형태로 표시됨을 확인
+    await page.getByTestId('records-filter').fill('  nomatch-xyz  ');
+    await expect(page.getByText('"nomatch-xyz"에 일치하는 레코드가 없습니다.')).toBeVisible();
+  });
+
   test('통계 탭 — 24시간 버튼 클릭 시 /api/dns/metrics?range=24h 요청이 발생한다', async ({ page }) => {
     await mockDnsDefaults(page);
     await page.goto('/dns');

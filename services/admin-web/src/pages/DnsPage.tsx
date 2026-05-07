@@ -275,9 +275,13 @@ function RecordsTab() {
     [],
   );
 
+  // 검색어 정규화 — 복사·붙여넣기로 따라오는 앞뒤 공백 때문에 정상 호스트가 0건으로
+  // 떨어지는 문제를 방지 (#241). 표시용 input value(searchValue)는 그대로 두고 필터
+  // 트리거에만 trim된 값을 사용한다. DomainsPage의 host.trim().toLowerCase() 패턴과 일관.
+  const trimmedQ = q.trim().toLowerCase();
   const filtered = useMemo(
-    () => (records ?? []).filter(r => r.host.toLowerCase().includes(q.toLowerCase())),
-    [records, q],
+    () => (records ?? []).filter(r => r.host.toLowerCase().includes(trimmedQ)),
+    [records, trimmedQ],
   );
 
   if (isLoading) return <Skeleton className="h-40 w-full" />;
@@ -304,7 +308,7 @@ function RecordsTab() {
         {/* 검색어 유무에 따라 빈 상태 메시지 분기 — 검색 결과 없음과 데이터 없음을 구분 */}
         {filtered.length === 0 ? (
           <p className="py-8 text-center text-sm text-muted-foreground">
-            {q ? `"${q}"에 일치하는 레코드가 없습니다.` : '등록된 레코드가 없습니다.'}
+            {trimmedQ ? `"${trimmedQ}"에 일치하는 레코드가 없습니다.` : '등록된 레코드가 없습니다.'}
           </p>
         ) : (
           // overflow-x-auto 래퍼 — 좁은 뷰포트에서 페이지 전체 가로 스크롤 대신 테이블만 스크롤 (#177)
