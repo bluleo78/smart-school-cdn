@@ -78,10 +78,17 @@ export function DomainTextCompressStats({ host, period = '30d' }: Props) {
           <CardTitle className="text-base font-semibold">텍스트 압축 ({PERIOD_LABEL[period] ?? period} 누적)</CardTitle>
           <p className="text-sm text-muted-foreground">Phase 15 brotli/gzip 프리컴프레스 결과</p>
         </CardHeader>
-        <CardContent className="flex flex-col items-center justify-center py-12 gap-2 text-muted-foreground">
-          <FileText size={32} className="opacity-30" />
-          <p className="text-sm">아직 데이터가 없습니다</p>
-          <p className="text-xs">텍스트 압축이 실행되면 자동으로 표시됩니다</p>
+        <CardContent>
+          {/* 빈 상태 컨테이너 — DomainCacheCards 의 dashed 박스 패턴과 동일하게 적용해
+              최적화 탭 내 카드 간 시각 일관성을 유지한다 (#272). */}
+          <div
+            className="flex flex-col items-center justify-center gap-2 rounded-md border border-dashed py-6 text-muted-foreground"
+            data-testid="text-compress-stats-empty"
+          >
+            <FileText size={32} className="opacity-30" />
+            <p className="text-sm">아직 데이터가 없습니다</p>
+            <p className="text-xs">텍스트 압축이 실행되면 자동으로 표시됩니다</p>
+          </div>
         </CardContent>
       </Card>
     );
