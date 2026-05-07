@@ -67,7 +67,7 @@ export function UsersPage() {
     mutationFn: (d: CreateFormData) => createUser(d.username, d.password),
     // 성공 시에만 다이얼로그 닫기 + 폼 초기화 — 오류 시 입력값 보존을 위해 onSuccess로 이동
     onSuccess: () => {
-      toast.success('사용자가 추가되었습니다');
+      toast.success('사용자가 추가되었습니다.');
       void qc.invalidateQueries({ queryKey: ['users'] });
       setCreateOpen(false);
       createForm.reset();
@@ -84,7 +84,7 @@ export function UsersPage() {
     // 성공 시에만 다이얼로그 닫기 — 오류 시 입력값 보존을 위해 onSuccess로 이동
     // 성공 시 폼 초기화 — 다음 오픈 시 dirty state 잔존 방지 (#161)
     onSuccess: () => {
-      toast.success('비밀번호가 재설정되었습니다');
+      toast.success('비밀번호가 재설정되었습니다.');
       setPasswordTarget(null);
       passwordForm.reset();
     },
@@ -105,7 +105,7 @@ export function UsersPage() {
     mutationFn: (id: number) => disableUser(id),
     // 성공 시 다이얼로그 닫기 — onClick에서 즉시 닫으면 isPending 렌더링 기회가 없으므로 onSuccess로 이동
     onSuccess: () => {
-      toast.success('사용자가 비활성화되었습니다');
+      toast.success('사용자가 비활성화되었습니다.');
       void qc.invalidateQueries({ queryKey: ['users'] });
       setDisableTarget(null);
     },
@@ -117,7 +117,7 @@ export function UsersPage() {
     mutationFn: (id: number) => enableUser(id),
     // 성공 시 다이얼로그 닫기 — onClick에서 즉시 닫으면 isPending 렌더링 기회가 없으므로 onSuccess로 이동
     onSuccess: () => {
-      toast.success('사용자가 재활성화되었습니다');
+      toast.success('사용자가 재활성화되었습니다.');
       void qc.invalidateQueries({ queryKey: ['users'] });
       setEnableTarget(null);
     },

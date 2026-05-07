@@ -10,7 +10,7 @@ export function useSyncDomain() {
     onSuccess: (result) => {
       void queryClient.invalidateQueries({ queryKey: ['domain'] });
       const ok = result.proxy && result.tls && result.dns;
-      if (ok) toast.success('모든 서비스 동기화 완료');
+      if (ok) toast.success('모든 서비스가 동기화되었습니다.');
       else toast.warning('일부 서비스 동기화 실패');
     },
     onError: () => toast.error('동기화에 실패했습니다.'),
