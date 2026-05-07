@@ -2083,6 +2083,39 @@ test.describe('도메인 상세 — 설정 탭', () => {
     await expect(page).toHaveURL(/\/$/);
   });
 
+  /**
+   * 이슈 #254 회귀 방지 — OriginSection 오리진 입력 maxLength 누락
+   *
+   * 수정 전: origin Input에 maxLength prop이 없어 사용자가 임의 길이의 문자열을
+   *   붙여넣을 수 있었고, 서버 ORIGIN_MAX_LENGTH(2083) 검증 단계에 가서야 거절됨.
+   * 수정 후: maxLength={2083}이 적용되어 description(#155)·users 이메일(#253)과
+   *   같은 패턴으로 입력 단계에서 길이 초과를 차단해야 한다.
+   *
+   * 검증 파이프라인: 편집 모드 진입 → origin-input의 maxLength 속성이 2083이고
+   *   description-input(500)과 동일한 동기화 정책을 따르는지 직접 검사.
+   *   "요소가 보이는가"가 아닌 "DOM 속성값이 서버 한도와 동기화되어 있는가"를 검증한다.
+   */
+  test('OriginSection — origin 입력에 maxLength=2083이 적용된다 (회귀: #254)', async ({ page }) => {
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com?tab=settings');
+    await expect(page.getByTestId('domain-settings-tab')).toBeVisible();
+
+    // 편집 모드 진입 — Input 요소가 렌더링되어야 maxLength 검사 가능
+    await page.getByTestId('edit-domain-btn').click();
+
+    // origin-input의 maxLength 속성이 서버 ORIGIN_MAX_LENGTH(2083)와 동기화되어 있는지 검증
+    const originMax = await page
+      .getByTestId('origin-input')
+      .evaluate((el) => (el as HTMLInputElement).maxLength);
+    expect(originMax).toBe(2083);
+
+    // description-input(maxLength=500, #155)과 동일한 동기화 패턴이 적용됨을 함께 확인
+    const descMax = await page
+      .locator('#description-input')
+      .evaluate((el) => (el as HTMLInputElement).maxLength);
+    expect(descMax).toBe(500);
+  });
+
   test('최적화 프로파일 편집이 동작한다', async ({ page }) => {
     await setupDetailMocks(page);
     await mockApi(page, 'PUT', '/optimizer/profiles/textbook.com', {});

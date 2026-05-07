@@ -154,12 +154,16 @@ function OriginSection({ domain }: { domain: Domain }) {
               <Label htmlFor="origin-input" className="text-xs text-muted-foreground">
                 오리진
               </Label>
+              {/* maxLength={2083} — 서버 ORIGIN_MAX_LENGTH(routes/domains.ts)와 동기화한 클라이언트 방어선.
+                  description(#155)·users 이메일(#253)과 같은 패턴으로 입력 단계에서 길이 초과를 차단해
+                  서버 거절·로그 폭주를 사전에 방지한다 (#254). */}
               <Input
                 id="origin-input"
                 value={origin}
                 onChange={(e) => setOrigin(e.target.value)}
                 data-testid="origin-input"
                 className="h-8 text-sm"
+                maxLength={2083}
               />
             </div>
 
