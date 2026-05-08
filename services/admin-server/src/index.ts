@@ -243,8 +243,8 @@ await app.register(proxyRoutes, { domainRepo });
 /** 캐시 통계/퍼지 API 라우트 등록 */
 await app.register(cacheRoutes);
 
-/** TLS 인증서 관리 API 라우트 등록 */
-await app.register(tlsRoutes);
+/** TLS 인증서 관리 API 라우트 등록 — 갱신 시 멤버십 검증을 위해 domainRepo 주입 (#298) */
+await app.register(tlsRoutes, { domainRepo });
 
 /** 도메인 관리 API 라우트 등록 */
 await app.register(domainRoutes, { domainRepo });

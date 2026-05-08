@@ -20,12 +20,13 @@ const mockTlsClient = {
   health:           vi.fn(),
 };
 
-/** 테스트용 Fastify 앱 생성 — tlsClient 데코레이터 주입 */
-async function createApp() {
+/** 테스트용 Fastify 앱 생성 — tlsClient 데코레이터 주입 + (옵션) domainRepo 주입 */
+async function createApp(opts: { domainRepo?: { findByHost: (h: string) => unknown } } = {}) {
   const app = Fastify({ logger: false });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   app.decorate('tlsClient', mockTlsClient as any);
-  await app.register(tlsRoutes);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await app.register(tlsRoutes, { domainRepo: opts.domainRepo as any });
   return app;
 }
 
@@ -127,6 +128,96 @@ describe('TLS 라우트', () => {
 
       expect(res.statusCode).toBe(502);
       expect(res.json()).toEqual({ error: 'tls-service에 연결할 수 없습니다.' });
+    });
+  });
+
+  // ─── POST /api/tls/renew/:host ───────────────────
+  // (#298) 멤버십 검증 — 미등록 host는 404, 등록 host만 갱신을 진행한다.
+
+  describe('POST /api/tls/renew/:host', () => {
+    /**
+     * 미등록 host 입력 시 syncDomains를 호출하지 않고 404로 거부한다.
+     * 다른 도메인 액션 라우트(sync/purge/toggle/DELETE)와 동일한 메시지·상태 코드.
+     */
+    it('등록되지 않은 도메인 갱신 요청은 404로 거부한다', async () => {
+      const domainRepo = { findByHost: vi.fn().mockReturnValue(undefined) };
+      const app = await createApp({ domainRepo });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/tls/renew/nope.example',
+      });
+
+      expect(res.statusCode).toBe(404);
+      expect(res.json()).toEqual({ error: '도메인을 찾을 수 없습니다.' });
+      expect(domainRepo.findByHost).toHaveBeenCalledWith('nope.example');
+      // 미등록 도메인은 tls-service까지 가지 않는다
+      expect(mockTlsClient.syncDomains).not.toHaveBeenCalled();
+    });
+
+    /**
+     * host 정규화 검증 — 대문자 입력이라도 lowercase 키로 멤버십 조회·갱신이 이뤄진다.
+     * 다른 `/:host` 라우트의 normalizeHost 패턴과 일관.
+     */
+    it('대소문자가 섞인 host도 정규화되어 멤버십 조회·갱신된다', async () => {
+      const domainRepo = {
+        findByHost: vi.fn().mockReturnValue({ host: 'textbook.co.kr' }),
+      };
+      mockTlsClient.syncDomains.mockResolvedValueOnce({});
+      const app = await createApp({ domainRepo });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/tls/renew/Textbook.CO.KR',
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ success: true, host: 'textbook.co.kr' });
+      expect(domainRepo.findByHost).toHaveBeenCalledWith('textbook.co.kr');
+      expect(mockTlsClient.syncDomains).toHaveBeenCalledWith([
+        { host: 'textbook.co.kr', origin: '' },
+      ]);
+    });
+
+    /**
+     * 등록된 host에 대해 syncDomains 호출 후 success 응답.
+     */
+    it('등록된 도메인은 syncDomains 호출 후 success를 반환한다', async () => {
+      const domainRepo = {
+        findByHost: vi.fn().mockReturnValue({ host: 'cdn.edunet.net' }),
+      };
+      mockTlsClient.syncDomains.mockResolvedValueOnce({});
+      const app = await createApp({ domainRepo });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/tls/renew/cdn.edunet.net',
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ success: true, host: 'cdn.edunet.net' });
+      expect(mockTlsClient.syncDomains).toHaveBeenCalledWith([
+        { host: 'cdn.edunet.net', origin: '' },
+      ]);
+    });
+
+    /**
+     * 등록된 host지만 tls-service 연결이 실패하면 502.
+     */
+    it('등록된 도메인이라도 tls-service 실패 시 502를 반환한다', async () => {
+      const domainRepo = {
+        findByHost: vi.fn().mockReturnValue({ host: 'cdn.edunet.net' }),
+      };
+      mockTlsClient.syncDomains.mockRejectedValueOnce(new Error('UNAVAILABLE'));
+      const app = await createApp({ domainRepo });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/tls/renew/cdn.edunet.net',
+      });
+
+      expect(res.statusCode).toBe(502);
+      expect(res.json()).toMatchObject({ error: 'TLS 갱신 실패' });
     });
   });
 });
