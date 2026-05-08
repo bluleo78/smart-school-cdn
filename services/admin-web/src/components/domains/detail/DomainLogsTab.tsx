@@ -135,8 +135,19 @@ function HitMissBarChart({
   hits: number[];
   misses: number[];
 }) {
-  if (labels.length === 0) {
-    return <p className="text-xs text-muted-foreground">데이터 없음</p>;
+  // 단일/빈 데이터 가드 (#286) — 점 1개로는 시간축 추세를 표현할 수 없으므로
+  // flex-1 단일 자식이 100% 폭을 차지해 "전체 시간대 한 덩어리"로 보이고,
+  // x축 라벨이 동일 timestamp("00:00")를 3회 반복해 사용자 혼란.
+  // 대신 명시적 안내 placeholder 표시.
+  if (labels.length < 2) {
+    return (
+      <div
+        className="h-32 flex items-center justify-center text-xs text-muted-foreground"
+        data-testid="hitmiss-empty"
+      >
+        추세를 표시할 데이터가 부족합니다
+      </div>
+    );
   }
 
   /** 각 구간 최대 합산값으로 높이 비율 계산 */
@@ -204,8 +215,17 @@ function BandwidthResponseChart({
   bandwidth: number[];
   responseTime: number[];
 }) {
-  if (labels.length === 0) {
-    return <p className="text-xs text-muted-foreground">데이터 없음</p>;
+  // 단일/빈 데이터 가드 (#286) — values.length<2면 MiniAreaChart polyline이 점 1개라
+  // 시각적으로 빈 SVG(viewBox 0 0 300 48 paths=0)로 보여 "차트 깨짐"으로 오인됨.
+  if (labels.length < 2) {
+    return (
+      <div
+        className="h-24 flex items-center justify-center text-xs text-muted-foreground"
+        data-testid="bandwidth-empty"
+      >
+        추세를 표시할 데이터가 부족합니다
+      </div>
+    );
   }
 
   const maxBw = Math.max(...bandwidth, 1);
@@ -250,7 +270,9 @@ function MiniAreaChart({
   const H = 48;
   const n = values.length;
 
-  if (n === 0) return null;
+  // 단일/빈 데이터 가드 (#286) — n<2면 polyline이 점 1개라 빈 SVG로 보임.
+  // 부모(BandwidthResponseChart)에서 이미 가드하지만 컴포넌트 자체 안전망.
+  if (n < 2) return null;
 
   /** SVG 좌표 계산 */
   const pts = values.map((v, i) => ({

@@ -1743,6 +1743,50 @@ test.describe('도메인 상세 — Logs 탭', () => {
     await expect(page.getByTestId('traffic-charts-section')).toBeVisible();
   });
 
+  /**
+   * 이슈 #286 회귀 방지 — 트래픽 탭 요청 수 추이 차트가 데이터 1개로 100% 폭 stack bar 렌더
+   * 수정 전: timeseries.labels.length===1 일 때 HitMissBarChart의 flex-1 단일 자식이 100% 폭을
+   *          차지해 "전체 시간대 한 덩어리"로 보이고, x축 라벨이 동일 timestamp("00:00")를
+   *          3회 반복(`labels[0]`, `labels[Math.floor(1/2)]=labels[0]`, `labels[0]`).
+   *          BandwidthResponseChart의 MiniAreaChart는 polyline 점이 1개라 빈 SVG처럼 보임.
+   * 수정 후: labels.length<2 면 두 차트 모두 "추세를 표시할 데이터가 부족합니다" placeholder 표시.
+   */
+  test('Traffic 탭 — 단일 데이터 포인트일 때 stack bar 대신 placeholder 표시 (회귀: #286)', async ({ page }) => {
+    await setupDetailMocks(page);
+    // stats를 단일 버킷 timeseries로 오버라이드 — 이슈 재현 조건
+    await page.unroute('**/api/domains/textbook.com/stats*');
+    await page.route('**/api/domains/textbook.com/stats*', (route) =>
+      route.fulfill({
+        json: {
+          ...createDomainStats(),
+          timeseries: {
+            labels: ['00:00'],
+            hits: [422],
+            misses: [226],
+            bandwidth: [104857600],
+            responseTime: [42],
+          },
+        },
+      }),
+    );
+
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '트래픽' }).click();
+    await expect(page.getByTestId('traffic-charts-section')).toBeVisible();
+
+    // 요청 수 추이 — 단일 100% 폭 stack bar(title="00:00:...")가 더 이상 렌더되지 않음
+    const stackBars = await page.locator('[title^="00:00:"]').count();
+    expect(stackBars).toBe(0);
+
+    // placeholder testid 두 개(요청 수 추이/대역폭&응답시간)가 표시됨
+    await expect(page.getByTestId('hitmiss-empty')).toBeVisible();
+    await expect(page.getByTestId('bandwidth-empty')).toBeVisible();
+
+    // 빈 SVG(viewBox="0 0 300 48") 도 더 이상 렌더되지 않아야 한다
+    const emptyAreaCharts = await page.locator('svg[viewBox="0 0 300 48"]').count();
+    expect(emptyAreaCharts).toBe(0);
+  });
+
   test('Logs 탭 자동 갱신 드롭다운 기본값은 30초', async ({ page }) => {
     await setupDetailMocks(page);
     await page.goto('/domains/textbook.com');
