@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { NavLink, Outlet, useLocation, useNavigationType } from 'react-router';
+import { matchPath, NavLink, Outlet, useLocation, useNavigationType } from 'react-router';
 import {
   LayoutDashboard,
   Globe,
@@ -97,14 +97,27 @@ export function AppLayout() {
   }, [location.key, navigationType]);
 
   // 페이지 이동 시 document.title 업데이트 — WCAG 2.4.2 Page Titled 준수
-  // navItems에서 현재 pathname에 매핑되는 레이블을 찾아 "레이블 | Smart School CDN" 형태로 설정.
-  // prefix 매칭 시 반드시 세그먼트 경계('/' 직후)까지 일치해야 한다.
-  // 단순 startsWith를 쓰면 `/system-extra` 같이 등록되지 않은 경로가 `/system`에 false-positive로
-  // 매칭되어 404 페이지인데도 부모 메뉴 라벨이 노출되는 버그가 발생한다 (#323).
-  const matchedNavLabel = navItems.find(({ to }) => {
-    if (to === '/') return location.pathname === '/';
-    return location.pathname === to || location.pathname.startsWith(`${to}/`);
-  })?.label;
+  // 알려진 라우트인지 판별은 App.tsx의 라우트 정의와 동일한 패턴 목록으로 matchPath 검사한다.
+  // 과거 startsWith(`${to}/`) 기반 세그먼트 경계 검사는 `/dns/random-subpath`처럼
+  // `/dns` 직하위에 라우트가 등록되지 않은 미지의 서브 path까지 부모 라벨("DNS")로
+  // 흡수해 404 화면인데 부모 메뉴 라벨이 노출되는 회귀를 만들었다 (#323).
+  // 라우트 정의 자체와 1:1로 비교해 unknown 여부를 판정한다.
+  const knownRoutePatterns = [
+    '/',
+    '/domains',
+    '/domains/:host',
+    '/cache',
+    '/optimizer',
+    '/dns',
+    '/users',
+    '/system',
+    // DEV 전용 ErrorBoundary E2E 라우트 — App.tsx와 동일하게 DEV 빌드에서만 known 처리
+    ...(import.meta.env.DEV ? ['/__e2e/throw'] : []),
+  ];
+  const isKnownRoute = knownRoutePatterns.some((pattern) =>
+    matchPath({ path: pattern, end: true }, location.pathname),
+  );
+  const isUnknownRoute = !isKnownRoute;
 
   // /domains/:host 같은 서브 라우트는 자식 컴포넌트(DomainDetailPageInner)가
   // 호스트명을 포함한 title을 직접 설정하므로 AppLayout은 덮어쓰지 않는다.
@@ -112,11 +125,16 @@ export function AppLayout() {
   // 자식이 설정한 title을 덮어쓰게 된다.
   const isDomainDetail = /^\/domains\/[^/]+/.test(location.pathname);
 
-  // 어떤 navItem 에도 매칭되지 않고 자식이 title을 직접 세팅하는 서브 라우트도 아니면
-  // NotFoundPage가 표시되는 상태(react-router의 catch-all `*`).
-  // 헤더 라벨과 document.title 모두 빈 값으로 떨어져 사용자가 404 상태를 인지할 수 없는
-  // 문제(WCAG 2.4.2 위반)를 막기 위해 명시적인 fallback 라벨을 사용한다. (#180)
-  const isUnknownRoute = matchedNavLabel === undefined && !isDomainDetail;
+  // 알려진 라우트일 때만 navItems에서 라벨을 찾는다. 정확한 path 일치 또는
+  // `${to}/` 직하위(예: /domains/123)일 때 부모 메뉴 라벨을 사용한다.
+  // 라우트 정의 기반 isKnownRoute 가드가 unknown을 먼저 걸러내므로
+  // 여기서의 startsWith는 #323 같은 false-positive를 만들지 않는다.
+  const matchedNavLabel = isUnknownRoute
+    ? undefined
+    : navItems.find(({ to }) => {
+        if (to === '/') return location.pathname === '/';
+        return location.pathname === to || location.pathname.startsWith(`${to}/`);
+      })?.label;
   const currentPageLabel = isUnknownRoute
     ? '페이지를 찾을 수 없음'
     : (matchedNavLabel ?? '');

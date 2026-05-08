@@ -151,15 +151,29 @@ test.describe('AppLayout', () => {
       });
     }
 
-    test('/dns/random-subpath — 등록된 prefix + 추가 세그먼트는 부모 라벨을 유지한다', async ({
+    test('/dns/random-subpath — 등록되지 않은 자식 경로는 404 라벨이 노출된다', async ({
       page,
     }) => {
-      // 정상 매칭 케이스(`/dns/...`)는 그대로 부모 라벨을 유지해야 한다.
-      // 단, 라우터 트리에 매칭되는 자식 라우트가 없으면 NotFoundPage가 렌더링될 수 있는데
-      // 이 경우 헤더는 'DNS'이고 본문이 404가 된다. 본문 라벨/타이틀은 단순 케이스만 검증.
+      // 회귀 보강: 1차 fix(baaaa20)는 startsWith(`${to}/`)로 세그먼트 경계만 추가했는데,
+      // `/dns/random-subpath`처럼 `/dns/`로 시작하지만 라우터에 자식이 등록되지 않은 미지의
+      // 서브 path는 여전히 부모 라벨("DNS")로 흡수되어 NotFoundPage 본문과 헤더가 어긋났다.
+      // 이번 수정에서는 라우트 정의(matchPath) 기반으로 known/unknown을 판정해 이 케이스도
+      // 404 라벨로 떨어진다. (#323 회귀)
       await page.goto('/dns/random-subpath');
-      // 헤더 라벨은 'DNS' — segment 경계 매칭 통과
-      await expect(page.getByRole('banner').getByText('DNS')).toBeVisible();
+
+      // 본문은 404
+      await expect(
+        page.getByRole('heading', { name: '페이지를 찾을 수 없습니다.' }),
+      ).toBeVisible();
+
+      // document.title 및 헤더 라벨 모두 404 라벨이어야 함 — 부모 'DNS'가 보이면 회귀
+      await expect(page).toHaveTitle('페이지를 찾을 수 없음 | Smart School CDN');
+      await expect(
+        page.getByRole('banner').getByText('페이지를 찾을 수 없음'),
+      ).toBeVisible();
+      await expect(
+        page.getByRole('banner').getByText('DNS', { exact: true }),
+      ).toHaveCount(0);
     });
   });
 
