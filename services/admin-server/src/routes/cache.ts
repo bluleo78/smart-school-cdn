@@ -12,6 +12,15 @@ const purgeBodySchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('all') }),
 ]);
 
+/**
+ * 도메인/호스트 입력 정규화 (#297)
+ * DNS 호스트는 case-insensitive(RFC 1035 §2.3.3)이고 사용자 입력에 앞뒤 공백이 섞일 수 있어
+ * trim + lowercase로 정규형을 만든다. 도메인 등록/조회/프록시 테스트(#190·#201·#296)와 동일 패턴.
+ */
+function normalizeHost(value: string): string {
+  return value.trim().toLowerCase();
+}
+
 export async function cacheRoutes(app: FastifyInstance) {
   /** 캐시 통계 — domain_stats에서 L1/L2/bypass 집계 + storage-service에서 disk 정보 */
   app.get('/api/cache/stats', async () => {
@@ -201,7 +210,9 @@ export async function cacheRoutes(app: FastifyInstance) {
     if (body.type === 'url') {
       let hostname: string;
       try {
-        hostname = new URL(body.target).hostname;
+        // URL 표준상 hostname은 이미 ASCII 소문자로 정규화되지만, 다른 라우트(#190·#201·#296)와
+        // 동일한 헬퍼를 통과시켜 비교 키 일관성을 명시한다.
+        hostname = normalizeHost(new URL(body.target).hostname);
       } catch {
         return reply.status(400).send({ error: '유효하지 않은 URL 형식입니다.' });
       }
@@ -229,15 +240,21 @@ export async function cacheRoutes(app: FastifyInstance) {
     }
 
     // 도메인 퍼지 시에도 target host가 등록된 도메인인지 동일하게 검증한다 (#168 부수 결함).
+    // DNS 호스트는 case-insensitive(RFC 1035 §2.3.3)이고 사용자 입력에 공백이 섞일 수 있어
+    // 도메인 등록/조회/프록시 테스트 라우트(#190·#201·#296)와 동일한 trim+lowercase 정규화를
+    // 적용한다 (#297). 에러 메시지에도 정규화된 값을 노출해 사용자 혼란을 방지한다.
     if (body.type === 'domain') {
+      const target = normalizeHost(body.target);
       const registered = app.db
         .prepare('SELECT 1 FROM domains WHERE host = ? LIMIT 1')
-        .get(body.target);
+        .get(target);
       if (!registered) {
         return reply
           .status(400)
-          .send({ error: `${body.target}은(는) 등록된 도메인이 아닙니다.` });
+          .send({ error: `${target}은(는) 등록된 도메인이 아닙니다.` });
       }
+      // 후속 storageClient.purgeDomain 호출도 정규화된 값을 사용해 매칭 일관성을 보장한다.
+      body.target = target;
     }
 
     try {

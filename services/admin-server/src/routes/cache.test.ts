@@ -424,6 +424,71 @@ describe('DELETE /api/cache/purge', () => {
     expect(mock.purgeDomain).not.toHaveBeenCalled();
   });
 
+  // #297: type=domain/url의 target host 입력 정규화 — trim + lowercase
+  // DNS 호스트 case-insensitive(RFC 1035 §2.3.3) + 공백 입력 방지. #296과 동일 root cause.
+  describe('target host 입력 정규화 (#297)', () => {
+    it('domain 타입 + 대문자 target이어도 등록된 도메인으로 매칭되어 purgeDomain을 호출한다', async () => {
+      const purgeResult = { purged_files: 3, freed_bytes: 1024 };
+      const mock = makeStorageMock(async () => ({ used_bytes: 0, total_bytes: 0 }));
+      mock.purgeDomain.mockResolvedValueOnce(purgeResult);
+      const { app } = mkApp({ storage: mock, domains: ['httpbin.org'] });
+
+      const res = await app.inject({
+        method: 'DELETE', url: '/api/cache/purge',
+        headers: { 'content-type': 'application/json' },
+        payload: { type: 'domain', target: 'HTTPBIN.ORG' },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ purged_count: 3, freed_bytes: 1024 });
+      // 후속 storageClient 호출도 정규화된 값(소문자)으로 일관성 보장
+      expect(mock.purgeDomain).toHaveBeenCalledWith('httpbin.org');
+    });
+
+    it('domain 타입 + 앞뒤 공백 target이어도 등록된 도메인으로 매칭된다', async () => {
+      const purgeResult = { purged_files: 1, freed_bytes: 256 };
+      const mock = makeStorageMock(async () => ({ used_bytes: 0, total_bytes: 0 }));
+      mock.purgeDomain.mockResolvedValueOnce(purgeResult);
+      const { app } = mkApp({ storage: mock, domains: ['httpbin.org'] });
+
+      const res = await app.inject({
+        method: 'DELETE', url: '/api/cache/purge',
+        headers: { 'content-type': 'application/json' },
+        payload: { type: 'domain', target: ' httpbin.org ' },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(mock.purgeDomain).toHaveBeenCalledWith('httpbin.org');
+    });
+
+    it('domain 타입 + 미등록 target이면 에러 메시지에 정규화된 값을 노출한다', async () => {
+      const mock = makeStorageMock(async () => ({ used_bytes: 0, total_bytes: 0 }));
+      const { app } = mkApp({ storage: mock });
+
+      const res = await app.inject({
+        method: 'DELETE', url: '/api/cache/purge',
+        headers: { 'content-type': 'application/json' },
+        payload: { type: 'domain', target: ' UNKNOWN.example.com ' },
+      });
+      expect(res.statusCode).toBe(400);
+      // trim + lowercase 적용된 값이 메시지에 노출되어야 사용자 혼란이 적다
+      expect(res.json().error).toBe('unknown.example.com은(는) 등록된 도메인이 아닙니다.');
+    });
+
+    it('url 타입 + 대문자 hostname이어도 등록된 와일드카드 도메인으로 매칭된다', async () => {
+      const purgeResult = { purged_files: 2, freed_bytes: 512 };
+      const mock = makeStorageMock(async () => ({ used_bytes: 0, total_bytes: 0 }));
+      mock.purgeUrl.mockResolvedValueOnce(purgeResult);
+      const { app } = mkApp({ storage: mock, domains: ['*.cdn.edu.kr'] });
+
+      const res = await app.inject({
+        method: 'DELETE', url: '/api/cache/purge',
+        headers: { 'content-type': 'application/json' },
+        payload: { type: 'url', target: 'https://APP.CDN.EDU.KR/foo.png' },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(mock.purgeUrl).toHaveBeenCalled();
+    });
+  });
+
   it('all 타입은 target 없이도 purgeAll 호출 후 성공한다', async () => {
     const purgeResult = { purged_files: 100, freed_bytes: 1048576 };
     const mock = makeStorageMock(async () => ({ used_bytes: 0, total_bytes: 0 }));
