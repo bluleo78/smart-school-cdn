@@ -112,6 +112,33 @@ test.describe('인증', () => {
     await expect(page).toHaveURL('http://localhost:4173/domains');
   });
 
+  // 이슈 #291 회귀 방지 — 인증 상태에서 /login 직접 접근 시 RequireUnauth 가드가 리다이렉트
+  test('인증된 상태에서 /login 직접 접근 → / 로 리다이렉트, 폼 미렌더', async ({ page }) => {
+    // 기본 모킹(authenticated)으로 시작 — 로그인 폼이 그대로 노출되면 안 됨
+    await page.goto('/login');
+
+    // 입력 → 처리 → 출력: 인증 상태 입력 + /login 라우트 접근 → 가드 리다이렉트 → 대시보드 URL
+    await expect(page).toHaveURL('http://localhost:4173/');
+    // 폼 요소 자체가 DOM에 없어야 401 reachable 시나리오가 차단됨
+    await expect(page.locator('input[name=username]')).toHaveCount(0);
+    await expect(page.locator('input[name=password]')).toHaveCount(0);
+  });
+
+  // 이슈 #291 — 인증 상태에서 /login?from=/domains 접근 시 from 경로로 리다이렉트
+  test('인증된 상태에서 /login?from=/domains 접근 → /domains 로 리다이렉트', async ({ page }) => {
+    // RequireAuth가 보존한 from 쿼리 흐름을 RequireUnauth가 깨지 않는지 확인
+    await page.goto('/login?from=/domains');
+
+    await expect(page).toHaveURL('http://localhost:4173/domains');
+  });
+
+  // 이슈 #291 — 인증 상태 + 외부 URL from은 차단되어 / 로 fallback (Open Redirect 방어)
+  test('인증된 상태에서 /login?from=http://evil.example.com → / 로 fallback', async ({ page }) => {
+    await page.goto('/login?from=http://evil.example.com');
+
+    await expect(page).toHaveURL('http://localhost:4173/');
+  });
+
   // 이슈 #76 회귀 방지 — 로그인 페이지 비밀번호 표시/숨기기 토글 버튼 없음
   test('로그인 비밀번호 필드 — 표시/숨기기 토글 동작', async ({ page }) => {
     await mockUnauthenticated(page);

@@ -3,6 +3,7 @@ import { Toaster } from 'sonner';
 import { AppLayout } from './components/layout/AppLayout';
 import { RequireAuth } from './components/auth/RequireAuth';
 import { RequireSetup } from './components/auth/RequireSetup';
+import { RequireUnauth } from './components/auth/RequireUnauth';
 import { LoginPage } from './pages/LoginPage';
 import { SetupPage } from './pages/SetupPage';
 import { DashboardPage } from './pages/DashboardPage';
@@ -52,7 +53,10 @@ export function App() {
   return (
     <>
       <Routes>
-        <Route path="/login" element={<LoginPage />} />
+        {/* RequireUnauth 가드 — 이미 로그인된 상태에서 /login 직접 접근 시 리다이렉트 (#291) */}
+        <Route element={<RequireUnauth />}>
+          <Route path="/login" element={<LoginPage />} />
+        </Route>
         {/* RequireSetup 가드 — 이미 설정 완료 상태에서 /setup 직접 접근 시 리다이렉트 (#131) */}
         <Route element={<RequireSetup />}>
           <Route path="/setup" element={<SetupPage />} />
