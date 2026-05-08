@@ -2608,6 +2608,92 @@ test.describe('도메인 상세 — 설정 탭', () => {
     await expect(page.getByText('body/quality must be >= 1')).toBeVisible();
   });
 
+  /**
+   * 이슈 #313 회귀 방지 — DomainOptimizerSection 변경 없이 '저장' 클릭 시
+   * PUT 발송 + "저장되었습니다" 거짓 토스트가 노출되던 버그.
+   *
+   * 수정 전: 저장 버튼 disabled 조건과 handleSave에 isDirty 반영 없음 → no-op write 발생.
+   * 수정 후: !isDirty이면 disabled, handleSave 진입 시 isDirty 가드 → PUT 미발송.
+   *
+   * 모킹 이유: PUT API 호출 횟수를 정확히 추적해 no-op write가 차단됐는지 검증한다.
+   * mock이 재현하는 조건: 사용자가 입력값을 바꾸지 않고 저장 버튼을 클릭하는 상황.
+   * 이 mock이 실제 버그 조건과 동일한 이유: 변경 없으면 mutate가 호출되지 않아야 하므로
+   * PUT 호출 횟수 0과 버튼 disabled 상태 모두로 dirty 가드가 작동했음을 보장한다.
+   */
+  test('DomainOptimizerSection — 변경 없으면 저장 버튼 disabled + PUT 미발송 (회귀: #313)', async ({ page }) => {
+    await setupDetailMocks(page);
+    let putCallCount = 0;
+    await page.route('**/api/optimizer/profiles/textbook.com', (route) => {
+      if (route.request().method() === 'PUT') putCallCount++;
+      return route.fallback();
+    });
+
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '설정' }).click();
+    await expect(page.getByTestId('domain-settings-tab')).toBeVisible();
+
+    // 입력값을 바꾸지 않은 초기 상태 — 저장 버튼은 disabled여야 한다
+    await expect(page.getByTestId('optimizer-save-btn')).toBeDisabled();
+
+    // 강제 클릭(force)으로 disabled 가드 우회 시도 → handleSave 가드도 막아야 한다
+    await page.getByTestId('optimizer-save-btn').click({ force: true });
+
+    // 거짓 성공 토스트가 표시되지 않아야 한다
+    await expect(page.getByText('저장되었습니다.')).not.toBeVisible({ timeout: 500 });
+    // PUT API는 호출되지 않아야 한다
+    expect(putCallCount).toBe(0);
+
+    // 값을 변경하면 disabled가 풀려야 한다 (회귀 가드 정상 동작 확인)
+    await page.getByTestId('optimizer-quality-input').fill('60');
+    await expect(page.getByTestId('optimizer-save-btn')).toBeEnabled();
+  });
+
+  /**
+   * 이슈 #313 회귀 방지 — OriginSection 편집 모드 진입 후 변경 없이 '저장' 클릭 시
+   * PATCH 발송 + "저장되었습니다" 거짓 토스트 + 편집 모드 종료가 발생하던 버그.
+   *
+   * 수정 전: 저장 버튼 disabled 조건과 handleSave에 isDirty 반영 없음 → no-op write 발생.
+   * 수정 후: !isDirty이면 disabled, handleSave 진입 시 isDirty 가드 → PATCH 미발송.
+   *
+   * 모킹 이유: PUT API 호출 횟수를 정확히 추적해 no-op write가 차단됐는지 검증한다.
+   * mock이 재현하는 조건: 사용자가 편집 모드로 진입한 뒤 입력값을 바꾸지 않고 저장하는 상황.
+   * 이 mock이 실제 버그 조건과 동일한 이유: 변경 없으면 mutate가 호출되지 않아야 하므로
+   * PUT 호출 횟수 0과 버튼 disabled 상태 모두로 dirty 가드가 작동했음을 보장한다.
+   */
+  test('OriginSection — 편집 진입 후 변경 없으면 저장 버튼 disabled + PUT 미발송 (회귀: #313)', async ({ page }) => {
+    await setupDetailMocks(page);
+    let putCallCount = 0;
+    await page.route('**/api/domains/textbook.com', (route) => {
+      if (route.request().method() === 'PUT') putCallCount++;
+      return route.fallback();
+    });
+
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '설정' }).click();
+    await expect(page.getByTestId('domain-settings-tab')).toBeVisible();
+
+    // 편집 모드 진입 — origin/description 그대로 둔 채
+    await page.getByTestId('edit-domain-btn').click();
+    await expect(page.getByTestId('origin-input')).toBeVisible();
+
+    // 변경 없으면 저장 버튼은 disabled여야 한다
+    await expect(page.getByTestId('save-domain-btn')).toBeDisabled();
+
+    // 강제 클릭으로 disabled 가드 우회 시도 → handleSave 가드도 막아야 한다
+    await page.getByTestId('save-domain-btn').click({ force: true });
+
+    // 거짓 성공 토스트가 표시되지 않아야 한다
+    await expect(page.getByText('저장되었습니다.')).not.toBeVisible({ timeout: 500 });
+    // PUT API는 호출되지 않아야 한다
+    expect(putCallCount).toBe(0);
+    // 편집 모드가 유지되어야 한다 (handleSave가 setEditing(false)를 실행하지 않음)
+    await expect(page.getByTestId('save-domain-btn')).toBeVisible();
+
+    // 값을 변경하면 disabled가 풀려야 한다 (회귀 가드 정상 동작 확인)
+    await page.getByTestId('origin-input').fill('https://changed.example.com');
+    await expect(page.getByTestId('save-domain-btn')).toBeEnabled();
+  });
+
   test('TLS 카드가 "정보 없음" 대신 실제 만료일·갱신일을 표시한다 (회귀: #32)', async ({ page }) => {
     // createCertificates() 팩토리의 issued_at / expires_at 값이 화면에 나타나야 한다
     await setupDetailMocks(page);

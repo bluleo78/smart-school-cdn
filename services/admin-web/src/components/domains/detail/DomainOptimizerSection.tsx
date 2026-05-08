@@ -55,6 +55,9 @@ export function DomainOptimizerSection({ host }: Props) {
 
   /** 저장 — 서버 전송 전 클라이언트 범위 검증으로 불필요한 API 호출을 방지한다 */
   function handleSave() {
+    // dirty 가드 — 변경 없으면 PUT 발송·거짓 성공 토스트를 차단한다 (#313).
+    // 버튼 disabled 외에 Enter 키 폼 제출 등 다른 진입 경로도 방어.
+    if (!isDirty) return;
     // 빈값(null)은 "값 미입력"으로 간주해 NaN 가드와 함께 명시 거부한다 (#215).
     const q = qualityDisplay;
     const mw = maxWidthDisplay;
@@ -153,7 +156,7 @@ export function DomainOptimizerSection({ host }: Props) {
 
             <Button
               onClick={handleSave}
-              disabled={updateMutation.isPending}
+              disabled={updateMutation.isPending || !isDirty}
               size="sm"
               data-testid="optimizer-save-btn"
             >

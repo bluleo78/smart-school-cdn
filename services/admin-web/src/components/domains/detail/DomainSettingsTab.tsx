@@ -78,6 +78,9 @@ function OriginSection({ domain }: { domain: Domain }) {
 
   /** 저장 — origin 빈값·스킴 클라이언트 검증 후 뮤테이션 호출, 편집 모드 해제 */
   function handleSave() {
+    // dirty 가드 — 변경 없으면 PATCH 발송·거짓 성공 토스트를 차단한다 (#313).
+    // 버튼 disabled 외에 Enter 키 폼 제출 경로(form onSubmit)에서도 방어.
+    if (!isDirty) return;
     // 입력값 정규화 — leading/trailing 공백을 제거한 뒤 모든 검증·전송에 사용한다.
     // raw origin으로 검증하면 leading 공백이 있을 때 scheme 검사가 false가 되어
     // "https://로 시작해야 합니다" 같은 오해 소지 메시지가 노출되고, trailing 공백은
@@ -186,7 +189,7 @@ function OriginSection({ domain }: { domain: Domain }) {
             <div className="flex gap-2 pt-1">
               <Button
                 type="submit"
-                disabled={updateMutation.isPending}
+                disabled={updateMutation.isPending || !isDirty}
                 data-testid="save-domain-btn"
                 size="xs"
               >
