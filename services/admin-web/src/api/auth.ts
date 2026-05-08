@@ -1,11 +1,11 @@
 /** 인증 API 래퍼 — /auth/* 엔드포인트 호출용 */
 import { api } from '../lib/api';
 
-/** 인증된 사용자 정보 */
+/** 인증된 사용자 정보. last_login_at 은 INTEGER unix seconds (#342). */
 export interface AuthUser {
   id: number;
   username: string;
-  last_login_at: string | null;
+  last_login_at: number | null;
 }
 
 /** 인증 상태 — 초기 진입 시 분기 결정용 */

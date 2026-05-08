@@ -42,6 +42,24 @@ describe('usersRoutes', () => {
     expect('password_hash' in users[0]).toBe(false);
   });
 
+  // 이슈 #342 — users 응답 타임스탬프는 INTEGER unix seconds (domains 와 동일 표준)
+  it('GET /api/users — 타임스탬프는 INTEGER unix seconds 로 직렬화 (#342)', async () => {
+    // last_login_at 도 검증하기 위해 사전 갱신
+    ctx.userRepo.updateLastLogin(1);
+    const r = await ctx.app.inject({ method: 'GET', url: '/api/users', cookies: ctx.cookies });
+    expect(r.statusCode).toBe(200);
+    const users = r.json();
+    const u = users[0];
+    expect(typeof u.created_at).toBe('number');
+    expect(typeof u.updated_at).toBe('number');
+    expect(typeof u.last_login_at).toBe('number');
+    // 합리적 범위: 2020-01-01 ~ 2100-01-01 (TEXT 잔존 시 NaN/0 방지 가드)
+    expect(u.created_at).toBeGreaterThan(1577836800);
+    expect(u.created_at).toBeLessThan(4102444800);
+    // disabled_at 은 null 가능 (admin 은 활성 상태)
+    expect(u.disabled_at).toBeNull();
+  });
+
   it('GET /api/users — 기본 정렬은 created_at DESC, 최신 사용자가 첫 번째 (#344)', async () => {
     // 신규 사용자가 등록되면 새 row 의 created_at 이 admin 의 created_at 보다 늦어진다.
     // 도메인·이벤트와 동일하게 최신 우선 정책을 따라 신규 사용자가 첫 번째에 노출되어야 한다.

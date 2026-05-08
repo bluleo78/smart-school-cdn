@@ -25,8 +25,16 @@ const credentialSchema = z.object({
   password: z.string().min(8).max(256),
 });
 
+/**
+ * auth 응답 직렬화 — users.ts 와 동일하게 last_login_at 을 INTEGER unix seconds 로 변환 (#342).
+ * 무엇을·왜: DB 는 ISO TEXT 로 보관하지만 API 응답은 프로젝트 표준(INTEGER unix sec) 으로 통일.
+ *           domains·optimization_events 와 같은 형식이라 클라이언트가 단일 처리 패턴 적용 가능.
+ */
 function publicUser(u: { id: number; username: string; last_login_at: string | null }) {
-  return { id: u.id, username: u.username, last_login_at: u.last_login_at };
+  const lastLogin = u.last_login_at === null
+    ? null
+    : (() => { const ms = Date.parse(u.last_login_at!); return Number.isFinite(ms) ? Math.floor(ms / 1000) : 0; })();
+  return { id: u.id, username: u.username, last_login_at: lastLogin };
 }
 
 export const authRoutes: FastifyPluginAsync<{ userRepo: UserRepository }> = async (app, opts) => {

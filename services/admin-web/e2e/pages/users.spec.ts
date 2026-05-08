@@ -12,17 +12,17 @@ const usersWithDisabled = [
   {
     id: TEST_USER.id,
     username: TEST_USER.username,
-    created_at: '2026-04-01T00:00:00.000Z',
-    updated_at: '2026-04-01T00:00:00.000Z',
+    created_at: 1775001600,
+    updated_at: 1775001600,
     disabled_at: null,
     last_login_at: TEST_USER.last_login_at,
   },
   {
     id: 2,
     username: 'disabled@example.com',
-    created_at: '2026-04-10T00:00:00.000Z',
-    updated_at: '2026-04-26T00:00:00.000Z',
-    disabled_at: '2026-04-26T00:00:00.000Z',
+    created_at: 1775779200,
+    updated_at: 1777161600,
+    disabled_at: 1777161600,
     last_login_at: null,
   },
 ];
@@ -32,16 +32,16 @@ const baseUsers = [
   {
     id: TEST_USER.id,
     username: TEST_USER.username,
-    created_at: '2026-04-01T00:00:00.000Z',
-    updated_at: '2026-04-01T00:00:00.000Z',
+    created_at: 1775001600,
+    updated_at: 1775001600,
     disabled_at: null,
     last_login_at: TEST_USER.last_login_at,
   },
   {
     id: 2,
     username: 'other@example.com',
-    created_at: '2026-04-10T00:00:00.000Z',
-    updated_at: '2026-04-10T00:00:00.000Z',
+    created_at: 1775779200,
+    updated_at: 1775779200,
     disabled_at: null,
     last_login_at: null,
   },
@@ -60,8 +60,8 @@ test.describe('사용자 관리', () => {
               {
                 id: added.id,
                 username: added.username,
-                created_at: '2026-04-25T00:00:00.000Z',
-                updated_at: '2026-04-25T00:00:00.000Z',
+                created_at: 1777075200,
+                updated_at: 1777075200,
                 disabled_at: null,
                 last_login_at: null,
               },
@@ -83,8 +83,8 @@ test.describe('사용자 관리', () => {
           body: JSON.stringify({
             id: 999,
             username: body.username,
-            created_at: '2026-04-25T00:00:00.000Z',
-            updated_at: '2026-04-25T00:00:00.000Z',
+            created_at: 1777075200,
+            updated_at: 1777075200,
             disabled_at: null,
             last_login_at: null,
           }),
@@ -200,7 +200,7 @@ test.describe('사용자 관리', () => {
   test('비활성화 확인 시 API 호출 후 목록 갱신', async ({ page }) => {
     let disableApiCalled = false;
     const disabledUsers = baseUsers.map((u) =>
-      u.id === 2 ? { ...u, disabled_at: '2026-04-26T00:00:00.000Z' } : u
+      u.id === 2 ? { ...u, disabled_at: 1777161600 } : u
     );
 
     await page.route('**/api/users', async (route) => {
@@ -628,7 +628,7 @@ test.describe('사용자 관리', () => {
 
   // 이슈 #77 회귀 방지 — formatDateTime 12시간제(오전/오후) 표기 버그
   test('마지막 로그인 컬럼 — 24시간제 표기 (오전/오후 없음)', async ({ page }) => {
-    // TEST_USER.last_login_at = '2026-04-25T00:00:00.000Z' (한국 시간 09:00:00)
+    // TEST_USER.last_login_at = 1777075200 (한국 시간 09:00:00)
     // 24시간제라면 "9시 00분 00초" 또는 "9:00:00" 형태여야 하고, "오전/오후" 문자열이 없어야 함
     await mockApi(page, 'GET', '/users', baseUsers);
 
@@ -1212,17 +1212,17 @@ test.describe('사용자 관리', () => {
       {
         id: TEST_USER.id,
         username: TEST_USER.username,
-        created_at: '2026-04-01T00:00:00.000Z',
-        updated_at: '2026-04-01T00:00:00.000Z',
+        created_at: 1775001600,
+        updated_at: 1775001600,
         disabled_at: null,
         last_login_at: TEST_USER.last_login_at,
       },
       {
         id: 3,
         username: '__dup_3__bluleo78@gmail.com',
-        created_at: '2026-05-06T00:00:00.000Z',
-        updated_at: '2026-05-06T00:00:00.000Z',
-        disabled_at: '2026-05-06T22:11:47.697Z',
+        created_at: 1778025600,
+        updated_at: 1778025600,
+        disabled_at: 1778105507,
         last_login_at: null,
       },
     ];
@@ -1291,7 +1291,7 @@ test.describe('사용자 관리', () => {
     let getCount = 0;
     const baseList = baseUsers;
     const disabledList = baseUsers.map((u) =>
-      u.id === 2 ? { ...u, disabled_at: '2026-05-08T00:00:00.000Z' } : u
+      u.id === 2 ? { ...u, disabled_at: 1778198400 } : u
     );
     await page.route('**/api/users', async (route) => {
       if (route.request().method() === 'GET') {

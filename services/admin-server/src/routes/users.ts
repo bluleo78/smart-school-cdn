@@ -49,17 +49,40 @@ function parseUserId(raw: string, reply: import('fastify').FastifyReply): number
   return parsed.data;
 }
 
+/**
+ * users 테이블 ISO TEXT 타임스탬프 → unix epoch seconds 정수로 변환 (#342).
+ *
+ * 무엇을: `"2026-04-26T05:54:01.153Z"` 같은 ISO 문자열을 `1779010441` 같은 정수로 변환한다.
+ * 왜: 프로젝트 표준 타임스탬프 직렬화는 INTEGER unix seconds (domains·optimization_events 와 동일).
+ *    users 테이블만 ISO TEXT 로 굳어져 클라이언트가 두 형식을 모두 다뤄야 했다 (#342).
+ *    DB 스키마는 호환성을 위해 그대로 두고, API 응답 직렬화 시점에서 표준 형식으로 통일한다.
+ *    DB 마이그레이션은 follow-up 으로 분리해 블래스트 반경을 제한.
+ *
+ * 입력 형식 가정:
+ *  - 정상 ISO 문자열 → `Math.floor(Date.parse / 1000)` 로 초 단위 절삭(ms 손실 허용 — 표준 정책)
+ *  - 빈 문자열·잘못된 형식이면 `Date.parse` 가 NaN 을 반환하므로 0 으로 폴백 (도메인 updated_at=0
+ *    "미수정" 표기 정책과 동일하게 epoch 처리)
+ */
+function toUnixSec(iso: string): number {
+  const ms = Date.parse(iso);
+  return Number.isFinite(ms) ? Math.floor(ms / 1000) : 0;
+}
+function toUnixSecOrNull(iso: string | null): number | null {
+  return iso === null ? null : toUnixSec(iso);
+}
+
 function publicUser(u: {
   id: number; username: string; created_at: string; updated_at: string;
   disabled_at: string | null; last_login_at: string | null;
 }) {
+  // 모든 타임스탬프 필드를 INTEGER unix seconds 로 변환하여 응답 (#342).
   return {
     id: u.id,
     username: u.username,
-    created_at: u.created_at,
-    updated_at: u.updated_at,
-    disabled_at: u.disabled_at,
-    last_login_at: u.last_login_at,
+    created_at: toUnixSec(u.created_at),
+    updated_at: toUnixSec(u.updated_at),
+    disabled_at: toUnixSecOrNull(u.disabled_at),
+    last_login_at: toUnixSecOrNull(u.last_login_at),
   };
 }
 

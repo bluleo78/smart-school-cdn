@@ -4,11 +4,12 @@
 /// 기본 모킹을 설치하고, 로그인/로그아웃 플로우를 검증하는 스펙은 mockUnauthenticated 등으로 재정의한다.
 import type { Page } from '@playwright/test';
 
-/** E2E 기본 테스트 사용자 — needs_setup 상태가 아닌 일반 로그인 상태를 가정 */
+/** E2E 기본 테스트 사용자 — needs_setup 상태가 아닌 일반 로그인 상태를 가정.
+ *  타임스탬프는 INTEGER unix seconds (#342) — 백엔드 publicUser 직렬화와 일치. */
 export const TEST_USER = {
   id: 1,
   username: 'test@example.com',
-  last_login_at: '2026-04-25T00:00:00.000Z',
+  last_login_at: 1777075200, // 2026-04-25T00:00:00Z
 };
 
 /**
