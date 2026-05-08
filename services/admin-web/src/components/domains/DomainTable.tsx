@@ -16,6 +16,7 @@ import { TlsStatusBadge } from '../TlsStatusBadge';
 // 아이콘 전용 버튼에 shadcn Tooltip 적용 — native title 대비 다크모드 대응·즉시 표시 등 UX 개선
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import type { Domain } from '../../api/domain-types';
+import type { CacheByDomain } from '../../api/cache';
 
 interface DomainTableProps {
   domains: Domain[] | undefined;
@@ -72,6 +73,11 @@ interface DomainTableProps {
    * 맵에 없는 도메인은 TlsStatusBadge가 null(미발급)로 처리한다.
    */
   tlsExpiryByHost?: Map<string, string>;
+  /**
+   * 도메인별 캐시 통계 맵 — DomainsPage에서 useCacheStats()로 조회한 by_domain[]을
+   * host 기준 Map으로 변환해 전달한다. 맵에 없는 행(요청 0건 등)은 '—'를 유지한다 (#346).
+   */
+  statsByHost?: Map<string, CacheByDomain>;
 }
 
 export function DomainTable({
@@ -93,6 +99,7 @@ export function DomainTable({
   sortDir,
   onSortChange,
   tlsExpiryByHost,
+  statsByHost,
 }: DomainTableProps) {
   /**
    * 컬럼 헤더 클릭 핸들러 — 같은 컬럼이면 방향 토글, 다른 컬럼이면 asc 시작
@@ -263,6 +270,8 @@ export function DomainTable({
         {domains.map((domain) => {
           const isEnabled = domain.enabled === 1;
           const isSelected = selectedHosts.has(domain.host);
+          // 도메인별 캐시 통계 — by_domain[]에서 host 매칭. 데이터가 없으면 '—' 유지 (#346)
+          const stat = statsByHost?.get(domain.host);
           return (
             <TableRow
               key={domain.host}
@@ -307,11 +316,17 @@ export function DomainTable({
                 </Badge>
               </TableCell>
 
-              {/* 요청 24h — 통계 데이터 없으므로 placeholder */}
-              <TableCell className="text-right text-xs text-muted-foreground">—</TableCell>
+              {/* 요청(24h) — /api/cache/stats by_domain[].requests를 host 매칭으로 표시.
+                   데이터가 없으면 '—' 유지. tabular-nums로 자릿수 정렬 안정화 (#346). */}
+              <TableCell className="text-right text-xs tabular-nums">
+                {stat ? stat.requests.toLocaleString('ko-KR') : <span className="text-muted-foreground">—</span>}
+              </TableCell>
 
-              {/* 캐시 히트 */}
-              <TableCell className="text-right text-xs text-muted-foreground">—</TableCell>
+              {/* 캐시 히트 — edge_hit_rate(0-1)를 백분율로 표시. 동일 데이터를 Dashboard
+                   ByDomainTable이 이미 소비 중 (#346). */}
+              <TableCell className="text-right text-xs tabular-nums">
+                {stat ? `${(stat.edge_hit_rate * 100).toFixed(1)}%` : <span className="text-muted-foreground">—</span>}
+              </TableCell>
 
               {/* TLS — tlsExpiryByHost에서 도메인별 만료일을 조회해 TlsStatusBadge로 표시한다.
                    맵에 없으면 null(미발급)으로 처리.

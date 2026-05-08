@@ -18,6 +18,7 @@ import { useDeleteDomain } from '../hooks/useDeleteDomain';
 import { useToggleDomain, usePendingToggleHosts } from '../hooks/useToggleDomain';
 import { usePurgeDomain, usePendingPurgeHosts } from '../hooks/usePurgeDomain';
 import { useCertificates } from '../hooks/useTls';
+import { useCacheStats } from '../hooks/useCacheStats';
 import type { DomainsFilter } from '../api/domain-types';
 import { DomainSummaryCards } from '../components/domains/DomainSummaryCards';
 import { DomainAlertBanner } from '../components/domains/DomainAlertBanner';
@@ -280,6 +281,14 @@ export function DomainsPage() {
     [certs],
   );
 
+  // 도메인별 캐시 통계 — Dashboard ByDomainTable과 동일 hook(useCacheStats) 재사용 (#346).
+  // by_domain[]을 host 키 Map으로 변환해 DomainTable이 O(1) 조회로 셀에 표시한다.
+  const { data: cacheStats } = useCacheStats();
+  const statsByHost = useMemo(
+    () => new Map(cacheStats?.by_domain.map((d) => [d.host, d])),
+    [cacheStats],
+  );
+
   // 단건 삭제 확인
   async function handleDeleteConfirm() {
     if (!deleteTarget) return;
@@ -359,6 +368,7 @@ export function DomainsPage() {
               sortDir={filter.order}
               onSortChange={handleSortChange}
               tlsExpiryByHost={tlsExpiryByHost}
+              statsByHost={statsByHost}
             />
           )}
         </CardContent>

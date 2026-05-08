@@ -4,6 +4,7 @@
 import { test, expect } from '../fixtures/test';
 import { mockApi } from '../fixtures/api-mock';
 import { createProxyStatusOnline } from '../factories/proxy.factory';
+import { createCacheStats } from '../factories/cache.factory';
 
 /** 테스트용 도메인 요약 통계 팩토리 */
 function createDomainSummary() {
@@ -2316,5 +2317,53 @@ test.describe('도메인 관리 — 일괄 추가 미리보기 (#219)', () => {
 
     // POST는 호출되지 않아야 한다 — disabled 가드가 정상 동작
     expect(bulkAddCalled).toBe(false);
+  });
+});
+
+/**
+ * 이슈 #346 — DomainTable '요청(24h)'·'캐시 히트' 셀 표시
+ * 회귀 방지: by_domain[]의 host와 매칭되는 행은 실제 값을 표시하고,
+ * 매칭되지 않는 행은 '—' placeholder를 유지해야 한다.
+ *
+ * 모킹 이유: 실제 백엔드의 by_domain 통계 값은 트래픽에 따라 변동하므로 확정적
+ * 검증이 어렵다. /api/cache/stats 응답을 고정 값으로 모킹해 셀 출력값을 확정한다.
+ * mock이 재현하는 시나리오: textbook.com은 by_domain에 포함(요청 1234, edge_hit_rate 0.821),
+ * cdn.school.kr은 미포함 → 후자는 '—' 유지.
+ * 이 mock이 실제 버그 조건과 동일한 이유: 버그는 by_domain 데이터 유무와 무관하게 항상
+ * '—'를 출력하던 것이었으므로, mock 데이터 매칭 행에서 실제 값이 보이는 것을 확인하면
+ * "데이터가 있어도 표시되지 않는" 원래 버그가 회귀하지 않았음을 검증할 수 있다.
+ */
+test.describe('도메인 관리 — 요청(24h)·캐시 히트 셀 표시 (#346 회귀 방지)', () => {
+  test('by_domain 매칭 행은 요청수/엣지 히트율을 표시하고, 미매칭 행은 — 유지', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+    // textbook.com만 by_domain에 포함 — cdn.school.kr은 누락 시나리오
+    await mockApi(page, 'GET', '/cache/stats', createCacheStats({
+      by_domain: [
+        {
+          host: 'textbook.com',
+          requests: 1234,
+          l1_hits: 800,
+          l2_hits: 213,
+          bypass_total: 50,
+          l1_hit_rate: 800 / 1234,
+          edge_hit_rate: 1013 / 1234, // ≈ 0.821 → 82.1%
+        },
+      ],
+    }));
+
+    await page.goto('/domains');
+    await expect(page.getByTestId('domains-table')).toBeVisible();
+
+    // 매칭 행: 천 단위 구분자 적용된 요청수 + 백분율 1자리 히트율 표시
+    const matchedRow = page.getByTestId('domain-row-textbook.com');
+    await expect(matchedRow).toContainText('1,234');
+    await expect(matchedRow).toContainText('82.1%');
+
+    // 미매칭 행: '—' placeholder 유지 (캐시 히트율 컬럼이 두 번째 — placeholder)
+    const unmatchedRow = page.getByTestId('domain-row-cdn.school.kr');
+    // 매칭 행은 '1,234'/'82.1%'라 '—'가 없어야 하지만, 미매칭 행에는 두 셀 모두 '—'가 있어야 한다.
+    const dashCount = await unmatchedRow.locator('td').filter({ hasText: /^—$/ }).count();
+    expect(dashCount).toBeGreaterThanOrEqual(2);
   });
 });
