@@ -2,7 +2,7 @@
 import { useDomainSummary } from '../../hooks/useDomainSummary';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Skeleton } from '../ui/skeleton';
-import { formatBytes } from '../../lib/format';
+import { formatBytes, formatNumber } from '../../lib/format';
 import { BarSparkline, DeltaBadge, EnabledDisabledGauge } from './StatSparkline';
 
 export function DomainSummaryCards() {
@@ -68,7 +68,7 @@ export function DomainSummaryCards() {
       <Card data-testid="summary-card-requests">
         <CardHeader><CardTitle>오늘 요청</CardTitle></CardHeader>
         <CardContent className="overflow-hidden">
-          <p className="text-3xl font-bold">{(data?.todayRequests ?? 0).toLocaleString()}</p>
+          <p className="text-3xl font-bold">{formatNumber(data?.todayRequests ?? 0)}</p>
           <div className="mt-1">
             <DeltaBadge delta={data?.todayRequestsDelta ?? 0} unit="%" />
           </div>

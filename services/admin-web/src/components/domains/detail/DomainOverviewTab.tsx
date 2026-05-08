@@ -3,7 +3,7 @@ import type { Domain } from '../../../api/domain-types';
 import { useDomainStats } from '../../../hooks/useDomainStats';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { Skeleton } from '../../ui/skeleton';
-import { formatBytes } from '../../../lib/format';
+import { formatBytes, formatNumber } from '../../../lib/format';
 import { DomainInfoCards } from './DomainInfoCards';
 import { DomainQuickActions } from './DomainQuickActions';
 import { BarSparkline, DeltaBadge } from '../StatSparkline';
@@ -59,7 +59,7 @@ function SummaryCards({ host }: { host: string }) {
         <CardContent>
           <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,120px)] items-end gap-2">
             <div>
-              <p className="text-3xl font-bold">{(s?.totalRequests ?? 0).toLocaleString()}</p>
+              <p className="text-3xl font-bold">{formatNumber(s?.totalRequests ?? 0)}</p>
               <DeltaBadge delta={s?.requestsDelta ?? 0} unit="%" />
             </div>
             {/* sparkline 슬롯 — 최대 120px, 좁은 카드에서는 자동 축소 */}

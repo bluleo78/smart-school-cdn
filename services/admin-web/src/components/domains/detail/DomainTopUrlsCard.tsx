@@ -3,6 +3,7 @@ import { useDomainTopUrls } from '../../../hooks/useDomainTopUrls';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { Skeleton } from '../../ui/skeleton';
 import type { StatsPeriod } from '../../../api/domains';
+import { formatNumber } from '../../../lib/format';
 
 interface Props {
   host: string;
@@ -33,7 +34,7 @@ export function DomainTopUrlsCard({ host, period, range, refetchIntervalMs }: Pr
             {data.map((u) => (
               <li key={u.path} className="flex items-center justify-between gap-2 text-sm">
                 <span className="truncate font-mono text-xs" title={u.path}>{u.path}</span>
-                <span className="tabular-nums text-muted-foreground">{u.count.toLocaleString()}</span>
+                <span className="tabular-nums text-muted-foreground">{formatNumber(u.count)}</span>
               </li>
             ))}
           </ul>

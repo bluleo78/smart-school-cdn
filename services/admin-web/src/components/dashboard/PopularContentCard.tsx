@@ -4,6 +4,7 @@ import { BarChart2 } from 'lucide-react';
 import { useCachePopular } from '../../hooks/useCachePopular';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Skeleton } from '../ui/skeleton';
+import { formatNumber } from '../../lib/format';
 import {
   Table,
   TableBody,
@@ -81,7 +82,7 @@ export function PopularContentCard() {
                       {path}
                     </TableCell>
                     <TableCell className="text-right font-medium">
-                      {item.hit_count.toLocaleString()}
+                      {formatNumber(item.hit_count)}
                     </TableCell>
                   </TableRow>
                 );

@@ -3,6 +3,7 @@
 import { useCacheStats } from '../../hooks/useCacheStats';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Skeleton } from '../ui/skeleton';
+import { formatNumber } from '../../lib/format';
 
 function fmtPct(n: number) {
   return `${(n * 100).toFixed(1)}%`;
@@ -45,7 +46,7 @@ export function EdgeHitRateCard() {
           {fmtPct(data.edge_hit_rate)}
         </p>
         <p className="text-xs text-muted-foreground mt-1">
-          엣지 HIT {edgeHits.toLocaleString()} / 요청 {data.requests.toLocaleString()}
+          엣지 HIT {formatNumber(edgeHits)} / 요청 {formatNumber(data.requests)}
         </p>
       </CardContent>
     </Card>

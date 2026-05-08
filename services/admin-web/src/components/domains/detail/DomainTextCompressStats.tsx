@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { FileText } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { Skeleton } from '../../ui/skeleton';
-import { formatBytes } from '../../../lib/format';
+import { formatBytes, formatNumber } from '../../../lib/format';
 
 interface StatsResponse {
   total: number;
@@ -115,7 +115,7 @@ export function DomainTextCompressStats({ host, period = '30d' }: Props) {
               <CardTitle className="text-sm">처리 이벤트</CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-2xl font-bold">{(brCount + gzipCount).toLocaleString()}</p>
+              <p className="text-2xl font-bold">{formatNumber(brCount + gzipCount)}</p>
               <p className="text-xs text-muted-foreground">br {brCount} · gzip {gzipCount}</p>
             </CardContent>
           </Card>

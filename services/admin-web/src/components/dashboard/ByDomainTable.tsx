@@ -7,6 +7,7 @@ import { Globe } from 'lucide-react';
 import { useCacheStats } from '../../hooks/useCacheStats';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Skeleton } from '../ui/skeleton';
+import { formatNumber } from '../../lib/format';
 import {
   Table,
   TableBody,
@@ -93,7 +94,7 @@ export function ByDomainTable() {
               >
                 <TableCell className="font-mono">{d.host}</TableCell>
                 <TableCell className="text-right tabular-nums">
-                  {d.requests.toLocaleString()}
+                  {formatNumber(d.requests)}
                 </TableCell>
                 <TableCell className="text-right tabular-nums">
                   {fmtPct(d.l1_hit_rate)}
@@ -102,7 +103,7 @@ export function ByDomainTable() {
                   {fmtPct(d.edge_hit_rate)}
                 </TableCell>
                 <TableCell className="text-right tabular-nums">
-                  {d.bypass_total.toLocaleString()}
+                  {formatNumber(d.bypass_total)}
                 </TableCell>
               </TableRow>
             ))}

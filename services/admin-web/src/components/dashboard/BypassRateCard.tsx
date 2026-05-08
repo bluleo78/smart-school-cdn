@@ -3,6 +3,7 @@
 import { useCacheStats } from '../../hooks/useCacheStats';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Skeleton } from '../ui/skeleton';
+import { formatNumber } from '../../lib/format';
 
 function fmtPct(n: number) {
   return `${(n * 100).toFixed(1)}%`;
@@ -43,7 +44,7 @@ export function BypassRateCard() {
           {fmtPct(data.bypass_rate)}
         </p>
         <p className="text-xs text-muted-foreground mt-1">
-          BYPASS {data.bypass.total.toLocaleString()} / 요청 {data.requests.toLocaleString()}
+          BYPASS {formatNumber(data.bypass.total)} / 요청 {formatNumber(data.requests)}
         </p>
       </CardContent>
     </Card>

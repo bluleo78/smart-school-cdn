@@ -3,6 +3,7 @@
 import { useCacheStats } from '../../hooks/useCacheStats';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Skeleton } from '../ui/skeleton';
+import { formatNumber } from '../../lib/format';
 
 export function BandwidthSavedCard() {
   const { data, isLoading, error } = useCacheStats();
@@ -33,7 +34,7 @@ export function BandwidthSavedCard() {
           className="text-3xl font-bold tabular-nums"
           data-testid="dashboard-total-requests"
         >
-          {data.requests.toLocaleString()}
+          {formatNumber(data.requests)}
         </p>
         <p className="text-xs text-muted-foreground mt-1">최근 24시간 누적 요청 수</p>
       </CardContent>

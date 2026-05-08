@@ -5,6 +5,7 @@
 import { useCacheStats } from '../../hooks/useCacheStats';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Skeleton } from '../ui/skeleton';
+import { formatNumber } from '../../lib/format';
 
 export function CacheStatsCard() {
   const { data, isLoading, error } = useCacheStats();
@@ -42,28 +43,28 @@ export function CacheStatsCard() {
           <div className="flex justify-between">
             {/* METHOD → 메서드 불일치: 캐시 불가 HTTP 메서드(POST 등) */}
             <span className="text-muted-foreground">메서드 불일치</span>
-            <span className="font-mono tabular-nums">{data.bypass.method.toLocaleString()}</span>
+            <span className="font-mono tabular-nums">{formatNumber(data.bypass.method)}</span>
           </div>
           <div className="flex justify-between">
             {/* NOCACHE → 캐시 불가: Cache-Control: no-cache/no-store 등 헤더 지시 */}
             <span className="text-muted-foreground">캐시 불가</span>
-            <span className="font-mono tabular-nums">{data.bypass.nocache.toLocaleString()}</span>
+            <span className="font-mono tabular-nums">{formatNumber(data.bypass.nocache)}</span>
           </div>
           <div className="flex justify-between">
             {/* SIZE → 크기 초과: 최대 캐시 객체 크기 초과 */}
             <span className="text-muted-foreground">크기 초과</span>
-            <span className="font-mono tabular-nums">{data.bypass.size.toLocaleString()}</span>
+            <span className="font-mono tabular-nums">{formatNumber(data.bypass.size)}</span>
           </div>
           <div className="flex justify-between">
             {/* OTHER → 기타: 위 분류에 해당하지 않는 나머지 사유 */}
             <span className="text-muted-foreground">기타</span>
-            <span className="font-mono tabular-nums">{data.bypass.other.toLocaleString()}</span>
+            <span className="font-mono tabular-nums">{formatNumber(data.bypass.other)}</span>
           </div>
         </div>
         {/* 총 BYPASS */}
         <div>
           <p className="text-lg font-semibold leading-tight tabular-nums">
-            {data.bypass.total.toLocaleString()}
+            {formatNumber(data.bypass.total)}
           </p>
           <p className="text-xs text-muted-foreground">총 BYPASS</p>
         </div>

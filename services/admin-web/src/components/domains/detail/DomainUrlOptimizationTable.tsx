@@ -21,7 +21,7 @@ import {
   TableHead,
   TableCell,
 } from '../../ui/table';
-import { formatBytes } from '../../../lib/format';
+import { formatBytes, formatNumber } from '../../../lib/format';
 import { useDomainUrlOptimization } from '../../../hooks/useDomainUrlOptimization';
 
 type Sort = 'savings' | 'orig_size' | 'events';
@@ -190,7 +190,7 @@ export function DomainUrlOptimizationTable({
             </Table>
             {/* 페이지네이션 — shadcn Button 컴포넌트 사용 */}
             <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>총 {data.total.toLocaleString()} URL</span>
+              <span>총 {formatNumber(data.total)} URL</span>
               <div className="flex gap-2">
                 <Button
                   variant="outline"

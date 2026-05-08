@@ -35,7 +35,7 @@ import {
   useDnsMetrics,
 } from '../hooks/useDns';
 import type { DnsQueryResultLabel, DnsMetricRange } from '../api/dns';
-import { formatUptime, formatTime } from '../lib/format';
+import { formatUptime, formatTime, formatNumber } from '../lib/format';
 
 /** 결과 라벨 → Badge variant 매핑 */
 const RESULT_VARIANT: Record<DnsQueryResultLabel, 'success' | 'outline' | 'destructive'> = {
@@ -278,7 +278,7 @@ function StatusStrip() {
          *  통계 탭 KPI '전체(1시간/24시간)'는 SQLite 시계열 합계로 데이터 소스/집계 범위가 다르므로
          *  같은 '전체' 라벨을 쓰면 사용자가 두 값(예: 0 vs 6,395)이 같은 의미라고 오해한다 (#240).
          *  라벨을 '라이브 누적'으로 구체화해 데이터 소스 의미를 분리한다. */}
-        <StripStat label="라이브 누적" value={status.total.toLocaleString()} />
+        <StripStat label="라이브 누적" value={formatNumber(status.total)} />
         {/* QPS */}
         <StripStat label="QPS (직전 1분)" value={qpsRecent.toFixed(2)} />
       </CardContent>
@@ -517,7 +517,7 @@ function StatsTab({ range, onRangeChange }: { range: DnsMetricRange; onRangeChan
                   }}
                   /* 값은 천단위 콤마로 가독성 확보 — KPI 카드 toLocaleString 표기와 일관 (#222) */
                   formatter={(value: number | string) =>
-                    typeof value === 'number' ? value.toLocaleString() : value
+                    typeof value === 'number' ? formatNumber(value) : value
                   }
                 />
                 {/* Legend — KPI 카드(전체/매칭/전달/없음)와 라인 색상 매핑을 식별 가능하게 노출 (#222).
@@ -603,7 +603,7 @@ function StatsTab({ range, onRangeChange }: { range: DnsMetricRange; onRangeChan
                     </TableCell>
                     <TableCell className="font-mono whitespace-nowrap">{d.qname}</TableCell>
                     <TableCell className="text-right tabular-nums font-medium whitespace-nowrap">
-                      {d.count.toLocaleString()}
+                      {formatNumber(d.count)}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -765,7 +765,7 @@ function StatCard({
       <CardContent className="py-5">
         {/* data-testid로 E2E에서 라벨 색상 검증 가능하게 노출 */}
         <p data-testid={testid ?? `statcard-label-${label}`} className={`text-xs font-medium ${accent ?? 'text-muted-foreground'}`}>{label}</p>
-        <p className="mt-1 text-3xl font-bold tabular-nums">{value.toLocaleString()}</p>
+        <p className="mt-1 text-3xl font-bold tabular-nums">{formatNumber(value)}</p>
       </CardContent>
     </Card>
   );

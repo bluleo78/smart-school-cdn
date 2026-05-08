@@ -3,6 +3,7 @@
 import { useCacheStats } from '../../hooks/useCacheStats';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Skeleton } from '../ui/skeleton';
+import { formatNumber } from '../../lib/format';
 
 /** 비율(0-1) → "%" 문자열 포매터 */
 function fmtPct(n: number) {
@@ -44,7 +45,7 @@ export function CacheHitRateCard() {
           {fmtPct(data.l1_hit_rate)}
         </p>
         <p className="text-xs text-muted-foreground mt-1">
-          L1 HIT {data.l1_hits.toLocaleString()} / 요청 {data.requests.toLocaleString()}
+          L1 HIT {formatNumber(data.l1_hits)} / 요청 {formatNumber(data.requests)}
         </p>
       </CardContent>
     </Card>

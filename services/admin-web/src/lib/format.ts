@@ -1,3 +1,13 @@
+/**
+ * 숫자를 ko-KR 천단위 구분자(쉼표) 포맷으로 변환한다
+ * - 인자 없는 toLocaleString()은 navigator.language에 따라 구분자가 달라짐
+ *   (de-DE → "10.000", 일부 → NBSP "10 000") — 한국 사용자에게 오해 소지
+ * - 앱 전체 ko-KR 정책 통일을 위해 본 헬퍼를 사용해야 한다 (#306)
+ */
+export function formatNumber(value: number): string {
+  return value.toLocaleString('ko-KR');
+}
+
 /// 바이트를 사람이 읽기 좋은 단위로 변환한다
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;

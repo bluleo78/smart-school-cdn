@@ -2,6 +2,7 @@
 import { useCacheStats } from '../../hooks/useCacheStats';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Skeleton } from '../ui/skeleton';
+import { formatNumber } from '../../lib/format';
 
 export function EntryCountCard() {
   const { data, isLoading, error } = useCacheStats();
@@ -32,7 +33,7 @@ export function EntryCountCard() {
           className="text-3xl font-bold tabular-nums"
           data-testid="dashboard-entry-count"
         >
-          {data.disk.entry_count.toLocaleString()}
+          {formatNumber(data.disk.entry_count)}
         </p>
         <p className="text-xs text-muted-foreground mt-1">저장된 URL</p>
       </CardContent>

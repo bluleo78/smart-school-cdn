@@ -3,7 +3,7 @@ import { useProxyStatus } from '../../hooks/useProxyStatus';
 import { Badge } from '../ui/badge';
 import { Card, CardContent, CardTitle, CardHeader } from '../ui/card';
 import { Skeleton } from '../ui/skeleton';
-import { formatUptime } from '../../lib/format';
+import { formatUptime, formatNumber } from '../../lib/format';
 
 export function ProxyStatusCard() {
   const { data, isLoading, error } = useProxyStatus();
@@ -44,7 +44,7 @@ export function ProxyStatusCard() {
         <p data-testid="proxy-uptime" className="text-xl font-bold mt-3 leading-tight">{formatUptime(data?.uptime ?? 0)}</p>
         {/* 프록시 부팅 후 누적 카운터 — BandwidthSavedCard 의 24h 윈도우와 시점이 다르므로 라벨로 명확히 구분한다 (#238). */}
         <p className="text-xs text-muted-foreground mt-1" data-testid="proxy-request-count">
-          부팅 후 요청 {(data?.request_count ?? 0).toLocaleString()}건
+          부팅 후 요청 {formatNumber(data?.request_count ?? 0)}건
         </p>
       </CardContent>
     </Card>
