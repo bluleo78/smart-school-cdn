@@ -553,6 +553,130 @@ test.describe('DNS — StatsTab Top 10 useDnsStatus 에러 처리 (#174)', () =>
   });
 });
 
+// ─── q / result 필터 URL searchParam 동기화 (#292 회귀) ──────
+// 수정 전: RecordsTab의 q와 QueriesTab의 filter가 컴포넌트 로컬 useState 라
+//   새로고침/공유 링크/뒤로가기 시 손실되었음. tab/range는 이미 URL 동기화 됨.
+// 수정 후: 둘 다 부모(DnsPage)로 lifting + ?q= / ?result= 로 URL 동기화.
+test.describe('DNS — 레코드 검색어 q URL 동기화 (#292)', () => {
+  test('레코드 검색 입력 시 URL에 ?q=... 가 반영된다', async ({ page }) => {
+    await mockApi(page, 'GET', '/dns/status', createDnsStatusOnline());
+    await mockApi(page, 'GET', '/dns/records', createDnsRecords([
+      { host: 'api.school.kr', target: '10.0.0.1', rtype: 'A', source: 'override' },
+      { host: 'cdn.school.kr', target: '10.0.0.2', rtype: 'A', source: 'override' },
+      { host: 'other.test', target: '10.0.0.9', rtype: 'A', source: 'override' },
+    ]));
+    await mockDnsQuery(page, '/dns/queries', createDnsQueriesMixed());
+    await mockDnsQuery(page, '/dns/metrics', createDnsMetrics());
+
+    await page.goto('/dns?tab=records');
+    await page.getByTestId('records-filter').fill('school');
+
+    await expect(page).toHaveURL(/[?&]q=school/);
+  });
+
+  test('URL ?tab=records&q=school 로 직접 진입하면 검색 입력값과 필터링이 적용된다', async ({ page }) => {
+    await mockApi(page, 'GET', '/dns/status', createDnsStatusOnline());
+    await mockApi(page, 'GET', '/dns/records', createDnsRecords([
+      { host: 'api.school.kr', target: '10.0.0.1', rtype: 'A', source: 'override' },
+      { host: 'cdn.school.kr', target: '10.0.0.2', rtype: 'A', source: 'override' },
+      { host: 'other.test', target: '10.0.0.9', rtype: 'A', source: 'override' },
+    ]));
+    await mockDnsQuery(page, '/dns/queries', createDnsQueriesMixed());
+    await mockDnsQuery(page, '/dns/metrics', createDnsMetrics());
+
+    await page.goto('/dns?tab=records&q=school');
+
+    // 검색 입력값이 URL에서 복원되어야 한다 (수정 전: 빈 칸으로 초기화)
+    await expect(page.getByTestId('records-filter')).toHaveValue('school');
+    // school 매칭 2건만 보이고 other.test 는 숨겨져야 함
+    await expect(page.getByText('api.school.kr')).toBeVisible();
+    await expect(page.getByText('cdn.school.kr')).toBeVisible();
+    await expect(page.getByText('other.test')).not.toBeVisible();
+  });
+
+  test('검색어를 비우면 ?q= 파라미터가 URL에서 제거된다', async ({ page }) => {
+    await mockApi(page, 'GET', '/dns/status', createDnsStatusOnline());
+    await mockApi(page, 'GET', '/dns/records', createDnsRecords());
+    await mockDnsQuery(page, '/dns/queries', createDnsQueriesMixed());
+    await mockDnsQuery(page, '/dns/metrics', createDnsMetrics());
+
+    await page.goto('/dns?tab=records&q=foo');
+    await expect(page.getByTestId('records-filter')).toHaveValue('foo');
+
+    // 입력 비우기 → URL에서 ?q 제거
+    await page.getByTestId('records-filter').fill('');
+    await expect(page).not.toHaveURL(/[?&]q=/);
+  });
+});
+
+test.describe('DNS — 최근 쿼리 result 필터 URL 동기화 (#292)', () => {
+  test('NXDOMAIN 토글 OFF 시 URL에 ?result=matched,forwarded 가 반영된다', async ({ page }) => {
+    await mockDnsDefaults(page);
+    await page.goto('/dns?tab=queries');
+
+    // 모두 ON 상태에서는 ?result 파라미터가 없어야 한다 (default 상태)
+    await expect(page).not.toHaveURL(/[?&]result=/);
+
+    // NXDOMAIN 토글 OFF
+    await page.getByTestId('filter-nxdomain').click();
+
+    // matched,forwarded 만 남아 ?result=matched,forwarded 형태로 직렬화되어야 한다
+    // (콤마는 URLSearchParams 가 %2C 로 인코딩하므로 둘 다 매칭)
+    await expect(page).toHaveURL(/[?&]result=matched(?:,|%2C)forwarded/);
+  });
+
+  test('URL ?tab=queries&result=matched 로 직접 진입하면 matched 만 ON 상태가 된다', async ({ page }) => {
+    await mockDnsDefaults(page);
+    await page.goto('/dns?tab=queries&result=matched');
+
+    await expect(page.getByTestId('filter-matched')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByTestId('filter-forwarded')).toHaveAttribute('aria-pressed', 'false');
+    await expect(page.getByTestId('filter-nxdomain')).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  test('모든 토글이 ON 상태로 복귀하면 ?result 파라미터가 제거된다', async ({ page }) => {
+    await mockDnsDefaults(page);
+    await page.goto('/dns?tab=queries&result=matched');
+
+    // forwarded, nxdomain 토글 ON → 모두 ON 상태 → ?result 제거
+    await page.getByTestId('filter-forwarded').click();
+    await page.getByTestId('filter-nxdomain').click();
+
+    await expect(page).not.toHaveURL(/[?&]result=/);
+  });
+
+  test('잘못된 ?result=invalid,unknown 값은 무시되고 전체 ON으로 폴백된다', async ({ page }) => {
+    await mockDnsDefaults(page);
+    await page.goto('/dns?tab=queries&result=invalid,unknown');
+
+    // 유효한 값이 하나도 없으면 default(전체 ON)로 폴백 — 사용자가 데이터를 잃지 않도록
+    await expect(page.getByTestId('filter-matched')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByTestId('filter-forwarded')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByTestId('filter-nxdomain')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  test('탭 전환 후 다시 돌아와도 q와 result 가 모두 유지된다', async ({ page }) => {
+    await mockDnsDefaults(page);
+    await page.goto('/dns?tab=records&q=foo&result=matched');
+
+    // 통계 탭으로 이동
+    await page.getByTestId('tab-stats').click();
+    await expect(page).toHaveURL(/[?&]tab=stats/);
+    // q / result 는 보존되어야 한다
+    await expect(page).toHaveURL(/[?&]q=foo/);
+    await expect(page).toHaveURL(/[?&]result=matched/);
+
+    // 레코드 탭 복귀 — 검색 입력값 유지
+    await page.getByTestId('tab-records').click();
+    await expect(page.getByTestId('records-filter')).toHaveValue('foo');
+
+    // 최근 쿼리 탭 — matched 만 ON 유지
+    await page.getByTestId('tab-queries').click();
+    await expect(page.getByTestId('filter-matched')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByTestId('filter-forwarded')).toHaveAttribute('aria-pressed', 'false');
+  });
+});
+
 // ─── 빈 데이터 empty state (#21 회귀) ─────────────────────────
 test.describe('DNS — 쿼리 추이 차트 empty state (#21)', () => {
   test('메트릭 데이터가 없으면 차트 대신 empty state 메시지가 표시된다', async ({ page }) => {

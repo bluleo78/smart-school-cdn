@@ -68,6 +68,27 @@ function isValidRange(value: string | null): value is DnsMetricRange {
   return VALID_RANGES.includes(value as DnsMetricRange);
 }
 
+/** 최근 쿼리 탭 result 필터 화이트리스트 — 잘못된 값은 무시하고 전체 ON으로 폴백 (#292) */
+const VALID_RESULTS: readonly DnsQueryResultLabel[] = ['matched', 'forwarded', 'nxdomain'] as const;
+
+/** ?result=matched,forwarded 같은 콤마 구분 문자열을 Set으로 파싱 (#292).
+ *  - null(파라미터 없음) → 기본 전체 ON Set
+ *  - 빈 문자열(?result=) → 빈 Set (모두 OFF 상태도 명시적으로 표현 가능, #231 빈 상태 분기 보존)
+ *  - 콤마 구분 값에서 유효한 라벨만 살리고 잘못된 값은 silent drop
+ *  - 유효 값이 하나도 없는 가비지(`?result=invalid,unknown`) → 안전하게 전체 ON으로 폴백 */
+function parseResultFilter(value: string | null): Set<DnsQueryResultLabel> {
+  const all = new Set<DnsQueryResultLabel>(VALID_RESULTS);
+  if (value === null) return all;
+  if (value === '') return new Set<DnsQueryResultLabel>(); // 명시적 모두 OFF 상태
+  const parts = value.split(',').map(s => s.trim()).filter(Boolean);
+  const valid = parts.filter((s): s is DnsQueryResultLabel =>
+    (VALID_RESULTS as readonly string[]).includes(s),
+  );
+  // 가비지만 들어온 경우(유효 값 0건) → 안전하게 default(전체 ON)로 폴백 — 사용자가 데이터를 잃지 않도록
+  if (valid.length === 0) return all;
+  return new Set(valid);
+}
+
 /** DNS 관리 페이지 루트 — 헤더 + 오프라인 배너 + 상태 스트립 + 3탭 */
 export function DnsPage() {
   const { data: status, error: statusError } = useDnsStatus();
@@ -88,6 +109,15 @@ export function DnsPage() {
   // DomainDetailTabs(#135)의 period 동기화 패턴을 동일하게 적용 — 새로고침/공유 시에도 유지.
   const rangeParam = searchParams.get('range');
   const statsRange: DnsMetricRange = isValidRange(rangeParam) ? rangeParam : '1h';
+
+  // 레코드 탭 호스트 검색어 q와 최근 쿼리 탭 result 필터도 부모로 lifting + URL 동기화 (#292).
+  // tab/range는 이미 동기화되는데 q/filter만 로컬 state로 남아 새로고침/공유 시 손실되던
+  // 비일관 UX를 해결한다. DomainsPage(#68) 검색·필터 URL 동기화 패턴과 일관.
+  const recordsQuery = searchParams.get('q') ?? '';
+  const queriesFilter = useMemo(
+    () => parseResultFilter(searchParams.get('result')),
+    [searchParams],
+  );
 
   /** 탭 전환 시 ?tab=<value> 를 URL에 반영한다.
    *  기존 ?range 파라미터는 보존해 통계 탭으로 돌아왔을 때도 동일 range 유지. */
@@ -114,6 +144,46 @@ export function DnsPage() {
       { replace: true },
     );
   }
+
+  /** 레코드 탭 검색어 q 변경 — ?q=<host>로 URL에 반영 (#292).
+   *  - 빈 문자열일 때는 파라미터 제거 → URL을 깔끔하게 유지 (DomainsPage 패턴과 일관)
+   *  - 검색어 변경은 history 누적 대상이 아니므로 replace 사용 (탭/range와 동일 정책) */
+  const handleQueryChange = useCallback(
+    (value: string) => {
+      setSearchParams(
+        prev => {
+          const next = new URLSearchParams(prev);
+          if (value) next.set('q', value);
+          else next.delete('q');
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+
+  /** 최근 쿼리 탭 result 필터 변경 — ?result=matched,forwarded 형태로 URL에 반영 (#292).
+   *  - 모두 ON(default 상태)이면 파라미터 제거 → URL 깔끔
+   *  - 일부 OFF 상태만 콤마 구분 문자열로 직렬화. 입력 순서를 안정화하기 위해 VALID_RESULTS 순으로 정렬 */
+  const handleResultFilterChange = useCallback(
+    (next: Set<DnsQueryResultLabel>) => {
+      setSearchParams(
+        prev => {
+          const params = new URLSearchParams(prev);
+          if (next.size === VALID_RESULTS.length) {
+            params.delete('result');
+          } else {
+            const ordered = VALID_RESULTS.filter(r => next.has(r));
+            params.set('result', ordered.join(','));
+          }
+          return params;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
 
   return (
     <div className="space-y-6" data-testid="dns-page">
@@ -157,9 +227,9 @@ export function DnsPage() {
           <TabsTrigger value="stats" data-testid="tab-stats">통계</TabsTrigger>
           <TabsTrigger value="queries" data-testid="tab-queries">최근 쿼리</TabsTrigger>
         </TabsList>
-        <TabsContent value="records"><RecordsTab /></TabsContent>
+        <TabsContent value="records"><RecordsTab q={recordsQuery} onQueryChange={handleQueryChange} /></TabsContent>
         <TabsContent value="stats"><StatsTab range={statsRange} onRangeChange={handleRangeChange} /></TabsContent>
-        <TabsContent value="queries"><QueriesTab /></TabsContent>
+        <TabsContent value="queries"><QueriesTab filter={queriesFilter} onFilterChange={handleResultFilterChange} /></TabsContent>
       </Tabs>
     </div>
   );
@@ -226,13 +296,12 @@ function StripStat({ label, value }: { label: string; value: string }) {
   );
 }
 
-/** 레코드 탭 — 호스트 검색 필터 + A 레코드 테이블 */
-function RecordsTab() {
+/** 레코드 탭 — 호스트 검색 필터 + A 레코드 테이블.
+ *  q는 부모(DnsPage)에서 URL searchParam(?q)로 끌어올려 새로고침/공유 시 유지된다 (#292). */
+function RecordsTab({ q, onQueryChange }: { q: string; onQueryChange: (value: string) => void }) {
   const { data: records, isLoading, error } = useDnsRecords();
-  // q: 실제 필터에 반영되는 값(완성 자모 기준).
   // localInput: IME 조합 중 input에 표시할 미완성 값(필터 트리거 X).
   // 조합 중에는 localInput만 갱신하고, compositionend에서 한 번에 q에 반영해 깜빡임을 막는다 (#209, #189 패턴).
-  const [q, setQ] = useState('');
   const [localInput, setLocalInput] = useState<string | null>(null);
 
   // IME 조합 중 여부를 동기적으로 추적 — onChange 시점의 e.nativeEvent.isComposing이
@@ -253,10 +322,10 @@ function RecordsTab() {
       if (composingRef.current || ne.isComposing || ne.keyCode === 229) {
         return; // 조합 중 — 필터 보류
       }
-      setQ(value);
+      onQueryChange(value);
       setLocalInput(null);
     },
-    [],
+    [onQueryChange],
   );
 
   // IME 조합 시작 — 진행 중 input 이벤트는 필터 트리거 안 함
@@ -269,10 +338,10 @@ function RecordsTab() {
     (e: React.CompositionEvent<HTMLInputElement>) => {
       composingRef.current = false;
       const value = e.currentTarget.value;
-      setQ(value);
+      onQueryChange(value);
       setLocalInput(null);
     },
-    [],
+    [onQueryChange],
   );
 
   // 검색어 정규화 — 복사·붙여넣기로 따라오는 앞뒤 공백 때문에 정상 호스트가 0건으로
@@ -548,12 +617,16 @@ function StatsTab({ range, onRangeChange }: { range: DnsMetricRange; onRangeChan
   );
 }
 
-/** 최근 쿼리 탭 — 결과별 필터 토글 + 최대 100행 테이블 */
-function QueriesTab() {
+/** 최근 쿼리 탭 — 결과별 필터 토글 + 최대 100행 테이블.
+ *  filter는 부모(DnsPage)에서 URL searchParam(?result)로 끌어올려 새로고침/공유 시 유지된다 (#292). */
+function QueriesTab({
+  filter,
+  onFilterChange,
+}: {
+  filter: Set<DnsQueryResultLabel>;
+  onFilterChange: (next: Set<DnsQueryResultLabel>) => void;
+}) {
   const { data: queries, isLoading, error } = useDnsQueries(100);
-  const [filter, setFilter] = useState<Set<DnsQueryResultLabel>>(
-    new Set<DnsQueryResultLabel>(['matched', 'forwarded', 'nxdomain']),
-  );
   const visible = useMemo(
     () => (queries ?? []).filter(e => filter.has(e.result)),
     [queries, filter],
@@ -563,12 +636,10 @@ function QueriesTab() {
   if (error) return <ErrorCard message={String(error)} />;
 
   function toggle(r: DnsQueryResultLabel) {
-    setFilter(prev => {
-      const next = new Set(prev);
-      if (next.has(r)) next.delete(r);
-      else next.add(r);
-      return next;
-    });
+    const next = new Set(filter);
+    if (next.has(r)) next.delete(r);
+    else next.add(r);
+    onFilterChange(next);
   }
 
   // 빈 상태 분기용 — 결과 필터 일부라도 해제되어 있는지 판정
@@ -579,7 +650,7 @@ function QueriesTab() {
 
   /** 결과 필터 일괄 초기화 — 빈 상태 안내 패널의 CTA에서 사용 */
   function handleResetFilters() {
-    setFilter(new Set<DnsQueryResultLabel>(allResults));
+    onFilterChange(new Set<DnsQueryResultLabel>(allResults));
   }
 
   return (
