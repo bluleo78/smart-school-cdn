@@ -236,6 +236,32 @@ describe('OptimizationEventsRepository', () => {
     });
   });
 
+  // ─── urlBreakdown limit/offset 정수화 (#294) ─────────────────────────────
+  // 라우트가 Number.isFinite만으로 필터링하면 소수가 그대로 repo→SQL `LIMIT`로
+  // 흘러가 SQLITE_MISMATCH 500을 일으킨다. clampInt/clampOffset이 floor + 클램프
+  // 하므로 비정수 입력에도 정상 응답해야 한다.
+  describe('urlBreakdown — 비정수 limit/offset (#294)', () => {
+    it('소수 limit/offset(2.5, 1.7)이 들어와도 SQLITE_MISMATCH 없이 정상 응답한다', () => {
+      const ts = new Date().toISOString();
+      repo.insertBatch([
+        sample({ host: 'cdn.test', url: 'https://cdn.test/a.jpg', ts }),
+        sample({ host: 'cdn.test', url: 'https://cdn.test/b.jpg', ts }),
+        sample({ host: 'cdn.test', url: 'https://cdn.test/c.jpg', ts }),
+        sample({ host: 'cdn.test', url: 'https://cdn.test/d.jpg', ts }),
+      ]);
+      // limit=2.5 → floor → 2 / offset=1.7 → floor → 1
+      expect(() =>
+        repo.urlBreakdown({ host: 'cdn.test', limit: 2.5 as number, offset: 1.7 as number }),
+      ).not.toThrow();
+      const result = repo.urlBreakdown({
+        host: 'cdn.test',
+        limit:  2.5 as number,
+        offset: 1.7 as number,
+      });
+      expect(result.items).toHaveLength(2);
+    });
+  });
+
   // ─── prune ──────────────────────────────────────────────────────────────
   describe('prune', () => {
     it('기준 시각 이전 이벤트를 삭제하고 삭제 개수를 반환', () => {

@@ -910,9 +910,9 @@ export async function domainRoutes(
     const periodMap: Record<string, number> = { '1h': 3600, '24h': 86400, '7d': 604800, '30d': 2592000 };
     const periodSec = periodMap[req.query.period ?? '24h'] ?? 86400;
     const sort = (['savings', 'orig_size', 'events'] as const).find((s) => s === req.query.sort) ?? 'savings';
-    // limit/offset은 Number() 결과가 NaN/Infinity면 undefined로 처리해 `LIMIT NaN` SQL 에러를 방지
-    const limitParsed  = req.query.limit  !== undefined ? Number(req.query.limit)  : NaN;
-    const offsetParsed = req.query.offset !== undefined ? Number(req.query.offset) : NaN;
+    // limit/offset 정수화·클램프는 repo의 clampInt/clampOffset에 위임한다 (#293/#294).
+    // 라우트에서 Number.isFinite만 검사하면 소수(예: 2.5)는 통과해 SQL `LIMIT 2.5`가
+    // SQLITE_MISMATCH를 일으키므로, 검증을 한 곳(repo)에 모아 회귀를 막는다.
     const repo = new OptimizationEventsRepository(domainRepo.database);
     return repo.urlBreakdown({
       host,
@@ -920,8 +920,8 @@ export async function domainRoutes(
       sort,
       decision:   req.query.decision,
       search:     req.query.q,
-      limit:      Number.isFinite(limitParsed)  ? limitParsed  : undefined,
-      offset:     Number.isFinite(offsetParsed) ? offsetParsed : undefined,
+      limit:      req.query.limit  !== undefined ? Number(req.query.limit)  : undefined,
+      offset:     req.query.offset !== undefined ? Number(req.query.offset) : undefined,
     });
   });
 
