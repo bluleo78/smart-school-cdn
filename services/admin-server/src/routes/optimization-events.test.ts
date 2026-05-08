@@ -157,6 +157,35 @@ describe('GET /api/optimization/events', () => {
     expect(empty.json().events).toHaveLength(2);
   });
 
+  it('since가 ISO 8601 파싱 불가하면 400 (#300)', async () => {
+    const { app } = mkApp();
+    // 완전히 무의미한 문자열
+    const r1 = await app.inject({ method: 'GET', url: '/api/optimization/events?since=hello' });
+    expect(r1.statusCode).toBe(400);
+    expect(r1.json().error).toMatch(/invalid since/);
+    // 잘못된 형식
+    const r2 = await app.inject({ method: 'GET', url: '/api/optimization/events?since=invalid-date' });
+    expect(r2.statusCode).toBe(400);
+  });
+
+  it('since가 유효 ISO 8601이면 200', async () => {
+    const { app } = mkApp();
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/optimization/events?since=2026-01-01T00:00:00.000Z',
+    });
+    expect(res.statusCode).toBe(200);
+    expect(Array.isArray(res.json().events)).toBe(true);
+  });
+
+  it('since 미지정/빈 문자열이면 필터 미적용 (200)', async () => {
+    const { app } = mkApp();
+    const r1 = await app.inject({ method: 'GET', url: '/api/optimization/events' });
+    expect(r1.statusCode).toBe(200);
+    const r2 = await app.inject({ method: 'GET', url: '/api/optimization/events?since=' });
+    expect(r2.statusCode).toBe(200);
+  });
+
   it('limit 파라미터 적용', async () => {
     const { app } = mkApp();
     await app.inject({
@@ -192,9 +221,23 @@ describe('GET /api/optimization/stats', () => {
     expect(s206.count).toBe(2);
   });
 
-  it('모르는 period 문자열이면 기본(24h) 적용', async () => {
+  it('모르는 period 문자열이면 400 거부 (#300) — dns/cache range와 동일 정책', async () => {
     const { app } = mkApp();
-    const res = await app.inject({ method: 'GET', url: '/api/optimization/stats?period=5y' });
+    // 임의 문자열
+    const r1 = await app.inject({ method: 'GET', url: '/api/optimization/stats?period=invalid' });
+    expect(r1.statusCode).toBe(400);
+    expect(r1.json().error).toMatch(/invalid period/);
+    // 형식만 비슷하지만 화이트리스트 밖 (999d)
+    const r2 = await app.inject({ method: 'GET', url: '/api/optimization/stats?period=999d' });
+    expect(r2.statusCode).toBe(400);
+    // 5y도 거부
+    const r3 = await app.inject({ method: 'GET', url: '/api/optimization/stats?period=5y' });
+    expect(r3.statusCode).toBe(400);
+  });
+
+  it('period 미지정 시 기본(24h) 적용', async () => {
+    const { app } = mkApp();
+    const res = await app.inject({ method: 'GET', url: '/api/optimization/stats' });
     expect(res.statusCode).toBe(200);
     expect(res.json().period_sec).toBe(86400);
   });
