@@ -93,6 +93,36 @@ export function useLogStream(service: string, tail = 100) {
     };
 
     es.onerror = () => {
+      // EventSource 사양상 4xx 응답·CORS 실패·서버 종료 시 readyState=CLOSED(2)로 영구 종료되며
+      // 브라우저는 재연결을 시도하지 않는다 (WHATWG HTML §9.2). 반대로 일시적 네트워크 끊김은
+      // readyState=CONNECTING(1)에서 자동 재연결 단계로 진입한다. 두 상태를 구분해 안내한다.
+      // refs #317: 401/403 시 '자동 재연결 중...' 거짓 메시지로 사용자 혼란 방지.
+      if (es.readyState === EventSource.CLOSED) {
+        // CLOSED 진입 시 인증 만료(401/403) 가능성을 즉시 확인한다.
+        // axios 인터셉터(api.ts)는 EventSource 호출에 관여하지 않으므로 여기서 별도 점검.
+        // /auth/state 호출 시 401이면 인터셉터가 자동 /login 리다이렉트를 트리거한다.
+        void fetch('/api/auth/state', { credentials: 'include' })
+          .then((r) => {
+            if (r.status === 401 || r.status === 403) {
+              const from = window.location.pathname + window.location.search;
+              window.location.href = `/login?from=${encodeURIComponent(from)}`;
+              return;
+            }
+            dispatch({
+              type: 'DISCONNECTED',
+              error: '로그 스트림이 종료되었습니다. 페이지를 새로고침하면 다시 연결됩니다.',
+            });
+          })
+          .catch(() => {
+            // 네트워크 자체가 안 되는 경우 — 자동 재연결도 의미 없음
+            dispatch({
+              type: 'DISCONNECTED',
+              error: '로그 스트림이 종료되었습니다. 페이지를 새로고침하면 다시 연결됩니다.',
+            });
+          });
+        return;
+      }
+      // CONNECTING(1) — 브라우저가 자체 재연결을 시도 중인 정상 케이스
       dispatch({ type: 'DISCONNECTED', error: '로그 스트림 연결이 끊어졌습니다. 자동 재연결 중...' });
     };
 

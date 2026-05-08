@@ -833,6 +833,63 @@ test.describe('LogViewer', () => {
     await expect(page.getByTestId('log-empty')).not.toHaveText('연결 대기 중...');
   });
 
+  /// 회귀 방지 #317: SSE가 401/403 응답으로 CLOSED 종료될 때
+  /// (1) "자동 재연결 중..." 거짓 메시지를 표시하지 않고
+  /// (2) /api/auth/state 401 확인 시 /login 으로 리다이렉트해야 한다.
+  test('SSE 401 응답 시 /login 리다이렉트 + 거짓 "자동 재연결" 메시지 미표시 — 회귀 방지 #317', async ({ page }) => {
+    // SSE 401 응답: EventSource는 readyState=CLOSED(2)로 영구 종료된다 (재연결 시도 없음)
+    await page.route('**/api/logs/**', async (route) => {
+      await route.fulfill({
+        status: 401,
+        contentType: 'application/json; charset=utf-8',
+        body: JSON.stringify({ error: 'unauthenticated' }),
+      });
+    });
+    // 훅이 onerror 분기에서 /api/auth/state 로 인증 확인 → 401이면 axios 인터셉터가 /login 리다이렉트
+    await page.route('**/api/auth/state', async (route) => {
+      await route.fulfill({
+        status: 401,
+        contentType: 'application/json; charset=utf-8',
+        body: JSON.stringify({ error: 'unauthenticated' }),
+      });
+    });
+
+    await page.goto('/system');
+
+    // 핵심 검증 1: /login 으로 리다이렉트 되어야 한다 (from 쿼리 포함)
+    await page.waitForURL(/\/login(\?|$)/, { timeout: 5000 });
+
+    // 핵심 검증 2: 리다이렉트 도달 전이라도 거짓 "자동 재연결 중..." 메시지가 노출되지 않아야 한다.
+    //            리다이렉트 후엔 LogViewer 자체가 언마운트되므로 단순히 보이지 않음을 확인한다.
+    await expect(page.getByText('자동 재연결 중...')).toHaveCount(0);
+  });
+
+  /// 회귀 방지 #317-b: SSE가 비-인증 사유로 CLOSED 종료된 경우(예: 서버 재시작)에는
+  /// 정확한 종료 안내 메시지를 표시하고 /login 리다이렉트는 발생하지 않아야 한다.
+  test('SSE CLOSED + 인증 정상일 때 정확한 종료 메시지 표시 + 리다이렉트 미발생 — 회귀 방지 #317', async ({ page }) => {
+    // SSE는 즉시 끊지만(빈 본문, JSON 아닌 content-type으로 EventSource가 CLOSED 진입 유도)
+    await page.route('**/api/logs/**', async (route) => {
+      await route.fulfill({
+        status: 500,
+        contentType: 'application/json; charset=utf-8',
+        body: JSON.stringify({ error: 'internal' }),
+      });
+    });
+    // 인증은 정상 — /login 리다이렉트가 일어나면 안 된다
+    await mockApi(page, 'GET', '/auth/state', { state: 'authenticated', user: { id: 1, username: 'admin', last_login_at: null } });
+
+    await page.goto('/system');
+
+    // 핵심 검증 1: 거짓 "자동 재연결 중..." 메시지 미표시
+    await expect(page.getByText('자동 재연결 중...')).toHaveCount(0, { timeout: 5000 });
+
+    // 핵심 검증 2: 정확한 종료 메시지 표시
+    await expect(page.getByTestId('log-error')).toContainText('로그 스트림이 종료되었습니다', { timeout: 5000 });
+
+    // 핵심 검증 3: 인증 정상이므로 /system 에 머문다 (login 리다이렉트 X)
+    await expect(page).toHaveURL(/\/system\b/);
+  });
+
   test('OFF 상태에서 레벨 필터로 줄 수가 줄어도 자동 스크롤이 다시 켜지지 않는다 — 회귀 방지 #235', async ({ page }) => {
     // #235: 사용자가 명시적으로 자동 스크롤 OFF한 뒤, 레벨 필터로 보이는 줄 수가 줄어 컨테이너
     // scrollHeight가 작아지면 브라우저가 scrollTop을 자동 클램프하면서 scroll 이벤트가 발생하고
