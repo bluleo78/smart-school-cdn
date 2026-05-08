@@ -28,7 +28,13 @@ export function useBulkDeleteDomains() {
   return useMutation({
     mutationFn: (hosts: string[]) => bulkDeleteDomains(hosts),
     onSuccess: (data) => {
+      // 일괄 삭제도 단건 삭제와 동일하게 TLS 인증서/DNS 레코드/캐시 인기 URL·통계가
+      // 연쇄적으로 영향받으므로 관련 쿼리를 모두 무효화한다. (#334)
       void queryClient.invalidateQueries({ queryKey: ['domains'] });
+      void queryClient.invalidateQueries({ queryKey: ['tls'] });
+      void queryClient.invalidateQueries({ queryKey: ['dns'] });
+      void queryClient.invalidateQueries({ queryKey: ['cache', 'popular'] });
+      void queryClient.invalidateQueries({ queryKey: ['cache', 'stats'] });
       const { deleted, requested, missing } = data;
       // 부분 실패 분기 — 요청 수와 실제 삭제 수가 다르거나 missing 목록이 있으면 warning.
       if (missing.length > 0 || deleted < requested) {
