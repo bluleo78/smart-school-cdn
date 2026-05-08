@@ -168,13 +168,61 @@ export async function domainRoutes(
    * - limit/offset 미지정 시 기존과 동일하게 전체 도메인 배열을 반환 (admin-web 호환)
    * - limit/offset 지정 시 음수/NaN은 무시하고 양의 정수만 적용 (silent ignore 방지)
    * - 응답 형태는 기존과 동일한 Domain[] 배열을 유지하여 클라이언트 호환성 보존
+   *
+   * 쿼리 파라미터 strict 검증 (#295):
+   * - enabled: 'true|false|1|0|yes|no'(대소문자 무시) 만 허용. 그 외 값은 silent하게 false로
+   *   강제되지 않고 400으로 명시 거부 — 클라이언트가 보낸 값과 응답 의미의 어긋남을 차단.
+   * - sort: SORT_ALLOWED 화이트리스트만 허용. 그 외 400. (repo의 화이트리스트 fallback은 유지해 다중 방어)
+   * - 기본값 적용 시점은 repo가 책임 — 라우트는 입력의 유효성만 검증.
    */
+  // enabled 쿼리 파라미터 화이트리스트 — 명시적 표현만 허용하고 그 외는 400 (#295)
+  const ENABLED_TRUE_VALUES  = new Set(['true', '1', 'yes']);
+  const ENABLED_FALSE_VALUES = new Set(['false', '0', 'no']);
+  // sort 쿼리 파라미터 화이트리스트 — repo SORT_WHITELIST와 일치 유지 (#295)
+  const SORT_ALLOWED  = new Set(['host', 'created_at', 'updated_at']);
+  // order 쿼리 파라미터 화이트리스트 — 'asc' | 'desc' 만 허용 (#295)
+  const ORDER_ALLOWED = new Set(['asc', 'desc']);
+  // q 검색어 최대 길이 — UI 검색 박스 한도와 동일하게 잡아 비정상적 입력을 사전 차단 (#295)
+  const Q_MAX_LENGTH = 200;
+
   app.get<{
     Querystring: { q?: string; enabled?: string; sort?: string; order?: string; limit?: string; offset?: string };
   }>(
     '/api/domains',
-    async (request) => {
+    async (request, reply) => {
       const { q, enabled, sort, order } = request.query;
+      // enabled strict 검증 (#295) — 빈 문자열·'foo'·'2'·'null' 등은 silent false 변환 대신 400
+      let enabledFilter: boolean | undefined;
+      if (enabled !== undefined) {
+        const normalized = enabled.toLowerCase();
+        if (ENABLED_TRUE_VALUES.has(normalized)) {
+          enabledFilter = true;
+        } else if (ENABLED_FALSE_VALUES.has(normalized)) {
+          enabledFilter = false;
+        } else {
+          return reply.status(400).send({
+            error: `enabled는 true|false|1|0|yes|no 중 하나여야 합니다 (받은 값: "${enabled}").`,
+          });
+        }
+      }
+      // sort strict 검증 (#295) — 화이트리스트 외 값(예: 'invalid', 'DROP_TABLE')은 명시 거부
+      if (sort !== undefined && !SORT_ALLOWED.has(sort)) {
+        return reply.status(400).send({
+          error: `sort는 host|created_at|updated_at 중 하나여야 합니다 (받은 값: "${sort}").`,
+        });
+      }
+      // order strict 검증 (#295) — 'asc'|'desc' 외 값은 명시 거부 (대소문자 무시)
+      if (order !== undefined && !ORDER_ALLOWED.has(order.toLowerCase())) {
+        return reply.status(400).send({
+          error: `order는 asc|desc 중 하나여야 합니다 (받은 값: "${order}").`,
+        });
+      }
+      // q 길이 가드 (#295) — UI 검색박스 maxLength와 정합. 비정상적 폭주 입력 차단.
+      if (q !== undefined && q.length > Q_MAX_LENGTH) {
+        return reply.status(400).send({
+          error: `q는 ${Q_MAX_LENGTH}자 이하여야 합니다 (받은 길이: ${q.length}).`,
+        });
+      }
       // limit/offset: 문자열 → 숫자 변환. NaN/음수/0은 undefined로 처리해 페이지네이션을 적용하지 않는다.
       const rawLimit  = request.query.limit  !== undefined ? Number(request.query.limit)  : NaN;
       const rawOffset = request.query.offset !== undefined ? Number(request.query.offset) : NaN;
@@ -182,7 +230,7 @@ export async function domainRoutes(
       const offset = Number.isFinite(rawOffset) && rawOffset > 0 ? rawOffset : undefined;
       return domainRepo.findAll({
         q,
-        enabled: enabled !== undefined ? enabled === 'true' || enabled === '1' : undefined,
+        enabled: enabledFilter,
         sort,
         order,
         limit,

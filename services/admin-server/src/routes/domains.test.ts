@@ -165,6 +165,114 @@ describe('GET /api/domains', () => {
       expect(body).toHaveLength(8);
     });
   });
+
+  /**
+   * 쿼리 파라미터 strict 검증 (#295)
+   *
+   * 무엇을: enabled/sort/order는 명시 화이트리스트 외 값에 대해 silent fallback 대신 400.
+   * 왜: `?enabled=foo`가 silent하게 false로 강제 변환되어 사용자가 보낸 값과 응답이 어긋나는
+   *     문제를 막는다. sort/order도 화이트리스트로 안전하지만 의미 어긋남을 사용자에게 명시.
+   */
+  describe('쿼리 파라미터 strict 검증 (#295)', () => {
+    function seedMixed(repo: DomainRepository) {
+      // enabled=1 6건, enabled=0 3건 — 응답 유효성 검증을 위해 결정적 시드
+      for (let i = 1; i <= 6; i++) repo.upsert(`on${i}.test`, `https://on${i}.test`);
+      for (let i = 1; i <= 3; i++) {
+        repo.upsert(`off${i}.test`, `https://off${i}.test`);
+        repo.database.prepare('UPDATE domains SET enabled = 0 WHERE host = ?').run(`off${i}.test`);
+      }
+    }
+
+    // enabled 명시 표현(true/false/1/0/yes/no, 대소문자 무시)은 200 + 정상 필터링
+    const ENABLED_VALID: Array<[string, number]> = [
+      ['true', 6], ['false', 3],
+      ['1', 6],    ['0', 3],
+      ['yes', 6],  ['no', 3],
+      ['TRUE', 6], ['False', 3], // 대소문자 무시
+    ];
+    for (const [val, expectedLen] of ENABLED_VALID) {
+      it(`?enabled=${val} → 200 (명시 표현 허용)`, async () => {
+        const repo = makeRepo();
+        seedMixed(repo);
+        const app = buildApp(repo);
+        const res = await app.inject({ method: 'GET', url: `/api/domains?enabled=${val}` });
+        expect(res.statusCode).toBe(200);
+        expect(JSON.parse(res.body)).toHaveLength(expectedLen);
+      });
+    }
+
+    // 잘못된 enabled 값은 400 — silent false 변환 회귀 방지
+    const ENABLED_INVALID = ['foo', '2', 'null', '', 'undefined', 'on', 'off', 'TruE1'];
+    for (const val of ENABLED_INVALID) {
+      it(`?enabled=${JSON.stringify(val)} → 400 (silent false 변환 차단)`, async () => {
+        const repo = makeRepo();
+        seedMixed(repo);
+        const app = buildApp(repo);
+        const res = await app.inject({ method: 'GET', url: `/api/domains?enabled=${encodeURIComponent(val)}` });
+        expect(res.statusCode).toBe(400);
+        expect(JSON.parse(res.body).error).toContain('enabled');
+      });
+    }
+
+    // sort 화이트리스트 — 'host'|'created_at'|'updated_at' 만 허용
+    for (const val of ['host', 'created_at', 'updated_at']) {
+      it(`?sort=${val} → 200 (화이트리스트 허용)`, async () => {
+        const repo = makeRepo();
+        seedMixed(repo);
+        const app = buildApp(repo);
+        const res = await app.inject({ method: 'GET', url: `/api/domains?sort=${val}` });
+        expect(res.statusCode).toBe(200);
+      });
+    }
+    for (const val of ['invalid', 'DROP TABLE', '', 'origin', 'enabled']) {
+      it(`?sort=${JSON.stringify(val)} → 400 (silent fallback 차단)`, async () => {
+        const repo = makeRepo();
+        seedMixed(repo);
+        const app = buildApp(repo);
+        const res = await app.inject({ method: 'GET', url: `/api/domains?sort=${encodeURIComponent(val)}` });
+        expect(res.statusCode).toBe(400);
+        expect(JSON.parse(res.body).error).toContain('sort');
+      });
+    }
+
+    // order 'asc'|'desc'만 허용 (대소문자 무시), 그 외 400
+    for (const val of ['asc', 'desc', 'ASC', 'Desc']) {
+      it(`?order=${val} → 200`, async () => {
+        const repo = makeRepo();
+        seedMixed(repo);
+        const app = buildApp(repo);
+        const res = await app.inject({ method: 'GET', url: `/api/domains?order=${val}` });
+        expect(res.statusCode).toBe(200);
+      });
+    }
+    for (const val of ['DROP_TABLE', 'random', '', 'ascending', 'descending']) {
+      it(`?order=${JSON.stringify(val)} → 400`, async () => {
+        const repo = makeRepo();
+        seedMixed(repo);
+        const app = buildApp(repo);
+        const res = await app.inject({ method: 'GET', url: `/api/domains?order=${encodeURIComponent(val)}` });
+        expect(res.statusCode).toBe(400);
+        expect(JSON.parse(res.body).error).toContain('order');
+      });
+    }
+
+    it('q 200자 초과는 400 (폭주 입력 차단)', async () => {
+      const repo = makeRepo();
+      const app = buildApp(repo);
+      const longQ = 'a'.repeat(201);
+      const res = await app.inject({ method: 'GET', url: `/api/domains?q=${longQ}` });
+      expect(res.statusCode).toBe(400);
+      expect(JSON.parse(res.body).error).toContain('q');
+    });
+
+    it('q 200자 정확히는 200 (경계값 허용)', async () => {
+      const repo = makeRepo();
+      const app = buildApp(repo);
+      const okQ = 'a'.repeat(200);
+      const res = await app.inject({ method: 'GET', url: `/api/domains?q=${okQ}` });
+      expect(res.statusCode).toBe(200);
+    });
+  });
 });
 
 describe('POST /api/domains', () => {
