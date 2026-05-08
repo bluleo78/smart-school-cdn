@@ -61,12 +61,29 @@ export function DomainOptimizerSection({ host }: Props) {
     // 빈값(null)은 "값 미입력"으로 간주해 NaN 가드와 함께 명시 거부한다 (#215).
     const q = qualityDisplay;
     const mw = maxWidthDisplay;
+    // 서버 JSON-Schema(`services/admin-server/src/routes/optimizer.ts`)와 동일 제약을 클라가 사전 차단한다.
+    // - quality: integer 1–100
+    // - max_width: integer 0–65535
+    // 정수/상한 가드가 빠지면 서버 raw 영문(`body/quality must be integer`, `body/max_width must be <= 65535`)이
+    // toast로 그대로 노출되어 한국어 일관성을 깨뜨린다 (#314, #48 server message passthrough와 양립).
     if (q === '' || !Number.isFinite(q) || q < 1 || q > 100) {
       toast.error('품질은 1–100 사이여야 합니다.');
       return;
     }
+    if (!Number.isInteger(q)) {
+      toast.error('품질은 정수여야 합니다.');
+      return;
+    }
     if (mw === '' || !Number.isFinite(mw) || mw < 0) {
       toast.error('최대 너비는 0 이상이어야 합니다.');
+      return;
+    }
+    if (!Number.isInteger(mw)) {
+      toast.error('최대 너비는 정수여야 합니다.');
+      return;
+    }
+    if (mw > 65535) {
+      toast.error('최대 너비는 65535 이하여야 합니다.');
       return;
     }
     updateMutation.mutate(
@@ -110,6 +127,7 @@ export function DomainOptimizerSection({ host }: Props) {
                 type="number"
                 min={1}
                 max={100}
+                step={1}
                 value={qualityDisplay}
                 onChange={(e) => {
                   // 빈 문자열은 null로 보존 — Number('')=0 보정으로 인한 dirty 오탐·잘못된 0 저장 방지(#215).
@@ -132,6 +150,8 @@ export function DomainOptimizerSection({ host }: Props) {
                 id="optimizer-max-width"
                 type="number"
                 min={0}
+                max={65535}
+                step={1}
                 value={maxWidthDisplay}
                 onChange={(e) => {
                   // 빈 문자열은 null로 보존 — Number('')=0 보정으로 인한 의도치 않은 max_width=0 저장 방지(#215).
@@ -141,7 +161,9 @@ export function DomainOptimizerSection({ host }: Props) {
                 className="h-8 text-sm"
                 data-testid="optimizer-max-width-input"
               />
-              <p className="text-xs text-muted-foreground">px 단위, 0 입력 시 너비 제한 없음</p>
+              <p className="text-xs text-muted-foreground">
+                0–65535 사이의 정수 (0 입력 시 너비 제한 없음)
+              </p>
             </div>
 
             {/* enabled Switch */}

@@ -2404,8 +2404,11 @@ test.describe('도메인 상세 — 설정 탭', () => {
     await qualityInput.fill('75');
     await page.getByTestId('optimizer-save-btn').click();
 
-    // 저장 버튼이 비활성화되지 않고 유지되어야 한다 (뮤테이션 완료)
-    await expect(page.getByTestId('optimizer-save-btn')).toBeEnabled();
+    // 저장 성공 토스트가 표시되어야 한다.
+    // 이전의 toBeEnabled 단언은 #313 dirty-guard 도입 이후 post-save 정상 상태가
+    // isDirty=false → 버튼 disabled 이므로 타이밍 의존 race window에 의존하던 결함이었다.
+    // 입력→처리→출력 파이프라인의 실제 출력(toast.success)을 검증한다 (#314).
+    await expect(page.getByText('저장되었습니다.')).toBeVisible();
   });
 
   /**
@@ -2579,6 +2582,79 @@ test.describe('도메인 상세 — 설정 탭', () => {
 
     await page.getByTestId('optimizer-save-btn').click();
     await expect(page.getByText('최대 너비는 0 이상이어야 합니다.')).toBeVisible();
+    expect(putCallCount).toBe(0);
+  });
+
+  /**
+   * 이슈 #314 회귀 방지 — 클라 검증이 서버 JSON-Schema와 불일치하여 정수 강제·max_width 65535 상한이 누락,
+   * 서버 raw 영문 메시지(`body/quality must be integer`, `body/max_width must be <= 65535`)가 토스트로 노출되던 결함.
+   *
+   * 수정 전: handleSave가 `Number.isFinite + 범위`만 체크 → 소수점/65535 초과 입력이 서버까지 전달되고 raw 영문 노출.
+   * 수정 후: `Number.isInteger`/`<= 65535` 가드를 추가해 한국어 메시지로 사전 차단, PUT 미호출.
+   *
+   * 모킹 이유: PUT 호출 차단을 정확히 검증하기 위해 호출 카운터로 추적 — 실제 서버 의존 없이 클라 가드만 검증.
+   */
+  test('최적화 프로파일 — 품질에 소수점 입력 시 한국어 정수 검증 메시지로 사전 차단 (회귀: #314)', async ({
+    page,
+  }) => {
+    await setupDetailMocks(page);
+    let putCallCount = 0;
+    await page.route('**/api/optimizer/profiles/textbook.com', (route) => {
+      if (route.request().method() === 'PUT') putCallCount++;
+      return route.fallback();
+    });
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '설정' }).click();
+
+    // 소수점 입력 → 저장
+    await page.getByTestId('optimizer-quality-input').fill('85.7');
+    await page.getByTestId('optimizer-save-btn').click();
+
+    // 한국어 정수 검증 메시지가 노출되고 서버 raw 영문은 노출되지 않아야 한다
+    await expect(page.getByText('품질은 정수여야 합니다.')).toBeVisible();
+    await expect(page.getByText('body/quality must be integer')).toHaveCount(0);
+    expect(putCallCount).toBe(0);
+  });
+
+  test('최적화 프로파일 — 최대 너비 65535 초과 입력 시 한국어 상한 메시지로 사전 차단 (회귀: #314)', async ({
+    page,
+  }) => {
+    await setupDetailMocks(page);
+    let putCallCount = 0;
+    await page.route('**/api/optimizer/profiles/textbook.com', (route) => {
+      if (route.request().method() === 'PUT') putCallCount++;
+      return route.fallback();
+    });
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '설정' }).click();
+
+    // 65535를 초과하는 큰 정수 입력 → 저장
+    await page.getByTestId('optimizer-max-width-input').fill('999999999');
+    await page.getByTestId('optimizer-save-btn').click();
+
+    // 한국어 상한 메시지가 노출되고 서버 raw 영문은 노출되지 않아야 한다
+    await expect(page.getByText('최대 너비는 65535 이하여야 합니다.')).toBeVisible();
+    await expect(page.getByText('body/max_width must be <= 65535')).toHaveCount(0);
+    expect(putCallCount).toBe(0);
+  });
+
+  test('최적화 프로파일 — 최대 너비에 소수점 입력 시 한국어 정수 검증 메시지로 사전 차단 (회귀: #314)', async ({
+    page,
+  }) => {
+    await setupDetailMocks(page);
+    let putCallCount = 0;
+    await page.route('**/api/optimizer/profiles/textbook.com', (route) => {
+      if (route.request().method() === 'PUT') putCallCount++;
+      return route.fallback();
+    });
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '설정' }).click();
+
+    // 최대 너비에 소수점 입력 → 저장
+    await page.getByTestId('optimizer-max-width-input').fill('1024.5');
+    await page.getByTestId('optimizer-save-btn').click();
+
+    await expect(page.getByText('최대 너비는 정수여야 합니다.')).toBeVisible();
     expect(putCallCount).toBe(0);
   });
 
@@ -3775,8 +3851,8 @@ test.describe('도메인 상세 — 설정 탭 TLS 수동 갱신 (#102)', () => 
     await expect(maxWidthLabel).not.toContainText('px');
     await expect(maxWidthLabel).not.toContainText('무제한');
 
-    // 힌트가 별도 <p>로 존재해야 한다
-    await expect(page.getByText('px 단위, 0 입력 시 너비 제한 없음')).toBeVisible();
+    // 힌트가 별도 <p>로 존재해야 한다 (#314: 65535 상한 명시 + 정수 강제)
+    await expect(page.getByText('0–65535 사이의 정수 (0 입력 시 너비 제한 없음)')).toBeVisible();
   });
 });
 
