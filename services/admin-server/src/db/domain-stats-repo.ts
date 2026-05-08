@@ -502,6 +502,17 @@ export class DomainStatsRepository {
    */
   cleanup(): number {
     const cutoff = Math.floor(Date.now() / 1000) - 2592000; // 30일 = 30 * 86400
-    return this.db.prepare(`DELETE FROM domain_stats WHERE timestamp < ?`).run(cutoff).changes;
+    return this.pruneBefore(cutoff);
+  }
+
+  /**
+   * 지정한 Unix 타임스탬프(초) 이전 행을 삭제한다.
+   *
+   * 스케줄러(`DomainStatsPruner`)가 retention 일수를 동적으로 주입할 수 있도록
+   * cleanup()에서 cutoff 계산을 분리한 형태. timestamp 컬럼은 1분 버킷 Unix 초이므로
+   * cutoff 도 동일 단위(초)로 받는다.
+   */
+  pruneBefore(cutoffSec: number): number {
+    return this.db.prepare(`DELETE FROM domain_stats WHERE timestamp < ?`).run(cutoffSec).changes;
   }
 }

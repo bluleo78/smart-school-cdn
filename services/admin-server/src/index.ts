@@ -17,6 +17,7 @@ import { USER_SCHEMA, UserRepository } from './db/user-repo.js';
 import { startStatsCollector } from './stats-collector.js';
 import { startDnsMetricsCollector } from './dns-metrics-collector.js';
 import { startOptimizationEventsPruner } from './optimization-events-pruner.js';
+import { startDomainStatsPruner } from './domain-stats-pruner.js';
 import { createStorageClient } from './grpc/storage_client.js';
 import { createTlsClient } from './grpc/tls_client.js';
 import { createDnsClient } from './grpc/dns_client.js';
@@ -304,6 +305,9 @@ try {
   // Proxy 통계 폴링 시작 — 1분마다 /stats 엔드포인트에서 수집하여 DB에 저장
   const statsRepo = new DomainStatsRepository(db);
   startStatsCollector(proxyAdminUrl, statsRepo, app.log);
+  // domain_stats retention 프루너 시작 — 1시간마다 30일 이전 통계 삭제 (#338)
+  // optimization-events-pruner와 동일 패턴: 부팅 시 1회 + setInterval 주기 tick
+  startDomainStatsPruner({ repo: statsRepo, log: app.log });
   // DNS 메트릭 폴링 시작 — 1분마다 dns-service GetStats 호출, 델타 계산 후 DB에 저장
   startDnsMetricsCollector({
     getStats: () => dnsClient.getStats(),
