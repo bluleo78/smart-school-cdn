@@ -230,6 +230,28 @@ describe('프록시 라우트', () => {
     expect(mockAxiosGet).not.toHaveBeenCalled();
   });
 
+  it('domain 입력이 대문자/공백을 포함해도 정규화하여 등록된 도메인과 매칭한다 (#296)', async () => {
+    // DNS 호스트는 case-insensitive하고 사용자 입력에 공백이 섞일 수 있어
+    // trim + lowercase 정규화로 등록된 도메인 매칭이 이루어져야 한다.
+    mockAxiosGet.mockResolvedValueOnce({ status: 200, headers: {} });
+
+    const app = await createApp({ domainRepo: makeMockDomainRepo() });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/proxy/test',
+      headers: { 'content-type': 'application/json' },
+      payload: { domain: ' HTTPBIN.ORG ', path: '/get' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().success).toBe(true);
+    // axios 요청 Host 헤더도 정규화된 값으로 전달되어야 한다 (origin 매칭 일관성).
+    expect(mockAxiosGet).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ headers: { Host: 'httpbin.org' } }),
+    );
+  });
+
   it('path에 상대 경로(..) 또는 인코딩된 경로가 포함된 경우 400을 반환한다', async () => {
     const app = await createApp({ domainRepo: makeMockDomainRepo() });
     const res = await app.inject({

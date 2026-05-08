@@ -61,11 +61,16 @@ export async function proxyRoutes(app: FastifyInstance, opts: ProxyRouteOptions 
   app.post<{
     Body: { domain: string; path: string; protocol?: 'http' | 'https' };
   }>('/api/proxy/test', async (request, reply) => {
-    const { domain, path, protocol = 'http' } = request.body;
+    const { domain: rawDomain, path, protocol = 'http' } = request.body;
 
-    if (!domain || !path) {
+    if (!rawDomain || !path) {
       return reply.status(400).send({ error: 'domain과 path는 필수 항목입니다.' });
     }
+
+    // 도메인 입력 정규화 — DNS 호스트는 case-insensitive(RFC 1035 §2.3.3)이고
+    // 사용자 입력에 앞뒤 공백이 섞일 수 있어 도메인 등록/조회 라우트(#190·#201)와 동일하게
+    // `trim().toLowerCase()` 로 정규화한다. SSRF 검증·후속 Host 헤더 모두 정규화 값 사용.
+    const domain = typeof rawDomain === 'string' ? rawDomain.trim().toLowerCase() : rawDomain;
 
     // SSRF 방어 — 등록된 도메인만 허용
     if (domainRepo) {
