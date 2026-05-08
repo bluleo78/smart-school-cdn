@@ -200,7 +200,9 @@ export function UsersPage() {
             <TableRow>
               <TableHead className="whitespace-nowrap">이메일</TableHead>
               <TableHead className="whitespace-nowrap">생성일</TableHead>
-              <TableHead className="whitespace-nowrap">마지막 로그인</TableHead>
+              {/* 마지막 로그인 — iPad 세로(<lg, 1024px 미만) 에서는 숨겨 액션 컬럼 가시성 확보 (#279).
+               *  정보 우선순위: 액션(파괴적 버튼) > 마지막 로그인. lg 이상에서만 노출. */}
+              <TableHead className="whitespace-nowrap hidden lg:table-cell">마지막 로그인</TableHead>
               <TableHead className="whitespace-nowrap">상태</TableHead>
               <TableHead className="whitespace-nowrap">액션</TableHead>
             </TableRow>
@@ -241,7 +243,8 @@ export function UsersPage() {
                 {/* formatDate/formatDateTime — ko-KR 로케일 명시, 앱 전역 포맷 통일.
                  *  whitespace-nowrap — 좁은 뷰포트에서 timestamp가 글자 단위로 5줄 분할되는 현상 차단 (#177) */}
                 <TableCell className="text-muted-foreground whitespace-nowrap">{formatDate(u.created_at)}</TableCell>
-                <TableCell className="text-muted-foreground whitespace-nowrap">{u.last_login_at ? formatDateTime(u.last_login_at) : '—'}</TableCell>
+                {/* 마지막 로그인 — iPad 세로(<lg) 에서는 숨김 (#279). 헤더와 동일한 breakpoint */}
+                <TableCell className="text-muted-foreground whitespace-nowrap hidden lg:table-cell">{u.last_login_at ? formatDateTime(u.last_login_at) : '—'}</TableCell>
                 <TableCell className="whitespace-nowrap">{u.disabled_at ? <Badge variant="outline">비활성</Badge> : <Badge variant="success">활성</Badge>}</TableCell>
                 <TableCell className="space-x-2 whitespace-nowrap">
                   {/* 보존된 충돌 항목(#252)은 username이 sentinel로 변형되어 비밀번호 재설정/재활성화 의미가 없음 → disabled */}

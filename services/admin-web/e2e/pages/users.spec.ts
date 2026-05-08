@@ -1244,4 +1244,36 @@ test.describe('사용자 관리', () => {
     await expect(dupRow.getByRole('button', { name: '비밀번호 재설정' })).toBeDisabled();
     await expect(dupRow.getByRole('button', { name: '재활성화' })).toBeDisabled();
   });
+
+  /**
+   * 이슈 #279 회귀 방지 — iPad 세로(810×1080) viewport에서 사용자 테이블이 컨테이너를 넘지 않고
+   * 액션 컬럼의 비활성화/재활성화 버튼이 viewport 안에 보여야 한다.
+   * 수정: lg(1024px) 미만에서 "마지막 로그인" 컬럼을 숨겨 폭을 확보.
+   */
+  test('iPad 세로 — 액션 컬럼 비활성화 버튼 가시성 + 마지막 로그인 컬럼 숨김 (#279)', async ({ page }) => {
+    await page.setViewportSize({ width: 810, height: 1080 });
+    await mockApi(page, 'GET', '/users', usersWithDisabled);
+
+    await page.goto('/users');
+
+    // 마지막 로그인 헤더는 lg 미만에서 숨겨져야 함
+    await expect(page.getByRole('columnheader', { name: '마지막 로그인' })).toBeHidden();
+
+    // 비활성 사용자 행의 재활성화 버튼이 viewport 내에 위치해야 함 (가로 overflow 없이 노출)
+    const disabledRow = page.locator('[data-testid="user-row-2"]');
+    const enableBtn = disabledRow.getByRole('button', { name: '재활성화' });
+    await expect(enableBtn).toBeVisible();
+    const box = await enableBtn.boundingBox();
+    expect(box).not.toBeNull();
+    // 우측 가장자리가 viewport(810) 안에 들어와야 함
+    expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(810);
+
+    // 테이블 컨테이너가 가로 overflow를 일으키지 않아야 함
+    const overflow = await page.evaluate(() => {
+      const t = document.querySelector('table');
+      const p = t?.parentElement;
+      return { tableW: t?.clientWidth ?? 0, parentW: p?.clientWidth ?? 0, scrollW: p?.scrollWidth ?? 0 };
+    });
+    expect(overflow.scrollW).toBeLessThanOrEqual(overflow.parentW);
+  });
 });
