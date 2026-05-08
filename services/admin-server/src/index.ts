@@ -188,6 +188,23 @@ await app.register(rateLimit, { global: false });
 app.addHook('preHandler', requireInternalToken);
 app.addHook('preHandler', requireAuth);
 
+// 캐시 차단 훅 — `/api/*` 모든 응답에 Cache-Control: no-store 부착 (#316)
+// 이유: admin-server 응답은 인증 세션·도메인 목록·로그 등 민감 데이터를 포함한다.
+// 헤더가 비어 있으면 브라우저 bfcache·service worker·내부망 중간 프록시가
+// 캐시할 수 있어 로그아웃 후 뒤로가기 시 이전 화면 노출, 다른 사용자에게 응답 재사용
+// 같은 위험이 있다. Pragma: no-cache 는 HTTP/1.0 레거시 클라이언트 호환용.
+//
+// 주의: SSE 스트리밍 라우트(routes/logs.ts:148~)는 reply.raw.writeHead 로
+// 헤더를 직접 쓰기 때문에 Fastify onSend 를 우회한다 — 해당 라우트는 자체적으로
+// Cache-Control: no-cache 를 이미 설정하므로 영향 없음.
+app.addHook('onSend', async (req, reply, payload) => {
+  if (req.url.startsWith('/api/')) {
+    reply.header('Cache-Control', 'no-store, max-age=0');
+    reply.header('Pragma', 'no-cache');
+  }
+  return payload;
+});
+
 // CORS 설정 — admin-server는 내부 전용이므로 허용 origin을 명시적으로 제한한다.
 // 와일드카드(`*`) + credentials 조합은 브라우저가 거부하고, 외부 origin이 쿠키 세션을
 // 탈취할 수 있으므로 허용 origin을 허용 목록으로 제한한다.
