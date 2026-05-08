@@ -140,6 +140,17 @@ describe('OptimizationEventsRepository', () => {
       expect(repo.query({ limit: 5    })).toHaveLength(5);
       expect(repo.query({ limit: 0    })).toHaveLength(1);  // 0 → 1로 클램프
     });
+
+    // #293 회귀 — 비정수 limit이 SQL `LIMIT`에 그대로 들어가 SQLITE_MISMATCH 발생하던 케이스.
+    // clampInt가 floor + 클램프를 강제해 더 이상 throw 하지 않아야 한다.
+    it('비정수 limit(예: 1.7)이 들어와도 SQLITE_MISMATCH 없이 정상 응답한다 (#293)', () => {
+      for (let i = 0; i < 5; i++) repo.insert(sample({ url: `https://d.test/${i}` }));
+      // 1.7 → floor → 1
+      expect(() => repo.query({ limit: 1.7 as number })).not.toThrow();
+      expect(repo.query({ limit: 1.7 as number })).toHaveLength(1);
+      // 2.5 → floor → 2
+      expect(repo.query({ limit: 2.5 as number })).toHaveLength(2);
+    });
   });
 
   // ─── statsByDecision ────────────────────────────────────────────────────

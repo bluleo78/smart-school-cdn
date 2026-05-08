@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import { createHash } from 'node:crypto';
+import { clampInt, clampOffset } from './pagination.js';
 
 /**
  * optimization_events 테이블 스키마.
@@ -184,7 +185,9 @@ export class OptimizationEventsRepository {
     if (q.decision)   { where.push('decision = @decision');     params.decision   = q.decision; }
     if (q.since)      { where.push('ts >= @since');             params.since      = q.since; }
 
-    const limit = Math.min(Math.max(q.limit ?? 100, 1), 1000);
+    // limit는 1~1000 정수로 강제 — 비정수 입력(예: 1.7)이 SQL `LIMIT`에 그대로 주입되어
+    // SQLITE_MISMATCH로 500이 되는 회귀(#293)를 차단하기 위해 clampInt로 정수화한다.
+    const limit = clampInt(q.limit, { min: 1, max: 1000, fallback: 100 });
     const sql = `
       SELECT id, ts, event_type, host, url_hash, url, decision,
              orig_size, out_size, range_header, content_type, elapsed_ms
@@ -291,8 +294,9 @@ export class OptimizationEventsRepository {
     // LIKE 특수문자(%, _, \)를 이스케이프하여 리터럴 검색을 보장한다
     if (q.search)   { where.push(`url LIKE @q ESCAPE '\\'`); params.q = `%${escapeLike(q.search)}%`; }
 
-    const limit  = Math.min(Math.max(q.limit ?? 50, 1), 500);
-    const offset = Math.max(q.offset ?? 0, 0);
+    // limit/offset 정수화 — #293과 동일한 SQLITE_MISMATCH 방지 (#294 라우트도 이 경로 공유)
+    const limit  = clampInt(q.limit, { min: 1, max: 500, fallback: 50 });
+    const offset = clampOffset(q.offset);
 
     // skipped_*/bypass_* 이벤트는 out_size가 NULL — 실제로는 압축/변환을 안 한 것이므로
     // 원본 그대로 전달된 것으로 간주해 out_size를 orig_size로 대체한다.
