@@ -25,6 +25,18 @@ const PERIOD_TO_SEC: Record<string, number> = {
   '30d': 86400 * 30,
 };
 
+/**
+ * host 쿼리 파라미터 정규화.
+ * 도메인 테이블이 lowercase로 정규화 저장(#201)되므로 조회 시에도 동일 규칙 적용 — `HTTPBIN.ORG`/` httpbin.org `도
+ * `httpbin.org` 이벤트와 매칭되도록 한다. 다른 라우트(domains/tls/cache)의 normalizeHost와 동일 패턴(#296/#297).
+ * 빈 문자열은 undefined로 다뤄 필터를 비활성화한다.
+ */
+function normalizeHostQuery(input: string | undefined): string | undefined {
+  if (typeof input !== 'string') return undefined;
+  const v = input.trim().toLowerCase();
+  return v.length > 0 ? v : undefined;
+}
+
 export async function optimizationEventsRoutes(app: FastifyInstance) {
   const repo = new OptimizationEventsRepository(app.db);
 
@@ -57,7 +69,7 @@ export async function optimizationEventsRoutes(app: FastifyInstance) {
     const limitNum = req.query.limit !== undefined ? Number(req.query.limit) : undefined;
     const events = repo.query({
       event_type: req.query.type,
-      host:       req.query.host,
+      host:       normalizeHostQuery(req.query.host),
       decision:   req.query.decision,
       since:      req.query.since,
       limit:      Number.isFinite(limitNum) ? (limitNum as number) : undefined,
@@ -73,7 +85,7 @@ export async function optimizationEventsRoutes(app: FastifyInstance) {
     const period_sec = PERIOD_TO_SEC[period] ?? 86400;
     const by_decision = repo.statsByDecision({
       event_type: req.query.type,
-      host:       req.query.host,
+      host:       normalizeHostQuery(req.query.host),
       period_sec,
     });
     const total = by_decision.reduce((s, r) => s + r.count, 0);

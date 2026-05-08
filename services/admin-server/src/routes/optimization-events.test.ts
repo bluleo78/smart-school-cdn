@@ -126,6 +126,37 @@ describe('GET /api/optimization/events', () => {
     expect(body.events[0].decision).toBe('served_206');
   });
 
+  it('host 쿼리는 trim+lowercase 정규화 후 매칭 (#299)', async () => {
+    const { app } = mkApp();
+    await app.inject({
+      method: 'POST', url: '/internal/events/batch',
+      headers: { 'content-type': 'application/json' },
+      payload: { events: [
+        sampleEvent({ host: 'httpbin.org', url: 'https://httpbin.org/a' }),
+        sampleEvent({ host: 'other.test',  url: 'https://other.test/b' }),
+      ] },
+    });
+
+    // 대문자 입력 → 소문자 매칭
+    const upper = await app.inject({
+      method: 'GET', url: '/api/optimization/events?host=HTTPBIN.ORG',
+    });
+    expect(upper.json().events).toHaveLength(1);
+    expect(upper.json().events[0].host).toBe('httpbin.org');
+
+    // 공백 + 혼합 케이스 입력 → 정규화 매칭 (URL 인코딩된 공백)
+    const padded = await app.inject({
+      method: 'GET', url: '/api/optimization/events?host=%20HttpBin.Org%20',
+    });
+    expect(padded.json().events).toHaveLength(1);
+
+    // 빈 문자열 host는 필터 비활성화 (전체 반환)
+    const empty = await app.inject({
+      method: 'GET', url: '/api/optimization/events?host=',
+    });
+    expect(empty.json().events).toHaveLength(2);
+  });
+
   it('limit 파라미터 적용', async () => {
     const { app } = mkApp();
     await app.inject({
@@ -166,6 +197,30 @@ describe('GET /api/optimization/stats', () => {
     const res = await app.inject({ method: 'GET', url: '/api/optimization/stats?period=5y' });
     expect(res.statusCode).toBe(200);
     expect(res.json().period_sec).toBe(86400);
+  });
+
+  it('host 쿼리는 trim+lowercase 정규화 후 집계 (#299)', async () => {
+    const { app } = mkApp();
+    await app.inject({
+      method: 'POST', url: '/internal/events/batch',
+      headers: { 'content-type': 'application/json' },
+      payload: { events: [
+        sampleEvent({ host: 'httpbin.org', decision: 'served_206' }),
+        sampleEvent({ host: 'httpbin.org', decision: 'stored_new' }),
+        sampleEvent({ host: 'other.test',  decision: 'served_206' }),
+      ] },
+    });
+
+    const upper = await app.inject({
+      method: 'GET', url: '/api/optimization/stats?host=HTTPBIN.ORG',
+    });
+    expect(upper.statusCode).toBe(200);
+    expect(upper.json().total).toBe(2);
+
+    const padded = await app.inject({
+      method: 'GET', url: '/api/optimization/stats?host=%20httpbin.org%20',
+    });
+    expect(padded.json().total).toBe(2);
   });
 
   it('period=1h로 요청하면 period_sec=3600', async () => {
