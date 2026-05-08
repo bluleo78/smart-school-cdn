@@ -401,10 +401,99 @@ export class DomainStatsRepository {
     });
   }
 
-  /** 단일 호스트 요약 통계 반환 — /api/domains/:host/summary 라우트용.
-   *  getSummaryAll() 결과에서 해당 host만 필터링하여 반환한다. */
+  /**
+   * 단일 호스트 요약 통계 반환 — /api/domains/:host/summary 라우트용.
+   *
+   * getSummaryAll()이 모든 도메인을 GROUP BY host로 집계 후 단건만 골라내던 over-fetch를
+   * 제거하기 위해 host = ? 필터를 SQL에 직접 적용한다. PK가 (host, timestamp)이므로
+   * host 필터가 인덱스 prefix scan에 태워져 도메인 수에 비례하던 비용이 단일 호스트 비용으로 줄어든다.
+   *
+   * 반환 데이터/필드는 getSummaryAll()의 host 항목과 동일하다 (계약 보존).
+   */
   getSummaryForHost(host: string): DomainSummary | undefined {
-    return this.getSummaryAll().find((r) => r.host === host);
+    const now = Math.floor(Date.now() / 1000);
+    // 오늘 자정 / 24시간 전 / 어제 시작 — getSummaryAll과 동일한 기준점
+    const todayStart = now - (now % 86400);
+    const since24h = now - 86400;
+    const yesterdayStart = todayStart - 86400;
+
+    // 오늘 통계 — host 단건.
+    // getSummaryAll()이 todayRows(GROUP BY host)에 매칭된 host만 반환했고, 그 결과에서 find하던 것이므로
+    // "오늘 윈도우에 단 한 행도 없으면 undefined"라는 기존 의미를 유지한다.
+    type TodayRow = {
+      today_requests: number;
+      today_cache_hits: number;
+      today_bandwidth: number;
+      today_l1_hits: number;
+      today_l2_hits: number;
+      today_bypass_total: number;
+      row_count: number;
+    };
+    const todayRow = this.db
+      .prepare(
+        `SELECT
+           COALESCE(SUM(requests), 0)                                                    AS today_requests,
+           COALESCE(SUM(cache_hits), 0)                                                  AS today_cache_hits,
+           COALESCE(SUM(bandwidth), 0)                                                   AS today_bandwidth,
+           COALESCE(SUM(l1_hits), 0)                                                     AS today_l1_hits,
+           COALESCE(SUM(l2_hits), 0)                                                     AS today_l2_hits,
+           COALESCE(SUM(bypass_method + bypass_nocache + bypass_size + bypass_other), 0) AS today_bypass_total,
+           COUNT(*)                                                                      AS row_count
+         FROM domain_stats
+         WHERE host = ? AND timestamp >= ?`,
+      )
+      .get(host, todayStart) as TodayRow;
+
+    // 오늘 윈도우에 통계 행이 전혀 없으면 — 기존 getSummaryAll().find() === undefined 동작과 일치
+    if (todayRow.row_count === 0) return undefined;
+
+    // 어제 통계 — 전일 대비 변화율 계산용
+    type YesterdayRow = { today_requests: number; today_cache_hits: number };
+    const yesterdayRow = this.db
+      .prepare(
+        `SELECT
+           COALESCE(SUM(requests), 0)   AS today_requests,
+           COALESCE(SUM(cache_hits), 0) AS today_cache_hits
+         FROM domain_stats
+         WHERE host = ? AND timestamp >= ? AND timestamp < ?`,
+      )
+      .get(host, yesterdayStart, todayStart) as YesterdayRow;
+
+    // 최근 24시간 시간별 (1시간 버킷) — host 필터 적용
+    type HourlyRow = { bucket: number; requests: number };
+    const hourlyRows = this.db
+      .prepare(
+        `SELECT
+           (timestamp / 3600) * 3600 AS bucket,
+           SUM(requests)             AS requests
+         FROM domain_stats
+         WHERE host = ? AND timestamp >= ?
+         GROUP BY bucket
+         ORDER BY bucket ASC`,
+      )
+      .all(host, since24h) as HourlyRow[];
+
+    const todayReq = todayRow.today_requests;
+    const todayHits = todayRow.today_cache_hits;
+    const yesterdayReq = yesterdayRow?.today_requests ?? 0;
+    const yesterdayHits = yesterdayRow?.today_cache_hits ?? 0;
+    const todayHitRate = todayReq > 0 ? todayHits / todayReq : 0;
+    const yesterdayHitRate = yesterdayReq > 0 ? yesterdayHits / yesterdayReq : 0;
+
+    return {
+      host,
+      today_requests: todayReq,
+      today_cache_hits: todayHits,
+      today_bandwidth: todayRow.today_bandwidth,
+      hit_rate: todayHitRate,
+      hourly: hourlyRows.map((r) => r.requests),
+      today_requests_delta: this.getDelta(todayReq, yesterdayReq),
+      hit_rate_delta: this.getDelta(todayHitRate, yesterdayHitRate),
+      // Phase 12 신규 — divide-by-zero 가드
+      today_l1_hit_rate:   todayReq > 0 ? todayRow.today_l1_hits / todayReq : 0,
+      today_edge_hit_rate: todayReq > 0 ? (todayRow.today_l1_hits + todayRow.today_l2_hits) / todayReq : 0,
+      today_bypass_rate:   todayReq > 0 ? todayRow.today_bypass_total / todayReq : 0,
+    };
   }
 
   /**
