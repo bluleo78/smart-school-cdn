@@ -1130,6 +1130,80 @@ describe('DELETE /api/domains/:host', () => {
     expect(eventsRepo.query({ host: 'keep.test' })).toHaveLength(1);
   });
 
+  it('syncToProxy 실패 시 created_at 가 원본 값 그대로 보존된다 (#311)', async () => {
+    // 기존 구현은 delete → upsert 로 롤백해 created_at 가 INSERT DEFAULT(=현재 시각)로 재설정됐다.
+    // BEGIN IMMEDIATE 트랜잭션 + ROLLBACK 으로 변경하면 행 자체가 원형으로 복원되어 created_at 가 보존된다.
+    const axiosMod = await import('axios');
+    vi.mocked(axiosMod.default.post).mockRejectedValueOnce(new Error('Network error'));
+
+    const repo = makeRepo();
+    repo.upsert('httpbin.org', 'https://httpbin.org');
+    // 과거 시각으로 created_at/updated_at 강제 설정 (테스트 결정성 확보)
+    const ORIGINAL_CREATED_AT = 1000000000;
+    repo.database.prepare('UPDATE domains SET created_at = ?, updated_at = ? WHERE host = ?')
+      .run(ORIGINAL_CREATED_AT, ORIGINAL_CREATED_AT, 'httpbin.org');
+
+    const app = buildApp(repo);
+    const res = await app.inject({ method: 'DELETE', url: '/api/domains/httpbin.org' });
+    expect(res.statusCode).toBe(502);
+    const restored = repo.findByHost('httpbin.org');
+    expect(restored).toBeDefined();
+    // 핵심 회귀 가드: created_at 가 원본 값과 동일해야 한다 (DEFAULT 로 재설정되면 안 됨)
+    expect(restored?.created_at).toBe(ORIGINAL_CREATED_AT);
+  });
+
+  it('syncToProxy 실패 시 domain_stats CASCADE 행이 트랜잭션 ROLLBACK 으로 보존된다 (#311)', async () => {
+    // 기존 구현은 delete() 시 FK ON DELETE CASCADE 로 domain_stats 가 영구 삭제됐다.
+    // 트랜잭션 ROLLBACK 은 CASCADE 도 함께 되돌리므로 통계 데이터가 그대로 살아남아야 한다.
+    // 이 테스트는 makeRepo 의 기본 스키마(FK 미설정) 대신 실제 마이그레이션 스키마를 재현한다.
+    const axiosMod = await import('axios');
+    vi.mocked(axiosMod.default.post).mockRejectedValueOnce(new Error('Network error'));
+
+    // FK CASCADE 가 동작하도록 별도 DB 구성
+    const db = new Database(':memory:');
+    db.pragma('foreign_keys = ON');
+    db.exec(DOMAIN_SCHEMA);
+    db.exec(`
+      CREATE TABLE domain_stats (
+        host TEXT NOT NULL, timestamp INTEGER NOT NULL,
+        requests INTEGER NOT NULL DEFAULT 0,
+        cache_hits INTEGER NOT NULL DEFAULT 0,
+        cache_misses INTEGER NOT NULL DEFAULT 0,
+        bandwidth INTEGER NOT NULL DEFAULT 0,
+        avg_response_time INTEGER NOT NULL DEFAULT 0,
+        l1_hits INTEGER NOT NULL DEFAULT 0,
+        l2_hits INTEGER NOT NULL DEFAULT 0,
+        bypass_method INTEGER NOT NULL DEFAULT 0,
+        bypass_nocache INTEGER NOT NULL DEFAULT 0,
+        bypass_size INTEGER NOT NULL DEFAULT 0,
+        bypass_other INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (host, timestamp),
+        FOREIGN KEY (host) REFERENCES domains(host) ON DELETE CASCADE
+      );
+    `);
+    db.exec(OPTIMIZATION_EVENTS_SCHEMA);
+    const repo = new DomainRepository(db);
+    repo.upsert('httpbin.org', 'https://httpbin.org');
+    // 시계열 통계 3건 사전 적재
+    const insertStat = db.prepare(
+      `INSERT INTO domain_stats (host, timestamp, requests, cache_hits, cache_misses, bandwidth, avg_response_time)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    );
+    insertStat.run('httpbin.org', 1700000000, 100, 80, 20, 1024, 50);
+    insertStat.run('httpbin.org', 1700003600, 200, 150, 50, 2048, 60);
+    insertStat.run('httpbin.org', 1700007200, 300, 200, 100, 4096, 70);
+
+    const app = buildApp(repo);
+    const res = await app.inject({ method: 'DELETE', url: '/api/domains/httpbin.org' });
+    expect(res.statusCode).toBe(502);
+    expect(repo.findByHost('httpbin.org')).toBeDefined();
+    // 핵심 회귀 가드: domain_stats 3건 모두 보존되어야 한다 (CASCADE 로 사라지면 안 됨)
+    const remainingStats = db
+      .prepare('SELECT COUNT(*) as cnt FROM domain_stats WHERE host = ?')
+      .get('httpbin.org') as { cnt: number };
+    expect(remainingStats.cnt).toBe(3);
+  });
+
   it('syncToProxy 실패로 도메인이 복원되는 경우 optimization_events는 보존된다 (#185)', async () => {
     // proxy 동기화 실패 → 도메인 복원 경로에서는 events cleanup도 실행되지 않아야 한다.
     // 도메인이 살아있는 상태에서 events만 삭제되면 통계 손실이 발생하므로 보존이 정답.

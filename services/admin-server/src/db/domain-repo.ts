@@ -300,4 +300,42 @@ export class DomainRepository {
   delete(host: string): number {
     return this.db.prepare(`DELETE FROM domains WHERE host = ?`).run(host).changes;
   }
+
+  /**
+   * 비동기 작업이 포함된 흐름을 SQLite 트랜잭션으로 감싸는 헬퍼 (#311)
+   *
+   * 무엇을: BEGIN IMMEDIATE 로 트랜잭션을 시작하고, 콜백의 결과(`commit: true|false`)에 따라
+   *        COMMIT 또는 ROLLBACK 으로 종료한다. 콜백이 throw 하면 ROLLBACK 후 재throw.
+   *
+   * 왜: better-sqlite3 의 `db.transaction()` 래퍼는 동기 콜백만 지원하므로, Proxy gRPC/HTTP
+   *    호출처럼 `await` 가 필요한 흐름에서는 사용할 수 없다. 도메인 DELETE 롤백 경로에서
+   *    `delete()` → `await syncToProxy()` → 실패 시 복원 시퀀스가 트랜잭션 밖에서 실행되어
+   *    (a) `created_at` DEFAULT 재설정, (b) `domain_stats` FK CASCADE 영구 손실 문제가 발생했다.
+   *    `BEGIN IMMEDIATE` 로 즉시 RESERVED 락을 잡고, 실패 시 ROLLBACK 만 하면 CASCADE 도
+   *    같이 되돌아가 원본 행이 그대로 살아난다.
+   *
+   * 사용 시 주의:
+   *  - 콜백 안에서는 같은 `db` 커넥션으로만 쿼리해야 한다(다른 커넥션은 격리 수준 때문에 미커밋
+   *    상태를 보지 못한다). admin-server 는 단일 better-sqlite3 인스턴스를 공유하므로 OK.
+   *  - 호출자는 host 단위 락(`withHostLock`) 안에서 호출해 동일 host 의 다른 요청과 직렬화한다.
+   */
+  async runInTransactionAsync<T>(
+    fn: () => Promise<{ commit: boolean; value: T }>,
+  ): Promise<T> {
+    this.db.exec('BEGIN IMMEDIATE');
+    let result: { commit: boolean; value: T };
+    try {
+      result = await fn();
+    } catch (err) {
+      // 콜백 예외는 항상 ROLLBACK — 부분 변경이 남지 않도록 한다
+      try { this.db.exec('ROLLBACK'); } catch { /* 이미 종료된 트랜잭션은 무시 */ }
+      throw err;
+    }
+    if (result.commit) {
+      this.db.exec('COMMIT');
+    } else {
+      this.db.exec('ROLLBACK');
+    }
+    return result.value;
+  }
 }

@@ -986,21 +986,32 @@ export async function domainRoutes(
     const host = normalizeHost(decodeURIComponent(request.params.host));
     // (#192) host 단위 락으로 toggle/PUT과 직렬화 — 삭제 중 끼어든 토글이 사라진 도메인을 가리키는 race 방지
     return withHostLock(host, async () => {
-    // 롤백을 위해 삭제 전 원본 값을 먼저 저장한다
-    const original = domainRepo.findByHost(host);
-    if (!original) {
+    // (#311) 삭제 + Proxy 동기화 + 실패 시 복원을 단일 SQLite 트랜잭션으로 감싼다.
+    // 기존 구현은 `delete()` 후 `upsert()` 로 롤백을 시도했으나 두 가지 데이터 손실이 있었다:
+    //   (a) upsert 의 INSERT 분기가 `created_at` 를 명시 지정하지 않아 DEFAULT(현재 시각)로 재설정
+    //   (b) FK ON DELETE CASCADE 로 `domain_stats` 행이 영구 삭제되어 통계 차트가 초기화
+    // BEGIN IMMEDIATE → DELETE → await syncToProxy → 결과에 따라 COMMIT/ROLLBACK 으로 변경하면
+    // ROLLBACK 시 도메인 행은 created_at 포함 원형 그대로, domain_stats CASCADE 도 자동 복원된다.
+    // 빠른 404 경로 — 트랜잭션 진입 전에 존재 여부 확인 (없으면 BEGIN IMMEDIATE 비용 절약)
+    if (!domainRepo.findByHost(host)) {
       return reply.status(404).send({ error: '도메인을 찾을 수 없습니다.' });
     }
-    const deleted = domainRepo.delete(host);
-    if (deleted === 0) {
+    const txResult = await domainRepo.runInTransactionAsync<{ ok: boolean; existed: boolean }>(async () => {
+      const deleted = domainRepo.delete(host);
+      if (deleted === 0) {
+        // 락 획득 직전 다른 요청이 먼저 삭제했을 수 있다 — ROLLBACK 으로 빠져나간다
+        return { commit: false, value: { ok: false, existed: false } };
+      }
+      // syncToProxy 는 같은 better-sqlite3 커넥션으로 SELECT 하므로 트랜잭션 내부의 미커밋
+      // 상태(=해당 host 가 빠진 목록)를 그대로 읽어 Proxy 에 보낸다. 실패 시 ROLLBACK 으로
+      // 도메인 + domain_stats 가 트랜잭션 시작 직전 상태로 자동 복원된다.
+      const synced = await syncToProxy(domainRepo);
+      return { commit: synced, value: { ok: synced, existed: true } };
+    });
+    if (!txResult.existed) {
       return reply.status(404).send({ error: '도메인을 찾을 수 없습니다.' });
     }
-    const synced = await syncToProxy(domainRepo);
-    if (!synced) {
-      // Proxy 동기화 실패 시 DB에 도메인을 복원 — toggle·PUT과 동일한 일관성 보장 (#151)
-      // upsert로 host/origin/description 복원 후 enabled 상태도 원복한다
-      domainRepo.upsert(original.host, original.origin, original.description);
-      domainRepo.update(original.host, { enabled: original.enabled });
+    if (!txResult.ok) {
       return reply.status(502).send({ error: 'Proxy 동기화 실패' });
     }
     // gRPC fan-out: tls-service + dns-service 도메인 동기화
