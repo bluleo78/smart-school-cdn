@@ -4096,3 +4096,43 @@ test.describe('도메인 상세 — API 5xx/네트워크 실패 분리 처리 (#
     await expect(page.getByText('해당 도메인을 찾을 수 없습니다')).toBeVisible();
   });
 });
+
+// ─────────────────────────────────────────────
+// 잘못된 URL 파라미터 정리 (#321)
+// ─────────────────────────────────────────────
+
+test.describe('도메인 상세 — 잘못된 URL 파라미터 정리 (#321)', () => {
+  test('알려지지 않은 ?tab 값은 URL에서 제거되고 개요로 폴백한다', async ({ page }) => {
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com?tab=garbageinvalid');
+
+    // overview 탭이 활성화되어 있어야 한다
+    await expect(page.getByRole('tab', { name: '개요', selected: true })).toBeVisible();
+    // URL에서 잘못된 tab 키가 사라져야 한다 (replace 적용 — history 누적 없음)
+    await expect.poll(() => new URL(page.url()).searchParams.get('tab')).toBeNull();
+  });
+
+  test('잘못된 ?tfPeriod 값은 URL에서 제거된다', async ({ page }) => {
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com?tab=traffic&tfPeriod=garbage');
+
+    // traffic 탭은 그대로 유지
+    await expect(page.getByRole('tab', { name: '트래픽', selected: true })).toBeVisible();
+    // tfPeriod / tfFrom / tfTo 가 모두 정리되어야 한다
+    await expect.poll(() => new URL(page.url()).searchParams.get('tfPeriod')).toBeNull();
+    await expect.poll(() => new URL(page.url()).searchParams.get('tfFrom')).toBeNull();
+    await expect.poll(() => new URL(page.url()).searchParams.get('tfTo')).toBeNull();
+  });
+
+  test('custom period 인데 from/to 가 부적합하면 from/to 만 제거되고 custom 은 유지된다', async ({ page }) => {
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com?tab=traffic&tfPeriod=custom&tfFrom=999999999999&tfTo=1');
+
+    await expect(page.getByRole('tab', { name: '트래픽', selected: true })).toBeVisible();
+    // custom 키워드는 유지 (사용자가 누른 의도 보존)
+    await expect.poll(() => new URL(page.url()).searchParams.get('tfPeriod')).toBe('custom');
+    // from/to 는 사라져야 한다
+    await expect.poll(() => new URL(page.url()).searchParams.get('tfFrom')).toBeNull();
+    await expect.poll(() => new URL(page.url()).searchParams.get('tfTo')).toBeNull();
+  });
+});

@@ -1,6 +1,6 @@
 /// 도메인 상세 탭 — Overview / Optimizer / Traffic / Settings.
 /// URL searchParam(?tab=...)과 탭 상태를 동기화하여 뒤로가기/북마크/공유 링크가 올바른 탭을 유지한다.
-import { useCallback } from 'react';
+import { useCallback, useEffect } from 'react';
 import { useSearchParams } from 'react-router';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../ui/tabs';
 import type { Domain } from '../../../api/domain-types';
@@ -71,6 +71,58 @@ export function DomainDetailTabs({ domain }: Props) {
   }
   const trafficRefresh = readRefresh('tfRefresh');
   const optimizerRefresh = readRefresh('opRefresh');
+
+  /** URL 파라미터에 잘못된 값이 들어 있으면 화면 폴백과 URL을 일치시키도록 정정한다 (#321).
+   *  - 잘못된 ?tab 값은 키 자체를 제거 (overview는 키 없음을 기본 표현으로 유지)
+   *  - 잘못된 ?{op|tf}Period 값은 prefix 관련 키(Period/From/To) 모두 제거
+   *  - custom 인데 from/to 가 부적합(NaN/음수/역전)이면 from/to 만 제거하여 폴백 상태로 정렬
+   *  history 누적 방지를 위해 replace: true 사용. */
+  useEffect(() => {
+    const tabRaw = searchParams.get('tab');
+    const tabInvalid = tabRaw !== null && !isValidTab(tabRaw);
+
+    type Bad = 'period' | 'range' | null;
+    function diagnose(prefix: 'op' | 'tf'): Bad {
+      const period = searchParams.get(`${prefix}Period`);
+      if (period !== null && !isValidPeriod(period)) return 'period';
+      if (period === 'custom') {
+        const fromRaw = searchParams.get(`${prefix}From`);
+        const toRaw = searchParams.get(`${prefix}To`);
+        if (fromRaw === null && toRaw === null) return null;
+        if (fromRaw === null || toRaw === null) return 'range';
+        const from = Number(fromRaw);
+        const to = Number(toRaw);
+        if (!isFinite(from) || !isFinite(to) || from <= 0 || to <= from) return 'range';
+      }
+      return null;
+    }
+    const opBad = diagnose('op');
+    const tfBad = diagnose('tf');
+
+    if (!tabInvalid && opBad === null && tfBad === null) return;
+
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (tabInvalid) next.delete('tab');
+        for (const [prefix, bad] of [
+          ['op', opBad],
+          ['tf', tfBad],
+        ] as const) {
+          if (bad === 'period') {
+            next.delete(`${prefix}Period`);
+            next.delete(`${prefix}From`);
+            next.delete(`${prefix}To`);
+          } else if (bad === 'range') {
+            next.delete(`${prefix}From`);
+            next.delete(`${prefix}To`);
+          }
+        }
+        return next;
+      },
+      { replace: true },
+    );
+  }, [searchParams, setSearchParams]);
 
   /** 탭 전환 시 ?tab=<value> 를 URL에 반영한다.
    *  함수형 업데이트로 기존 period/refresh 파라미터를 보존한다. (#206) */
