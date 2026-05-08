@@ -16,6 +16,7 @@ import { Button } from '../components/ui/button';
 import { TlsStatusBadge } from '../components/TlsStatusBadge';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Skeleton } from '../components/ui/skeleton';
+import { Input } from '../components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { downloadCACert, downloadMobileConfig } from '../api/tls';
 import { useCertificates } from '../hooks/useTls';
@@ -35,8 +36,17 @@ const SERVICE_LABELS: Record<keyof SystemStatus, string> = {
 };
 
 
+/** 인증서 검색 input·max-height 컨테이너 노출 임계 (#284)
+ * 운영 환경에서 도메인이 늘어나면 인증서 행 수가 증가해 페이지가 무한히 길어지고
+ * 하단 '테마 설정' 같은 다른 섹션의 발견성이 떨어진다. 임계 초과 시 검색·스크롤
+ * 컨테이너로 페이지 높이를 일정하게 유지한다. 10건은 시드+소수 운영 도메인
+ * 환경에서 모두 노출 유지하면서, 누적·중복 인증서가 쌓이는 시점에 대비한 값. */
+const CERT_TABLE_PAGINATION_THRESHOLD = 10;
+
 export function SystemPage() {
   const [currentTheme, setCurrentTheme] = useState<Theme>(getTheme);
+  // 인증서 검색어 — 도메인 부분 일치(대소문자 무시). 임계 초과 시에만 input 노출.
+  const [certSearchQuery, setCertSearchQuery] = useState('');
 
   function handleThemeChange(theme: Theme) {
     setTheme(theme);
@@ -75,6 +85,18 @@ export function SystemPage() {
       return ax - bx;
     });
   }, [certificates]);
+  // 검색어로 필터링된 인증서 목록 — 도메인 substring 매칭(대소문자 무시).
+  // 검색어 공백 trim 후 빈 문자열이면 전체 노출. sortedCertificates 정렬 결과 위에 적용해
+  // 만료/임박 우선 노출 정책을 유지한다.
+  const filteredCertificates = useMemo(() => {
+    if (!sortedCertificates) return sortedCertificates;
+    const q = certSearchQuery.trim().toLowerCase();
+    if (!q) return sortedCertificates;
+    return sortedCertificates.filter((c) => c.domain.toLowerCase().includes(q));
+  }, [sortedCertificates, certSearchQuery]);
+  // 검색 input 노출 여부 — 임계(10건) 초과 시에만 노출해 적은 환경에서는 UI 단순 유지.
+  const showCertSearch =
+    !!sortedCertificates && sortedCertificates.length > CERT_TABLE_PAGINATION_THRESHOLD;
   // isLoading: 첫 요청이 완료되기 전 true — 로딩 중엔 Skeleton으로 대체해
   // systemStatus=undefined 시 ?? true fallback으로 오표시되는 버그(#139) 방지
   const { data: systemStatus, isLoading: systemStatusLoading } = useSystemStatus();
@@ -267,7 +289,11 @@ export function SystemPage() {
         </CardContent>
       </Card>
 
-      {/* 발급된 인증서 목록 */}
+      {/* 발급된 인증서 목록 (#284)
+       * 33+ 인증서가 한 번에 노출되어 페이지 하단(테마 설정 등) 발견성이 낮아지는 문제 해결:
+       * - 임계(10건) 초과 시: 도메인 검색 input 노출 + 테이블을 max-h 360px·overflow-y 컨테이너로 감싸 sticky 헤더 적용.
+       * - 임계 이하: 기존처럼 단순 테이블 노출(과한 chrome 제거).
+       * 정렬(만료/임박/일반) 정책은 그대로 유지하고, 그 위에 검색 필터를 얹는다. */}
       <Card data-testid="certificates-card">
         <CardHeader><CardTitle>발급된 인증서</CardTitle></CardHeader>
         <CardContent>
@@ -284,38 +310,84 @@ export function SystemPage() {
               아직 발급된 인증서가 없습니다. HTTPS 요청이 들어오면 자동으로 발급됩니다.
             </p>
           ) : (
-            <Table data-testid="certificates-table">
-              <TableHeader>
-                <TableRow>
-                  <TableHead>도메인</TableHead>
-                  <TableHead>발급일</TableHead>
-                  <TableHead>만료일</TableHead>
-                  <TableHead>상태</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {sortedCertificates.map((cert) => (
-                  <TableRow key={cert.domain}>
-                    {/* 도메인 셀: 클릭 시 도메인 상세 페이지로 이동 — Link 래핑 */}
-                    <TableCell className="font-mono">
-                      <Link
-                        to={`/domains/${encodeURIComponent(cert.domain)}`}
-                        className="hover:underline"
-                      >
-                        {cert.domain}
-                      </Link>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {new Date(cert.issued_at).toLocaleDateString('ko-KR')}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {new Date(cert.expires_at).toLocaleDateString('ko-KR')}
-                    </TableCell>
-                    <TableCell><TlsStatusBadge expiresAt={cert.expires_at} /></TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+            <div className="space-y-3">
+              {showCertSearch && (
+                <div className="flex items-center justify-between gap-3">
+                  <Input
+                    data-testid="certificates-search"
+                    type="search"
+                    placeholder="도메인 검색"
+                    aria-label="인증서 도메인 검색"
+                    value={certSearchQuery}
+                    onChange={(e) => setCertSearchQuery(e.target.value)}
+                    className="max-w-xs"
+                  />
+                  <p
+                    data-testid="certificates-count"
+                    className="shrink-0 text-xs text-muted-foreground tabular-nums"
+                  >
+                    {filteredCertificates?.length ?? 0} / {sortedCertificates.length}건
+                  </p>
+                </div>
+              )}
+              {/* 검색 결과가 0건인 경우 — 빈 안내(테이블 헤더만 외롭게 보이는 상태 방지) */}
+              {filteredCertificates && filteredCertificates.length === 0 ? (
+                <p
+                  data-testid="certificates-search-empty"
+                  className="rounded-md border border-dashed border-border/60 px-3 py-6 text-center text-sm text-muted-foreground"
+                >
+                  검색 결과가 없습니다.
+                </p>
+              ) : (
+                <div
+                  data-testid="certificates-table-scroll"
+                  className={
+                    // 임계 초과 시에만 max-height+overflow 적용해 페이지 높이 안정화.
+                    // sticky 헤더(thead)가 컨테이너 상단에 붙어 도메인 컬럼 식별성 유지.
+                    showCertSearch
+                      ? 'max-h-[360px] overflow-y-auto rounded-md border border-border/60'
+                      : ''
+                  }
+                >
+                  <Table data-testid="certificates-table">
+                    <TableHeader
+                      className={
+                        showCertSearch ? 'sticky top-0 z-10 bg-muted/95 backdrop-blur-sm' : ''
+                      }
+                    >
+                      <TableRow>
+                        <TableHead>도메인</TableHead>
+                        <TableHead>발급일</TableHead>
+                        <TableHead>만료일</TableHead>
+                        <TableHead>상태</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredCertificates!.map((cert) => (
+                        <TableRow key={cert.domain}>
+                          {/* 도메인 셀: 클릭 시 도메인 상세 페이지로 이동 — Link 래핑 */}
+                          <TableCell className="font-mono">
+                            <Link
+                              to={`/domains/${encodeURIComponent(cert.domain)}`}
+                              className="hover:underline"
+                            >
+                              {cert.domain}
+                            </Link>
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {new Date(cert.issued_at).toLocaleDateString('ko-KR')}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {new Date(cert.expires_at).toLocaleDateString('ko-KR')}
+                          </TableCell>
+                          <TableCell><TlsStatusBadge expiresAt={cert.expires_at} /></TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </div>
           )}
         </CardContent>
       </Card>

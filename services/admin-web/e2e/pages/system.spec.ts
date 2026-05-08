@@ -294,6 +294,71 @@ test.describe('발급된 인증서 목록', () => {
   // 30초마다 자동 갱신: useTls 훅의 refetchInterval: 30_000 옵션으로 구현됨.
   // E2E에서 타이머 기반 폴링을 직접 검증하는 것은 신뢰성이 낮으므로 생략한다.
 
+  /// 회귀 방지 #284: 인증서 행이 임계(10건) 이하일 때는 검색 input·max-height 컨테이너를
+  /// 노출하지 않는다 (적은 환경에서 과한 chrome 방지).
+  test('인증서 10건 이하에서는 검색 input과 max-height 컨테이너가 없다 — 회귀 방지 #284', async ({ page }) => {
+    const now = Date.now();
+    const issued = new Date(now - 86_400_000).toISOString();
+    // 5건 — 임계 이하
+    await mockApi(page, 'GET', '/tls/certificates', Array.from({ length: 5 }, (_, i) => ({
+      domain: `domain-${i}.test`,
+      issued_at: issued,
+      expires_at: new Date(now + (i + 1) * 86_400_000).toISOString(),
+    })));
+    await page.goto('/system');
+
+    await expect(page.getByTestId('certificates-table')).toBeVisible({ timeout: 10000 });
+    // 검색 input·count·스크롤 컨테이너가 노출되지 않아야 한다
+    await expect(page.getByTestId('certificates-search')).toHaveCount(0);
+    await expect(page.getByTestId('certificates-count')).toHaveCount(0);
+    // 스크롤 컨테이너 div도 없거나 max-h 클래스가 적용되지 않은 빈 wrapper여야 한다
+    const wrapper = page.getByTestId('certificates-table-scroll');
+    await expect(wrapper).not.toHaveClass(/max-h-/);
+  });
+
+  /// 회귀 방지 #284: 인증서 행이 임계(10건) 초과 시 검색 input·max-height 컨테이너가 노출되어
+  /// 페이지 높이가 제한된다. 검색어로 도메인을 substring 필터링한다.
+  test('인증서 10건 초과 시 검색 input·max-height 컨테이너가 노출되고 검색이 동작한다 — 회귀 방지 #284', async ({ page }) => {
+    const now = Date.now();
+    const issued = new Date(now - 86_400_000).toISOString();
+    // 15건 — 임계 초과 (다양한 prefix로 검색 매칭 검증)
+    const certs = [
+      ...Array.from({ length: 8 }, (_, i) => ({
+        domain: `textbook-${i}.example.com`,
+        issued_at: issued,
+        expires_at: new Date(now + (i + 30) * 86_400_000).toISOString(),
+      })),
+      ...Array.from({ length: 7 }, (_, i) => ({
+        domain: `cdn-${i}.edunet.net`,
+        issued_at: issued,
+        expires_at: new Date(now + (i + 30) * 86_400_000).toISOString(),
+      })),
+    ];
+    await mockApi(page, 'GET', '/tls/certificates', certs);
+    await page.goto('/system');
+
+    await expect(page.getByTestId('certificates-table')).toBeVisible({ timeout: 10000 });
+    // 검색 input·카운트·max-h 컨테이너가 모두 노출되어야 한다
+    await expect(page.getByTestId('certificates-search')).toBeVisible();
+    await expect(page.getByTestId('certificates-count')).toHaveText('15 / 15건');
+    await expect(page.getByTestId('certificates-table-scroll')).toHaveClass(/max-h-\[360px\]/);
+
+    // 검색 — substring 매칭(대소문자 무시)
+    await page.getByTestId('certificates-search').fill('edunet');
+    await expect(page.getByTestId('certificates-count')).toHaveText('7 / 15건');
+    const rows = page.getByTestId('certificates-table').locator('tbody tr');
+    await expect(rows).toHaveCount(7);
+
+    // 매칭 0건 — 빈 안내가 표시되어야 한다 (테이블 헤더만 외롭게 보이는 상태 방지)
+    await page.getByTestId('certificates-search').fill('zzz-not-exist');
+    await expect(page.getByTestId('certificates-search-empty')).toBeVisible();
+    await expect(page.getByTestId('certificates-search-empty')).toHaveText('검색 결과가 없습니다.');
+
+    // 검색어 초기화 — 전체 다시 노출
+    await page.getByTestId('certificates-search').fill('');
+    await expect(page.getByTestId('certificates-count')).toHaveText('15 / 15건');
+  });
+
   /// 회귀 방지 #210: 인증서 카드가 서버 응답 순서를 그대로 렌더해 만료/임박 인증서가
   /// 정상 인증서 사이에 섞이는 버그. 클라이언트에서 expires_at 오름차순 정렬해야 한다.
   /// — 만료(과거) → 임박(가까운 만료) → 일반 순으로 행이 배치되어야 한다
