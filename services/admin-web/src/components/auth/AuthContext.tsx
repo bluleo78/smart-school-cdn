@@ -52,11 +52,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     await apiLogout();
+    // 같은 탭의 react-query 캐시 정리 — 같은 탭에서 곧바로 다른 사용자로 로그인할 때
+    // 직전 사용자의 stale 캐시가 새 사용자 화면에 잠시 노출되는 문제를 차단한다 (#341).
+    // BroadcastChannel/storage 는 자기 자신을 수신 대상에서 제외하므로,
+    // 다른 탭 핸들러(아래 subscribeAuthEvents)와 동일 정책을 자기 탭에도 명시 적용.
+    queryClient.clear();
     setState({ status: 'needs_login' });
     // 다른 탭에 로그아웃 신호 브로드캐스트 — 같은 origin/같은 사용자 컨텍스트의
     // 다른 탭도 즉시 needs_login 상태로 전환되도록 한다 (#332).
     broadcastAuthEvent({ type: 'logout' });
-  }, []);
+  }, [queryClient]);
 
   // 다중 탭 동기화 구독 (#332)
   // - logout: 무조건 자기 자신도 로그아웃 (서버 세션이 이미 무효화되었으므로 유지 의미 없음)
