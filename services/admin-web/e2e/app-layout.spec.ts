@@ -116,6 +116,53 @@ test.describe('AppLayout', () => {
     await expect(page.getByRole('link', { name: '대시보드로 돌아가기' })).toBeVisible();
   });
 
+  test.describe('NotFoundPage prefix 매칭 회귀 (#323)', () => {
+    // 등록된 nav path의 prefix는 일치하지만 세그먼트 경계가 다른 경로
+    // (예: /system-extra, /usersxxx, /dnsfoo)에서도 NotFoundPage가 렌더링되어야 하고,
+    // 헤더 라벨/document.title은 부모 메뉴 라벨이 아니라 "페이지를 찾을 수 없음"이어야 한다.
+    // 회귀 방지: startsWith 단순 매칭으로 인한 false-positive 재발 차단.
+    const cases: { path: string; wrongLabel: string }[] = [
+      { path: '/system-extra', wrongLabel: '시스템' },
+      { path: '/usersxxx', wrongLabel: '사용자 관리' },
+      { path: '/dnsfoo', wrongLabel: 'DNS' },
+    ];
+
+    for (const { path, wrongLabel } of cases) {
+      test(`${path} — 부모 메뉴 라벨(${wrongLabel}) 대신 404 라벨이 노출된다`, async ({
+        page,
+      }) => {
+        await page.goto(path);
+
+        // 본문은 404
+        await expect(
+          page.getByRole('heading', { name: '페이지를 찾을 수 없습니다.' }),
+        ).toBeVisible();
+
+        // document.title — 부모 메뉴가 아닌 "페이지를 찾을 수 없음"
+        await expect(page).toHaveTitle('페이지를 찾을 수 없음 | Smart School CDN');
+
+        // 헤더 라벨 — 부모 메뉴 라벨이 보이면 안 됨
+        await expect(
+          page.getByRole('banner').getByText('페이지를 찾을 수 없음'),
+        ).toBeVisible();
+        await expect(
+          page.getByRole('banner').getByText(wrongLabel, { exact: true }),
+        ).toHaveCount(0);
+      });
+    }
+
+    test('/dns/random-subpath — 등록된 prefix + 추가 세그먼트는 부모 라벨을 유지한다', async ({
+      page,
+    }) => {
+      // 정상 매칭 케이스(`/dns/...`)는 그대로 부모 라벨을 유지해야 한다.
+      // 단, 라우터 트리에 매칭되는 자식 라우트가 없으면 NotFoundPage가 렌더링될 수 있는데
+      // 이 경우 헤더는 'DNS'이고 본문이 404가 된다. 본문 라벨/타이틀은 단순 케이스만 검증.
+      await page.goto('/dns/random-subpath');
+      // 헤더 라벨은 'DNS' — segment 경계 매칭 통과
+      await expect(page.getByRole('banner').getByText('DNS')).toBeVisible();
+    });
+  });
+
   test.describe('모바일 사이드바 닫기 (#320)', () => {
     // 모바일 viewport(iPad portrait)에서 사이드바를 연 뒤
     // ESC 키와 X(닫기) 버튼이 모두 동작하는지 회귀 방지.

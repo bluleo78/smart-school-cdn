@@ -60,10 +60,14 @@ export function AppLayout() {
   }, [location.pathname]);
 
   // 페이지 이동 시 document.title 업데이트 — WCAG 2.4.2 Page Titled 준수
-  // navItems에서 현재 pathname에 매핑되는 레이블을 찾아 "레이블 | Smart School CDN" 형태로 설정
-  const matchedNavLabel = navItems.find(({ to }) =>
-    to === '/' ? location.pathname === '/' : location.pathname.startsWith(to),
-  )?.label;
+  // navItems에서 현재 pathname에 매핑되는 레이블을 찾아 "레이블 | Smart School CDN" 형태로 설정.
+  // prefix 매칭 시 반드시 세그먼트 경계('/' 직후)까지 일치해야 한다.
+  // 단순 startsWith를 쓰면 `/system-extra` 같이 등록되지 않은 경로가 `/system`에 false-positive로
+  // 매칭되어 404 페이지인데도 부모 메뉴 라벨이 노출되는 버그가 발생한다 (#323).
+  const matchedNavLabel = navItems.find(({ to }) => {
+    if (to === '/') return location.pathname === '/';
+    return location.pathname === to || location.pathname.startsWith(`${to}/`);
+  })?.label;
 
   // /domains/:host 같은 서브 라우트는 자식 컴포넌트(DomainDetailPageInner)가
   // 호스트명을 포함한 title을 직접 설정하므로 AppLayout은 덮어쓰지 않는다.
