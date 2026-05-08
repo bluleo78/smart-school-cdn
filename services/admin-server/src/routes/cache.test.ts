@@ -262,6 +262,68 @@ describe('GET /api/cache/popular', () => {
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual([]);
   });
+
+  // limit 입력 검증 (#326) — 음수/비숫자/과대값/소수가 silent로 gRPC 백엔드에 흘러들어가
+  // 빈 배열 폴백·과대 응답을 만들던 회귀를 차단한다.
+  describe('limit 입력 검증 (#326)', () => {
+    function makeAppWithMock() {
+      const mock = makeStorageMock(async () => ({ used_bytes: 0, total_bytes: 0 }));
+      mock.popular.mockResolvedValue({ entries: [] });
+      return { app: mkApp({ storage: mock }).app, mock };
+    }
+
+    it('limit이 음수면 400 invalid_input', async () => {
+      const { app, mock } = makeAppWithMock();
+      const res = await app.inject({ method: 'GET', url: '/api/cache/popular?limit=-5' });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe('invalid_input');
+      expect(mock.popular).not.toHaveBeenCalled();
+    });
+
+    it('limit이 비숫자(abc)면 400 invalid_input', async () => {
+      const { app, mock } = makeAppWithMock();
+      const res = await app.inject({ method: 'GET', url: '/api/cache/popular?limit=abc' });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe('invalid_input');
+      expect(mock.popular).not.toHaveBeenCalled();
+    });
+
+    it('limit이 상한(100) 초과면 400 invalid_input', async () => {
+      const { app, mock } = makeAppWithMock();
+      const res = await app.inject({ method: 'GET', url: '/api/cache/popular?limit=99999999' });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe('invalid_input');
+      expect(mock.popular).not.toHaveBeenCalled();
+    });
+
+    it('limit이 0이면 400 invalid_input', async () => {
+      const { app, mock } = makeAppWithMock();
+      const res = await app.inject({ method: 'GET', url: '/api/cache/popular?limit=0' });
+      expect(res.statusCode).toBe(400);
+      expect(mock.popular).not.toHaveBeenCalled();
+    });
+
+    it('limit이 소수(1.7)면 400 invalid_input', async () => {
+      const { app, mock } = makeAppWithMock();
+      const res = await app.inject({ method: 'GET', url: '/api/cache/popular?limit=1.7' });
+      expect(res.statusCode).toBe(400);
+      expect(mock.popular).not.toHaveBeenCalled();
+    });
+
+    it('limit이 정상 범위(1~100)면 200 + 정수화된 값으로 storage 호출', async () => {
+      const { app, mock } = makeAppWithMock();
+      const res = await app.inject({ method: 'GET', url: '/api/cache/popular?limit=50' });
+      expect(res.statusCode).toBe(200);
+      expect(mock.popular).toHaveBeenCalledWith(50);
+    });
+
+    it('limit 미지정 시 기본값 20으로 호출한다', async () => {
+      const { app, mock } = makeAppWithMock();
+      const res = await app.inject({ method: 'GET', url: '/api/cache/popular' });
+      expect(res.statusCode).toBe(200);
+      expect(mock.popular).toHaveBeenCalledWith(20);
+    });
+  });
 });
 
 // ─── DELETE /api/cache/purge ──────────────────────────────────────────────────

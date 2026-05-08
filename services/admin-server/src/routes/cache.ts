@@ -156,11 +156,23 @@ export async function cacheRoutes(app: FastifyInstance) {
     };
   });
 
-  /** 인기 콘텐츠 목록 — hit_count 내림차순 상위 20개, domain 쿼리로 특정 도메인만 필터링 가능 */
-  app.get<{ Querystring: { limit?: string; domain?: string } }>('/api/cache/popular', async (request) => {
+  /** 인기 콘텐츠 목록 — hit_count 내림차순 상위 N개, domain 쿼리로 특정 도메인만 필터링 가능 */
+  // limit 검증: 음수/비숫자/과대값을 silent 폴백시키지 않고 400으로 거부한다 (#326).
+  // 같은 파일 /api/cache/series(range) · /api/dns/queries(limit) 처럼 입력 화이트리스트로
+  // gRPC 백엔드에 부정 값을 흘리지 않는다. zod coerce로 "20" 같은 querystring을 정수화하고
+  // [1,100] 범위 밖이면 invalid_input 400.
+  const popularQuerySchema = z.object({
+    limit:  z.coerce.number().int().min(1).max(100).default(20),
+    domain: z.string().min(1).optional(),
+  });
+
+  app.get<{ Querystring: { limit?: string; domain?: string } }>('/api/cache/popular', async (request, reply) => {
+    const parsed = popularQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      return reply.status(400).send({ error: 'invalid_input', issues: parsed.error.issues });
+    }
+    const { limit, domain } = parsed.data;
     try {
-      const limit = Number(request.query.limit ?? 20);
-      const { domain } = request.query;
       const res = await app.storageClient.popular(limit);
       const entries = res.entries ?? [];
       if (domain) {
