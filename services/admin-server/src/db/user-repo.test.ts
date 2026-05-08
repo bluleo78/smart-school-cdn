@@ -100,12 +100,43 @@ describe('UserRepository', () => {
     expect(after.updated_at).toBe(after.last_login_at);
   });
 
-  it('list 는 password_hash 를 포함하되 순서는 id 오름차순', () => {
+  it('list 기본 정렬은 created_at DESC — 최신 등록 사용자가 첫 번째 (#344)', async () => {
+    // 도메인(#199)·이벤트와 일관된 정렬 정책. 같은 ms 시점에 만들어진 row 가 있어도
+    // 보조 정렬 키(id ASC)로 안정 정렬 — 명시적 시간 차이를 두어 검증 견고화.
+    repo.create('first@b.c', 'h');
+    await new Promise((r) => setTimeout(r, 5));
+    repo.create('second@b.c', 'h');
+    await new Promise((r) => setTimeout(r, 5));
+    repo.create('third@b.c', 'h');
+    const all = repo.list();
+    expect(all.map(u => u.username)).toEqual(['third@b.c', 'second@b.c', 'first@b.c']);
+  });
+
+  it('list — sort=id&order=asc 명시 시 id 오름차순으로 우선 적용 (#344)', () => {
     repo.create('c@b.c', 'h');
     repo.create('a@b.c', 'h');
     repo.create('b@b.c', 'h');
-    const all = repo.list();
+    const all = repo.list({ sort: 'id', order: 'asc' });
     expect(all.map(u => u.username)).toEqual(['c@b.c', 'a@b.c', 'b@b.c']);
+  });
+
+  it('list — sort=username&order=asc 알파벳 정렬 (#344)', () => {
+    repo.create('c@b.c', 'h');
+    repo.create('a@b.c', 'h');
+    repo.create('b@b.c', 'h');
+    const all = repo.list({ sort: 'username', order: 'asc' });
+    expect(all.map(u => u.username)).toEqual(['a@b.c', 'b@b.c', 'c@b.c']);
+  });
+
+  it('list — 화이트리스트 외 sort 값은 기본값(created_at)으로 fallback (#344)', async () => {
+    // SQL injection 방어 다중 레이어 — repo 단에서도 화이트리스트 미통과 시 안전 fallback.
+    // sort 만 잘못된 값이고 order 는 명시 안 함 → sort=created_at, order=DESC(기본).
+    repo.create('first@b.c', 'h');
+    await new Promise((r) => setTimeout(r, 5));
+    repo.create('second@b.c', 'h');
+    const all = repo.list({ sort: '; DROP TABLE users; --' });
+    // 기본값(created_at DESC)로 fallback. second 가 더 최근이므로 첫 번째.
+    expect(all[0].username).toBe('second@b.c');
   });
 
   it('findById 가 일치하는 row 반환', () => {

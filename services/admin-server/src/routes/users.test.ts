@@ -42,6 +42,51 @@ describe('usersRoutes', () => {
     expect('password_hash' in users[0]).toBe(false);
   });
 
+  it('GET /api/users — 기본 정렬은 created_at DESC, 최신 사용자가 첫 번째 (#344)', async () => {
+    // 신규 사용자가 등록되면 새 row 의 created_at 이 admin 의 created_at 보다 늦어진다.
+    // 도메인·이벤트와 동일하게 최신 우선 정책을 따라 신규 사용자가 첫 번째에 노출되어야 한다.
+    await new Promise((r) => setTimeout(r, 5));
+    ctx.userRepo.create('latest@school.local', 'hash');
+    const r = await ctx.app.inject({ method: 'GET', url: '/api/users', cookies: ctx.cookies });
+    expect(r.statusCode).toBe(200);
+    const users = r.json();
+    expect(users[0].username).toBe('latest@school.local');
+  });
+
+  it('GET /api/users?sort=id&order=asc — 명시적 정렬이 기본값보다 우선 (#344)', async () => {
+    await new Promise((r) => setTimeout(r, 5));
+    ctx.userRepo.create('latest@school.local', 'hash');
+    const r = await ctx.app.inject({
+      method: 'GET',
+      url: '/api/users?sort=id&order=asc',
+      cookies: ctx.cookies,
+    });
+    expect(r.statusCode).toBe(200);
+    const users = r.json();
+    // id ASC 는 admin(id=1)이 첫 번째
+    expect(users[0].username).toBe('admin@school.local');
+  });
+
+  it('GET /api/users?sort=invalid — 화이트리스트 외 값은 400 (#344)', async () => {
+    const r = await ctx.app.inject({
+      method: 'GET',
+      url: '/api/users?sort=DROP_TABLE',
+      cookies: ctx.cookies,
+    });
+    expect(r.statusCode).toBe(400);
+    expect(r.json().error).toBe('invalid_input');
+  });
+
+  it('GET /api/users?order=sideways — 잘못된 order 값은 400 (#344)', async () => {
+    const r = await ctx.app.inject({
+      method: 'GET',
+      url: '/api/users?order=sideways',
+      cookies: ctx.cookies,
+    });
+    expect(r.statusCode).toBe(400);
+    expect(r.json().error).toBe('invalid_input');
+  });
+
   it('POST /api/users — 정상 생성', async () => {
     const r = await ctx.app.inject({
       method: 'POST', url: '/api/users',

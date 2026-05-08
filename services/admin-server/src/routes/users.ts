@@ -71,11 +71,32 @@ function publicUser(u: {
  * - PUT    /api/users/:id/enable    — 비활성 사용자 재활성화
  * - DELETE /api/users/:id           — 비활성(soft delete), 자기 자신은 거부
  */
+// GET /api/users 정렬 화이트리스트 — repo USER_SORT_WHITELIST 와 일치 유지 (#344).
+// 도메인 라우트(#295) 와 동일하게 라우트 레이어에서도 strict 검증하여 다중 방어.
+const SORT_ALLOWED  = new Set(['id', 'username', 'created_at', 'updated_at', 'last_login_at']);
+const ORDER_ALLOWED = new Set(['asc', 'desc']);
+
 export const usersRoutes: FastifyPluginAsync<{ userRepo: UserRepository }> = async (app, opts) => {
   const { userRepo } = opts;
 
-  app.get('/api/users', async () => {
-    return userRepo.list().map(publicUser);
+  // GET /api/users — 기본 정렬은 created_at DESC (도메인·이벤트와 일관, #344).
+  // 명시적 sort/order 쿼리가 있으면 화이트리스트 검증 후 그것을 우선 사용.
+  app.get<{ Querystring: { sort?: string; order?: string } }>('/api/users', async (req, reply) => {
+    const { sort, order } = req.query;
+    if (sort !== undefined && !SORT_ALLOWED.has(sort)) {
+      // 표준 envelope (#329) — 도메인 라우트와 동일한 메시지 패턴
+      return reply.code(400).send({
+        error: 'invalid_input',
+        message: `sort는 id|username|created_at|updated_at|last_login_at 중 하나여야 합니다 (받은 값: "${sort}").`,
+      });
+    }
+    if (order !== undefined && !ORDER_ALLOWED.has(order.toLowerCase())) {
+      return reply.code(400).send({
+        error: 'invalid_input',
+        message: `order는 asc|desc 중 하나여야 합니다 (받은 값: "${order}").`,
+      });
+    }
+    return userRepo.list({ sort, order }).map(publicUser);
   });
 
   app.post('/api/users', async (req, reply) => {

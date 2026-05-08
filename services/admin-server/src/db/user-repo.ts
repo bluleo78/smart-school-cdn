@@ -28,6 +28,21 @@ export interface UserRow {
   last_login_at: string | null;
 }
 
+/** list() 정렬 옵션 — 라우트에서 화이트리스트 검증 후 전달 (#344) */
+export interface UserListOptions {
+  /** 정렬 컬럼 (기본 created_at) */
+  sort?: string;
+  /** 정렬 방향 — 'asc' | 'desc' (기본 desc) */
+  order?: string;
+}
+
+/**
+ * sort 화이트리스트 — SQL injection 방지를 위해 식별자를 직접 string interpolation
+ * 하기 전 반드시 검증한다. 도메인 라우트(#295)와 동일 패턴.
+ */
+const USER_SORT_WHITELIST = new Set(['id', 'username', 'created_at', 'updated_at', 'last_login_at']);
+const USER_ORDER_WHITELIST = new Set(['asc', 'desc']);
+
 /**
  * 사용자 계정 저장소 — argon2id 해시는 password_hash 컬럼에 전체 encoded string 으로 보관.
  * username 은 email 형식으로 사용하지만 컬럼명은 username 을 유지.
@@ -55,8 +70,27 @@ export class UserRepository {
     return (this.db.prepare('SELECT * FROM users WHERE username = ?').get(username) as UserRow | undefined) ?? null;
   }
 
-  list(): UserRow[] {
-    return this.db.prepare('SELECT * FROM users ORDER BY id ASC').all() as UserRow[];
+  /**
+   * 사용자 목록 조회 — 정렬은 도메인(#199)·이벤트와 일관된 정책으로 통일한다 (#344).
+   * 기본 정렬: created_at DESC (최신 등록 사용자가 첫 페이지 상단에 노출되도록).
+   * sort/order 옵션이 명시되면 화이트리스트 검증 후 그것을 우선 적용.
+   * last_login_at 으로 정렬할 때 NULL 은 ASC 에서는 위, DESC 에서는 아래에 위치 —
+   * 비로그인 사용자가 "최근 로그인 순" 상단에 떠서 의미를 해치는 것을 방지하기 위해
+   * NULLS LAST(DESC) / NULLS FIRST(ASC) 처럼 DESC 시 NULL 을 뒤로 보낸다.
+   * 동순위 안정성 보장을 위해 보조 정렬 키로 id ASC 를 항상 추가한다.
+   */
+  list(options?: UserListOptions): UserRow[] {
+    const sortCol = options?.sort && USER_SORT_WHITELIST.has(options.sort) ? options.sort : 'created_at';
+    const sortDir = options?.order && USER_ORDER_WHITELIST.has(options.order.toLowerCase())
+      ? options.order.toUpperCase()
+      : 'DESC';
+    // last_login_at 은 NULL 가능 컬럼이므로 DESC 정렬 시 NULL 을 마지막으로 밀어내
+    // "최근 로그인 순" 상단에 미로그인 사용자가 끼는 부자연스러움을 방지.
+    const nullsClause = sortCol === 'last_login_at'
+      ? (sortDir === 'DESC' ? `${sortCol} IS NULL, ` : '')
+      : '';
+    const orderBy = `ORDER BY ${nullsClause}${sortCol} ${sortDir}, id ASC`;
+    return this.db.prepare(`SELECT * FROM users ${orderBy}`).all() as UserRow[];
   }
 
   updatePassword(id: number, passwordHash: string): void {
