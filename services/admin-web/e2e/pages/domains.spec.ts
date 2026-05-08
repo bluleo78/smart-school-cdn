@@ -1412,6 +1412,53 @@ test.describe('도메인 관리 — 검색 입력 trim 정규화 (#243)', () => 
  * toggleMutation 또는 purgeMutation이 isPending 상태일 때,
  * 토글/퍼지 버튼이 disabled 처리되어 중복 클릭이 불가능해야 한다.
  */
+/**
+ * 이슈 #322 회귀 방지 — DomainToolbar 검색 input ESC 키로 비우기
+ * 키보드 사용자가 검색 결과 필터링 후 표준 단축키(ESC)로 즉시 전체 보기로 복귀할 수 있어야 한다.
+ * X 버튼 클릭과 동일하게 입력값과 URL `?q=`가 모두 비워져야 한다.
+ */
+test.describe('도메인 관리 — 검색 input ESC 키 클리어 (#322)', () => {
+  test('검색어 입력 후 ESC 키 누르면 입력값과 URL ?q= 가 모두 비워진다', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+    await mockApi(page, 'GET', '/domains?q=httpbin', createDomains());
+
+    await page.goto('/domains');
+    await expect(page.getByTestId('domains-table')).toBeVisible();
+
+    // 검색어 입력 (debounce 300ms 대기 후 URL ?q= 반영 확인)
+    const search = page.getByTestId('domain-search');
+    await search.fill('httpbin');
+    await page.waitForTimeout(400);
+    expect(page.url()).toContain('q=httpbin');
+
+    // 입력 필드에 포커스가 있는 상태에서 ESC — debounce 대기 없이 즉시 비워짐
+    await search.focus();
+    await search.press('Escape');
+
+    await expect(search).toHaveValue('');
+    expect(page.url()).not.toContain('q=');
+    // 비워졌으므로 X 버튼도 사라져야 한다
+    await expect(page.getByTestId('domain-search-clear')).toHaveCount(0);
+  });
+
+  test('빈 입력에서 ESC 누르면 다른 동작(예: 모달 닫기)을 가로채지 않는다', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+
+    await page.goto('/domains');
+    await expect(page.getByTestId('domains-table')).toBeVisible();
+
+    const search = page.getByTestId('domain-search');
+    await search.focus();
+    // 빈 입력 상태에서 ESC — 아무 일도 발생하지 않아야 한다 (preventDefault 미발동)
+    await search.press('Escape');
+
+    await expect(search).toHaveValue('');
+    expect(page.url()).not.toContain('q=');
+  });
+});
+
 test.describe('도메인 관리 — 토글/퍼지 중복 클릭 방지 (#70)', () => {
   test('토글 API 요청 중에는 토글 버튼이 disabled 상태가 된다', async ({ page }) => {
     await setupBaseMocks(page);

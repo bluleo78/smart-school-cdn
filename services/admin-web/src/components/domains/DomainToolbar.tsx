@@ -111,6 +111,23 @@ export function DomainToolbar({
     onFilterChange({ ...filter, q: undefined });
   }, [filter, onFilterChange]);
 
+  // ESC 키로 검색 입력값 비우기 — X 버튼과 동일 동작을 키보드로 트리거한다(#322).
+  // - IME 조합 중 ESC는 한글 자모 조합 취소(브라우저 기본)이므로 가로채지 않는다.
+  // - 빈 입력에서 ESC는 다른 기본 동작(예: 모달 닫기)을 가로채지 않도록 가드한다.
+  const handleSearchKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (
+        e.key === 'Escape' &&
+        !composingRef.current &&
+        searchValue.length > 0
+      ) {
+        e.preventDefault();
+        handleClearSearch();
+      }
+    },
+    [searchValue, handleClearSearch],
+  );
+
   /** 상태 필터 변경 */
   function handleEnabledChange(value: string) {
     onFilterChange({
@@ -159,6 +176,7 @@ export function DomainToolbar({
             placeholder="도메인 검색..."
             value={searchValue}
             onChange={handleSearchChange}
+            onKeyDown={handleSearchKeyDown}
             onCompositionStart={handleCompositionStart}
             onCompositionEnd={handleCompositionEnd}
             className="w-full pr-8"
