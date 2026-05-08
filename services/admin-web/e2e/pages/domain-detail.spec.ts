@@ -358,6 +358,64 @@ test.describe('도메인 상세 — Overview 탭', () => {
   });
 
   /**
+   * 이슈 #333 회귀 방지 — usePurgeDomain onSuccess에서 invalidateQueries 누락
+   * 수정 전: toast.success만 호출하고 어떤 query도 invalidate 하지 않아 KPI/차트/인기 URL/도메인 detail이 stale
+   * 수정 후: ['cache','popular'], ['cache','stats'], ['cache','series'], ['domain', host] 무효화 → 즉시 refetch
+   *
+   * 검증 전략: 도메인 detail 페이지에 활성 마운트된 query는 ['domain', host] prefix 트리(host-summary,
+   * stats, top-urls 등)다. invalidate가 누락되면 퍼지 후 추가 GET이 발생하지 않아야 하고, 수정 후엔
+   * prefix 매칭으로 refetch가 발생해야 한다. baseline 호출 수와 퍼지 후 호출 수를 비교한다.
+   */
+  test('도메인 퍼지 성공 시 ["domain", host] 트리 쿼리가 invalidate되어 refetch된다 (회귀: #333)', async ({ page }) => {
+    await setupDetailMocks(page);
+    await mockApi(page, 'POST', '/domains/textbook.com/purge', { ok: true });
+
+    // 도메인 트리 prefix 호출을 카운트한다 (host-summary, stats, top-urls — 모두 detail에 마운트됨).
+    // setupDetailMocks가 등록한 라우트보다 우선 처리되도록 동일 패턴으로 다시 register한다.
+    let domainTreeCalls = 0;
+    await page.route('**/api/domains/textbook.com/summary', async (route) => {
+      domainTreeCalls++;
+      await route.fulfill({ json: createDomainHostSummary() });
+    });
+    await page.route('**/api/domains/textbook.com/stats*', async (route) => {
+      if (route.request().method() === 'GET') {
+        domainTreeCalls++;
+        await route.fulfill({ json: createDomainStats() });
+      } else {
+        await route.fallback();
+      }
+    });
+    await page.route('**/api/domains/textbook.com/top-urls*', async (route) => {
+      domainTreeCalls++;
+      await route.fulfill({
+        json: { urls: [
+          { path: '/a', count: 30 },
+          { path: '/b', count: 20 },
+          { path: '/c', count: 10 },
+        ] },
+      });
+    });
+
+    await page.goto('/domains/textbook.com');
+    await page.getByTestId('purge-cache-open').waitFor();
+
+    // 초기 마운트 호출이 모두 끝나도록 잠시 대기 후 baseline 캡처
+    await page.waitForLoadState('networkidle');
+    const baseline = domainTreeCalls;
+    expect(baseline).toBeGreaterThan(0); // 초기 마운트 호출이 실제로 발생했는지 sanity check
+
+    // 퍼지 트리거
+    await page.getByTestId('purge-cache-open').click();
+    await expect(page.getByTestId('purge-confirm-dialog')).toBeVisible();
+    await page.getByTestId('purge-confirm-submit').click();
+    await expect(page.getByTestId('purge-confirm-dialog')).not.toBeVisible();
+
+    // invalidate → refetch로 도메인 트리 호출이 baseline보다 증가해야 한다.
+    // 수정 전(invalidate 없음)에는 baseline 그대로 유지되어 실패한다.
+    await expect.poll(() => domainTreeCalls, { timeout: 3000 }).toBeGreaterThan(baseline);
+  });
+
+  /**
    * 이슈 #142 회귀 방지 — 퍼지 진행 중 취소/ESC로 dialog가 닫히는 버그
    * 수정 후:
    * - 취소 버튼이 isPending 동안 disabled 처리되어야 한다
