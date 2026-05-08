@@ -116,6 +116,57 @@ test.describe('AppLayout', () => {
     await expect(page.getByRole('link', { name: '대시보드로 돌아가기' })).toBeVisible();
   });
 
+  test.describe('모바일 사이드바 닫기 (#320)', () => {
+    // 모바일 viewport(iPad portrait)에서 사이드바를 연 뒤
+    // ESC 키와 X(닫기) 버튼이 모두 동작하는지 회귀 방지.
+    // 기존에는 닫기 경로가 백드롭 탭 1개뿐이라 키보드 사용자 진입이 막혀 있었다.
+    test.use({ viewport: { width: 820, height: 1180 } });
+
+    test('ESC 키로 모바일 사이드바가 닫힌다', async ({ page }) => {
+      await page.goto('/domains');
+
+      // 햄버거 버튼 클릭 → 사이드바 슬라이드 인
+      await page.getByRole('button', { name: '메뉴 열기' }).click();
+      const aside = page.locator('aside');
+      // translate-x-0 상태 — 화면 좌측에 노출
+      await expect(aside).toHaveClass(/translate-x-0/);
+
+      // ESC keydown — window 리스너로 처리되어 사이드바가 닫혀야 함
+      await page.keyboard.press('Escape');
+
+      // -translate-x-full로 다시 숨겨졌는지 검증
+      await expect(aside).toHaveClass(/-translate-x-full/);
+    });
+
+    test('사이드바 헤더 X 버튼으로 모바일 사이드바가 닫힌다', async ({ page }) => {
+      await page.goto('/domains');
+
+      await page.getByRole('button', { name: '메뉴 열기' }).click();
+      const aside = page.locator('aside');
+      await expect(aside).toHaveClass(/translate-x-0/);
+
+      // 사이드바 헤더 우측 X(닫기) 버튼
+      await page.getByRole('button', { name: '메뉴 닫기' }).click();
+
+      await expect(aside).toHaveClass(/-translate-x-full/);
+    });
+
+    test('백드롭 클릭으로 모바일 사이드바가 닫힌다', async ({ page }) => {
+      await page.goto('/domains');
+
+      await page.getByRole('button', { name: '메뉴 열기' }).click();
+      const aside = page.locator('aside');
+      await expect(aside).toHaveClass(/translate-x-0/);
+
+      // 백드롭(aria-hidden div)을 force click으로 탭 — 명시적 close 경로 검증
+      await page
+        .locator('div[aria-hidden="true"].fixed.inset-0')
+        .click({ position: { x: 700, y: 400 } });
+
+      await expect(aside).toHaveClass(/-translate-x-full/);
+    });
+  });
+
   test('페이지 이동 시 메인 콘텐츠 스크롤이 상단으로 초기화된다 (#146)', async ({ page }) => {
     // 시스템 페이지(긴 콘텐츠)에서 스크롤 후 다른 페이지로 이동하면
     // 이전 스크롤 위치가 유지되는 버그 회귀 방지

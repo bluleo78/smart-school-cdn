@@ -8,6 +8,7 @@ import {
   Users as UsersIcon,
   Menu as MenuIcon,
   Layers,
+  X as XIcon,
 } from 'lucide-react';
 import { useAuth } from '../auth/use-auth';
 import { UserNav } from './UserNav';
@@ -37,6 +38,19 @@ export function AppLayout() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- 라우트 변경에 따른 UI 상태 동기화
     setMobileOpen(false);
   }, [location.pathname]);
+
+  // 모바일 사이드바가 열려 있을 때만 ESC 키 리스너 등록 — 키보드 사용자에게 닫기 경로 제공.
+  // 데스크톱(lg+)에서는 사이드바가 항상 보이므로 등록 자체를 생략(불필요한 keydown 핸들러 회피).
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setMobileOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [mobileOpen]);
 
   // 페이지 이동 시 메인 콘텐츠 영역을 상단으로 스크롤 리셋
   // BrowserRouter + overflow-auto <main>을 사용하기 때문에 window.scrollTo가 아닌
@@ -93,7 +107,7 @@ export function AppLayout() {
                     transition-transform duration-200
                     ${mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}
       >
-        <div className="h-14 flex items-center px-4 border-b border-sidebar-border">
+        <div className="h-14 flex items-center justify-between px-4 border-b border-sidebar-border">
           <div className="flex items-center gap-2">
             <div className="size-8 rounded-md bg-primary/10 text-primary flex items-center justify-center shrink-0">
               <Layers size={18} />
@@ -102,6 +116,17 @@ export function AppLayout() {
               Smart School CDN
             </h1>
           </div>
+          {/* 모바일 전용 닫기(X) 버튼 — 사이드바 헤더 우측에 배치.
+              데스크톱(lg+)에서는 사이드바가 상시 노출되므로 lg:hidden으로 감춘다.
+              백드롭 탭 외에 명시적 close affordance를 제공해 보조기기/터치 사용자 접근성 향상. */}
+          <button
+            type="button"
+            aria-label="메뉴 닫기"
+            className="lg:hidden p-2 -mr-2 rounded-md hover:bg-accent text-foreground shrink-0"
+            onClick={() => setMobileOpen(false)}
+          >
+            <XIcon size={18} />
+          </button>
         </div>
         <nav className="flex-1 p-2 space-y-1 overflow-y-auto">
           {navItems.map(({ to, icon: Icon, label }) => (
