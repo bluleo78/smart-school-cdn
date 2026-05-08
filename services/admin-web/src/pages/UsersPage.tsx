@@ -10,6 +10,8 @@ import { formatDate, formatDateTime } from '../lib/format';
 // 충돌 정리(#190) loser 행의 `__dup_N__` sentinel 접두사를 표시 단계에서 제거 (#252)
 import { formatUsername } from '../lib/users/format-username';
 import { useAuth } from '../components/auth/use-auth';
+// 다중 탭 동기화 — mutation 성공 시 다른 탭에 변경 사실을 신호 (#332)
+import { broadcastAuthEvent } from '../components/auth/auth-broadcast';
 import { Button } from '../components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '../components/ui/dialog';
 // 비활성화 확인 다이얼로그 — 네이티브 confirm() 대신 shadcn AlertDialog 사용 (디자인 시스템 일관성)
@@ -98,10 +100,12 @@ export function UsersPage() {
       updatePassword(id, password, currentPassword),
     // 성공 시에만 다이얼로그 닫기 — 오류 시 입력값 보존을 위해 onSuccess로 이동
     // 성공 시 폼 초기화 — 다음 오픈 시 dirty state 잔존 방지 (#161)
-    onSuccess: () => {
+    // 성공 시 다른 탭에도 password-changed 신호 — 본인이면 강제 로그아웃, 그 외에는 목록 invalidate (#332)
+    onSuccess: (_data, variables) => {
       toast.success('비밀번호가 재설정되었습니다.');
       setPasswordTarget(null);
       passwordForm.reset();
+      broadcastAuthEvent({ type: 'password-changed', userId: variables.id });
     },
     onError: (e) => {
       // 현재 비밀번호 오류와 일반 오류를 구분하여 안내 메시지 제공 (이슈 #31)
@@ -119,10 +123,12 @@ export function UsersPage() {
   const disableMut = useMutation({
     mutationFn: (id: number) => disableUser(id),
     // 성공 시 다이얼로그 닫기 — onClick에서 즉시 닫으면 isPending 렌더링 기회가 없으므로 onSuccess로 이동
-    onSuccess: () => {
+    // 성공 시 다른 탭에 user-disabled 신호 — 대상이 본인이면 강제 로그아웃, 그 외에는 목록 invalidate (#332)
+    onSuccess: (_data, userId) => {
       toast.success('사용자가 비활성화되었습니다.');
       void qc.invalidateQueries({ queryKey: ['users'] });
       setDisableTarget(null);
+      broadcastAuthEvent({ type: 'user-disabled', userId });
     },
     onError: () => toast.error('사용자 비활성화에 실패했습니다.'),
   });

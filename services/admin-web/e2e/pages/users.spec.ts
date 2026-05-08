@@ -1276,4 +1276,89 @@ test.describe('사용자 관리', () => {
     });
     expect(overflow.scrollW).toBeLessThanOrEqual(overflow.parentW);
   });
+
+  /**
+   * 이슈 #332 회귀 방지 — 다중 탭 동기화: 다른 탭의 비활성화/비밀번호 재설정 시
+   * 탭 B가 stale UI를 유지하지 않도록 BroadcastChannel('sscdn-auth') 신호로
+   * 사용자 목록을 invalidate (자기 자신이 영향이면 강제 로그아웃, 그 외 invalidate).
+   *
+   * 이 테스트는 단일 탭에서 BroadcastChannel postMessage를 evaluate로 직접 발생시켜
+   * 탭 B 입장의 동작을 시뮬레이션한다 (Playwright context 내 다중 탭은
+   * 같은 BroadcastChannel을 공유). user-disabled 이벤트 수신 후 사용자 목록이
+   * invalidate되어 disabled 상태가 반영되는지 확인.
+   */
+  test('다중 탭 동기화 — user-disabled 신호 수신 시 사용자 목록 invalidate (#332)', async ({ page }) => {
+    let getCount = 0;
+    const baseList = baseUsers;
+    const disabledList = baseUsers.map((u) =>
+      u.id === 2 ? { ...u, disabled_at: '2026-05-08T00:00:00.000Z' } : u
+    );
+    await page.route('**/api/users', async (route) => {
+      if (route.request().method() === 'GET') {
+        getCount += 1;
+        // 첫 호출은 활성 상태, 두 번째 호출(invalidate 후)은 비활성 상태로 응답
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(getCount === 1 ? baseList : disabledList),
+        });
+      } else {
+        return route.fallback();
+      }
+    });
+
+    await page.goto('/users');
+    // 초기 활성 상태 확인
+    const otherRow = page.getByTestId('user-row-2');
+    await expect(otherRow).toHaveAttribute('data-disabled', 'false');
+
+    // 다른 탭에서 발신된 것과 동일한 BroadcastChannel 메시지를 evaluate로 트리거
+    // (다른 사용자 id=2 비활성화 → 본인이 아니므로 invalidate만)
+    await page.evaluate(() => {
+      const ch = new BroadcastChannel('sscdn-auth');
+      ch.postMessage({ type: 'user-disabled', userId: 2 });
+      ch.close();
+    });
+
+    // 사용자 목록이 invalidate되어 재조회되고 비활성 상태가 반영되어야 함
+    await expect(otherRow).toHaveAttribute('data-disabled', 'true');
+    expect(getCount).toBeGreaterThanOrEqual(2);
+  });
+
+  /**
+   * 이슈 #332 회귀 방지 — 자기 자신이 영향 대상인 user-disabled 신호 수신 시
+   * 강제 로그아웃 + /login 리다이렉트.
+   */
+  test('다중 탭 동기화 — 본인 user-disabled 신호 수신 시 강제 로그아웃 (#332)', async ({ page }) => {
+    await mockApi(page, 'GET', '/users', baseUsers);
+    await page.goto('/users');
+    await expect(page.getByRole('heading', { name: '사용자 관리', level: 2 })).toBeVisible();
+
+    // 본인 id로 user-disabled 신호 — 강제 로그아웃 → /login 리다이렉트
+    await page.evaluate((myId) => {
+      const ch = new BroadcastChannel('sscdn-auth');
+      ch.postMessage({ type: 'user-disabled', userId: myId });
+      ch.close();
+    }, TEST_USER.id);
+
+    await expect(page).toHaveURL(/\/login/);
+  });
+
+  /**
+   * 이슈 #332 회귀 방지 — logout 신호 수신 시 본 탭도 강제 로그아웃 + /login 리다이렉트.
+   */
+  test('다중 탭 동기화 — logout 신호 수신 시 강제 로그아웃 (#332)', async ({ page }) => {
+    await mockApi(page, 'GET', '/users', baseUsers);
+    await page.goto('/users');
+    await expect(page.getByRole('heading', { name: '사용자 관리', level: 2 })).toBeVisible();
+
+    // 다른 탭에서 logout 발신 — 본 탭도 needs_login 전이 + /login
+    await page.evaluate(() => {
+      const ch = new BroadcastChannel('sscdn-auth');
+      ch.postMessage({ type: 'logout' });
+      ch.close();
+    });
+
+    await expect(page).toHaveURL(/\/login/);
+  });
 });
