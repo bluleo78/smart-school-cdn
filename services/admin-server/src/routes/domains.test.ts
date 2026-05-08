@@ -1182,6 +1182,22 @@ describe('DELETE /api/domains/bulk', () => {
     expect(eventsRepo.query({ host: 'keep.test' })).toHaveLength(1);
   });
 
+  // (#310) hosts 배열에 비문자열(숫자/null/객체)이 섞이면 raw SQLite 에러로 500이 떨어지던 회귀 — 입력 경계에서 400으로 거부해야 한다.
+  it('hosts 배열에 비문자열 항목이 섞이면 400으로 거부한다 (#310)', async () => {
+    const repo = makeRepo();
+    repo.upsert('exists.test', 'https://exists.test');
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'DELETE', url: '/api/domains/bulk',
+      payload: { hosts: ['exists.test', 123, null, { a: 1 }] },
+    });
+    expect(res.statusCode).toBe(400);
+    const body = JSON.parse(res.body);
+    expect(body.error).toMatch(/문자열 host/);
+    // 거부됐으므로 DB에서 삭제되지 않아야 한다 (부수 효과 없음 보장).
+    expect(repo.findByHost('exists.test')).toBeDefined();
+  });
+
   // (#212) 부분 실패 — 요청 host 중 일부만 매칭되어 삭제된 경우 deleted/requested/missing이 정확히 분리되어야 한다.
   it('부분 실패 시 deleted/requested/missing을 분리해 반환한다 (#212)', async () => {
     const repo = makeRepo();

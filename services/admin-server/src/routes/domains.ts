@@ -477,12 +477,19 @@ export async function domainRoutes(
       if (!Array.isArray(rawHosts) || rawHosts.length === 0) {
         return reply.status(400).send({ error: 'hosts 배열은 필수 항목입니다.' });
       }
+      // 비문자열 항목 사전 거부 (#310) — 과거에는 비문자열을 그대로 통과시켜 better-sqlite3
+      // prepared statement 바인딩에서 raw "Too few parameter values were provided" 500 으로 크래시했다.
+      // bulkInsert(POST /api/domains/bulk) 가 host 타입을 명시적으로 400 거부하는 패턴(#152)과 짝을 맞춰
+      // 입력 경계에서 즉시 거부해 일관된 정책을 유지한다.
+      const invalidHost = rawHosts.find((h) => typeof h !== 'string');
+      if (invalidHost !== undefined) {
+        return reply.status(400).send({ error: 'hosts 배열에는 문자열 host만 허용됩니다.' });
+      }
       // host 정규화 (#201) — 같은 도메인의 대소문자 변형이 섞여 들어와도 일관되게 lowercase 키로 삭제.
-      // 비문자열 항목이 섞이면 안전하게 그대로 두고 bulkDelete 가 미일치로 무시하게 둔다.
-      const hosts = rawHosts.map((h) => (typeof h === 'string' ? normalizeHost(h) : h));
+      const hosts = (rawHosts as string[]).map((h) => normalizeHost(h));
       // (#212) 부분 실패 분리 안내를 위해 bulkDelete 가 deleted + missing 을 함께 반환하도록 확장.
       // missing 은 "요청에 포함되었으나 DB에 매칭되는 행이 없던 host" — 클라이언트에서 분리 토스트로 안내한다.
-      const { deleted, missing } = domainRepo.bulkDelete(hosts as string[]);
+      const { deleted, missing } = domainRepo.bulkDelete(hosts);
       const synced = await syncToProxy(domainRepo);
       if (!synced) {
         return reply.status(502).send({ error: 'Proxy 동기화 실패' });
