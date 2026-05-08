@@ -76,8 +76,12 @@ describe('authRoutes', () => {
         payload: { username: 'Admin@SCHOOL.local', password: 'password1' },
       });
       expect(r.statusCode).toBe(201);
-      expect(userRepo.findByUsername('admin@school.local')).not.toBeNull();
-      expect(userRepo.findByUsername('Admin@SCHOOL.local')).toBeNull();
+      // 저장 시 lower-case 로 정규화됐는지는 row 의 username 필드로 직접 확인.
+      // 이슈 #340 이후 findByUsername 은 COLLATE NOCASE 라 대소문자 관계없이 매칭되므로
+      // 조회 결과 null 비교만으로는 정규화 여부를 판정할 수 없다.
+      const found = userRepo.findByUsername('admin@school.local');
+      expect(found).not.toBeNull();
+      expect(found?.username).toBe('admin@school.local');
     });
 
     it('이미 사용자 존재하면 409', async () => {

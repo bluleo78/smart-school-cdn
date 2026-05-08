@@ -1,16 +1,21 @@
 import type Database from 'better-sqlite3';
 
+// 이슈 #340 — username 컬럼에 COLLATE NOCASE 부여하여 대소문자 무시 UNIQUE 보장.
+// 라우트 레이어가 trim().toLowerCase() 정규화를 수행하더라도, 라우트를 우회하는
+// 직접 INSERT(테스트 헬퍼·향후 internal API·sqlite3 CLI 등)에서도 동일 invariant 가
+// DB 레벨에서 강제되도록 한다. 인덱스도 NOCASE 로 두어 case-insensitive 조회 시
+// 인덱스 활용 가능.
 export const USER_SCHEMA = `
   CREATE TABLE IF NOT EXISTS users (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    username       TEXT    NOT NULL UNIQUE,
+    username       TEXT    NOT NULL UNIQUE COLLATE NOCASE,
     password_hash  TEXT    NOT NULL,
     created_at     TEXT    NOT NULL,
     updated_at     TEXT    NOT NULL,
     disabled_at    TEXT,
     last_login_at  TEXT
   );
-  CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+  CREATE INDEX IF NOT EXISTS idx_users_username ON users(username COLLATE NOCASE);
 `;
 
 export interface UserRow {

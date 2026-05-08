@@ -79,8 +79,12 @@ describe('usersRoutes', () => {
       payload: { username: 'NewUser@SCHOOL.local', password: 'password2' },
     });
     expect(r.statusCode).toBe(201);
-    expect(ctx.userRepo.findByUsername('newuser@school.local')).not.toBeNull();
-    expect(ctx.userRepo.findByUsername('NewUser@SCHOOL.local')).toBeNull();
+    // 저장 시 lower-case 로 정규화됐는지는 row 의 username 필드로 직접 확인.
+    // 이슈 #340 이후 findByUsername 은 COLLATE NOCASE 라 대소문자 관계없이 매칭되므로
+    // 조회 결과 null 비교만으로는 정규화 여부를 판정할 수 없다.
+    const found = ctx.userRepo.findByUsername('newuser@school.local');
+    expect(found).not.toBeNull();
+    expect(found?.username).toBe('newuser@school.local');
   });
 
   // 이슈 #31 — 자기 자신 비밀번호 변경 시 currentPassword 포함 성공

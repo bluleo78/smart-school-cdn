@@ -34,6 +34,21 @@ describe('UserRepository', () => {
     expect(() => repo.create('a@b.c', 'h2')).toThrow();
   });
 
+  // 이슈 #340 회귀 방지 — username UNIQUE 가 COLLATE NOCASE 로 동작하여
+  // 라우트 정규화 우회 시에도 대소문자 다른 username 이 공존하지 못한다.
+  it('대소문자만 다른 username 도 UNIQUE 제약으로 throw (COLLATE NOCASE)', () => {
+    repo.create('User@Example.Com', 'h1');
+    expect(() => repo.create('user@example.com', 'h2')).toThrow();
+    expect(() => repo.create('USER@EXAMPLE.COM', 'h3')).toThrow();
+  });
+
+  // 이슈 #340 — case-insensitive 인덱스로 조회 시에도 동일 행이 반환된다.
+  it('대소문자 다른 키로 조회해도 같은 row 반환 (COLLATE NOCASE)', () => {
+    const u = repo.create('Mixed@Case.Test', 'h');
+    expect(repo.findByUsername('mixed@case.test')?.id).toBe(u.id);
+    expect(repo.findByUsername('MIXED@CASE.TEST')?.id).toBe(u.id);
+  });
+
   it('updatePassword 로 hash 가 갱신된다', () => {
     const u = repo.create('a@b.c', 'old');
     repo.updatePassword(u.id, 'new');

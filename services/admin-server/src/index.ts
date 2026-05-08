@@ -177,6 +177,84 @@ db.exec(USER_SCHEMA);
   tx();
 }
 
+// users.username COLLATE NOCASE 마이그레이션 — 이슈 #340
+// USER_SCHEMA 가 CREATE TABLE IF NOT EXISTS 라 기존 DB 의 users 테이블은 새 정의로
+// 자동 변경되지 않는다. table_info 의 username 컬럼에 COLLATE NOCASE 가 부여되어
+// 있는지 확인하고, 없다면 테이블을 재생성하여 collation 을 적용한다.
+//
+// 충돌 처리 정책: 직전의 #190 마이그레이션이 이미 lower-case 정규화 + 충돌 행에
+// `__dup_<id>__` prefix 를 붙였기 때문에, 정상적인 운영 데이터에는 case-insensitive
+// 중복이 남아있지 않다. 그래도 안전망으로 남아있는 NOCASE 중복을 다시 한 번 검출하여,
+// 발견되면 동일 정책(활성/낮은 id keeper, 나머지 disable + __dup_ prefix)으로 정리한 뒤
+// 재생성을 진행한다.
+{
+  type ColInfo = { name: string; type: string; pk: number; notnull: number; dflt_value: unknown };
+  const cols = db.pragma('table_info(users)') as ColInfo[];
+  const usernameCol = cols.find((c) => c.name === 'username');
+  if (usernameCol) {
+    // sqlite_master 의 SQL 문에서 username 정의에 COLLATE NOCASE 가 있는지 확인
+    const masterRow = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'")
+      .get() as { sql: string } | undefined;
+    const hasNoCase = masterRow ? /username[^,]*COLLATE\s+NOCASE/i.test(masterRow.sql) : false;
+    if (!hasNoCase) {
+      type DupRow = { id: number; username: string; disabled_at: string | null };
+      const rows = db.prepare('SELECT id, username, disabled_at FROM users').all() as DupRow[];
+      const groups = new Map<string, DupRow[]>();
+      for (const r of rows) {
+        const k = r.username.trim().toLowerCase();
+        if (!groups.has(k)) groups.set(k, []);
+        groups.get(k)!.push(r);
+      }
+      const now = new Date().toISOString();
+      const tx = db.transaction(() => {
+        // 1) NOCASE 중복 잔여 정리 — #190 이후에도 손으로 들어온 행이 있을 수 있어 안전망.
+        for (const list of groups.values()) {
+          if (list.length <= 1) continue;
+          list.sort((a, b) => {
+            const aActive = a.disabled_at === null ? 0 : 1;
+            const bActive = b.disabled_at === null ? 0 : 1;
+            if (aActive !== bActive) return aActive - bActive;
+            return a.id - b.id;
+          });
+          const [, ...losers] = list;
+          for (const loser of losers) {
+            if (loser.disabled_at === null) {
+              db.prepare('UPDATE users SET disabled_at = ?, updated_at = ? WHERE id = ?')
+                .run(now, now, loser.id);
+            }
+            if (!loser.username.startsWith('__dup_')) {
+              db.prepare('UPDATE users SET username = ? WHERE id = ?')
+                .run(`__dup_${loser.id}__${loser.username}`, loser.id);
+            }
+          }
+        }
+
+        // 2) 새 스키마로 테이블 재생성 후 데이터 복사. 컬럼 구성은 USER_SCHEMA 와 동일하게 유지.
+        db.exec(`
+          CREATE TABLE users_new (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            username       TEXT    NOT NULL UNIQUE COLLATE NOCASE,
+            password_hash  TEXT    NOT NULL,
+            created_at     TEXT    NOT NULL,
+            updated_at     TEXT    NOT NULL,
+            disabled_at    TEXT,
+            last_login_at  TEXT
+          );
+        `);
+        db.exec(`
+          INSERT INTO users_new (id, username, password_hash, created_at, updated_at, disabled_at, last_login_at)
+          SELECT id, username, password_hash, created_at, updated_at, disabled_at, last_login_at FROM users;
+        `);
+        db.exec('DROP INDEX IF EXISTS idx_users_username');
+        db.exec('DROP TABLE users');
+        db.exec('ALTER TABLE users_new RENAME TO users');
+        db.exec('CREATE INDEX IF NOT EXISTS idx_users_username ON users(username COLLATE NOCASE)');
+      });
+      tx();
+    }
+  }
+}
+
 // 외래 키 제약 활성화 — 도메인 삭제 시 cascade 동작에 필요
 db.pragma('foreign_keys = ON');
 
