@@ -2,8 +2,9 @@
  * Card·Skeleton 기반, 에러 상태 처리, formatUptime 공통 유틸 사용
  * 마이크로서비스 상태 그리드 + 장애 배너 추가
  */
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router';
 import { toast } from 'sonner';
 import { AlertTriangle, Monitor, Sun, Moon, CheckCircle2, XCircle } from 'lucide-react';
 import { getTheme, setTheme, type Theme } from '../lib/theme';
@@ -46,12 +47,34 @@ const CERT_TABLE_PAGINATION_THRESHOLD = 10;
 export function SystemPage() {
   const [currentTheme, setCurrentTheme] = useState<Theme>(getTheme);
   // 인증서 검색어 — 도메인 부분 일치(대소문자 무시). 임계 초과 시에만 input 노출.
-  const [certSearchQuery, setCertSearchQuery] = useState('');
+  // URL searchParam ?certQ=... 으로 동기화하여 새로고침/공유 링크/뒤로가기 시 검색어를 유지한다 (#301).
+  // DnsPage(#292)·DomainsPage(#68) 검색 URL 동기화 패턴과 일관. SystemPage 다른 상태(테마 등)와
+  // 충돌하지 않도록 'certQ' 라는 prefix가 붙은 키를 사용한다.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const certSearchQuery = searchParams.get('certQ') ?? '';
 
   function handleThemeChange(theme: Theme) {
     setTheme(theme);
     setCurrentTheme(theme);
   }
+
+  /** 인증서 검색어 변경 — ?certQ=<value>로 URL에 반영 (#301).
+   *  - 빈 문자열일 때는 파라미터 제거 → URL 깔끔하게 유지 (DomainsPage·DnsPage 동일 정책)
+   *  - 검색어 변경은 history 누적 대상이 아니므로 replace 사용 (탭/필터와 동일 정책) */
+  const handleCertSearchChange = useCallback(
+    (value: string) => {
+      setSearchParams(
+        prev => {
+          const next = new URLSearchParams(prev);
+          if (value) next.set('certQ', value);
+          else next.delete('certQ');
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
 
   // CA 인증서/iOS 프로파일 다운로드 mutation — 성공/실패 양쪽 토스트로 피드백 (#187, #214)
   // - 이전엔 anchor href click만 호출해 4xx/5xx 응답 시 silent 실패했다 (#187 → onError 추가).
@@ -319,7 +342,7 @@ export function SystemPage() {
                     placeholder="도메인 검색"
                     aria-label="인증서 도메인 검색"
                     value={certSearchQuery}
-                    onChange={(e) => setCertSearchQuery(e.target.value)}
+                    onChange={(e) => handleCertSearchChange(e.target.value)}
                     className="max-w-xs"
                   />
                   <p

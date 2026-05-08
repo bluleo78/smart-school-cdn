@@ -359,6 +359,68 @@ test.describe('발급된 인증서 목록', () => {
     await expect(page.getByTestId('certificates-count')).toHaveText('15 / 15건');
   });
 
+  /// 회귀 방지 #301: 인증서 도메인 검색어를 URL searchParam ?certQ=... 로 동기화하여
+  /// 새로고침/공유 링크/뒤로가기 시 검색 조건이 유지되어야 한다 (#292·#68 동일 패턴).
+  test('인증서 도메인 검색어가 URL ?certQ=... 로 동기화되고 새로고침에도 유지된다 — 회귀 방지 #301', async ({ page }) => {
+    const now = Date.now();
+    const issued = new Date(now - 86_400_000).toISOString();
+    // 임계(10건) 초과로 검색 input 노출 조건 충족
+    const certs = [
+      ...Array.from({ length: 8 }, (_, i) => ({
+        domain: `textbook-${i}.example.com`,
+        issued_at: issued,
+        expires_at: new Date(now + (i + 30) * 86_400_000).toISOString(),
+      })),
+      ...Array.from({ length: 7 }, (_, i) => ({
+        domain: `cdn-${i}.edunet.net`,
+        issued_at: issued,
+        expires_at: new Date(now + (i + 30) * 86_400_000).toISOString(),
+      })),
+    ];
+    await mockApi(page, 'GET', '/tls/certificates', certs);
+    await page.goto('/system');
+
+    await expect(page.getByTestId('certificates-search')).toBeVisible({ timeout: 10000 });
+
+    // 검색어 입력 → URL ?certQ= 로 반영
+    await page.getByTestId('certificates-search').fill('edunet');
+    await expect(page).toHaveURL(/[?&]certQ=edunet\b/);
+    await expect(page.getByTestId('certificates-count')).toHaveText('7 / 15건');
+
+    // 새로고침 → 검색어와 필터 결과가 모두 유지되어야 한다 (이슈 #301 핵심)
+    await page.reload();
+    await expect(page.getByTestId('certificates-search')).toHaveValue('edunet');
+    await expect(page.getByTestId('certificates-count')).toHaveText('7 / 15건');
+
+    // 검색어 비우면 ?certQ= 파라미터 자체가 제거되어 URL 깔끔 유지
+    await page.getByTestId('certificates-search').fill('');
+    await expect(page).not.toHaveURL(/[?&]certQ=/);
+    await expect(page.getByTestId('certificates-count')).toHaveText('15 / 15건');
+  });
+
+  /// 회귀 방지 #301: ?certQ=... 으로 진입한 URL에서 입력값이 즉시 복원되어야 한다 (공유 링크 시나리오).
+  test('?certQ= 쿼리로 진입 시 검색어가 자동 복원된다 — 회귀 방지 #301', async ({ page }) => {
+    const now = Date.now();
+    const issued = new Date(now - 86_400_000).toISOString();
+    const certs = [
+      ...Array.from({ length: 8 }, (_, i) => ({
+        domain: `textbook-${i}.example.com`,
+        issued_at: issued,
+        expires_at: new Date(now + (i + 30) * 86_400_000).toISOString(),
+      })),
+      ...Array.from({ length: 7 }, (_, i) => ({
+        domain: `cdn-${i}.edunet.net`,
+        issued_at: issued,
+        expires_at: new Date(now + (i + 30) * 86_400_000).toISOString(),
+      })),
+    ];
+    await mockApi(page, 'GET', '/tls/certificates', certs);
+    await page.goto('/system?certQ=textbook');
+
+    await expect(page.getByTestId('certificates-search')).toHaveValue('textbook');
+    await expect(page.getByTestId('certificates-count')).toHaveText('8 / 15건');
+  });
+
   /// 회귀 방지 #210: 인증서 카드가 서버 응답 순서를 그대로 렌더해 만료/임박 인증서가
   /// 정상 인증서 사이에 섞이는 버그. 클라이언트에서 expires_at 오름차순 정렬해야 한다.
   /// — 만료(과거) → 임박(가까운 만료) → 일반 순으로 행이 배치되어야 한다
