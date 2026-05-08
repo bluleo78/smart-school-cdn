@@ -487,22 +487,40 @@ export async function domainRoutes(
       }
       // host 정규화 (#201) — 같은 도메인의 대소문자 변형이 섞여 들어와도 일관되게 lowercase 키로 삭제.
       const hosts = (rawHosts as string[]).map((h) => normalizeHost(h));
-      // (#212) 부분 실패 분리 안내를 위해 bulkDelete 가 deleted + missing 을 함께 반환하도록 확장.
-      // missing 은 "요청에 포함되었으나 DB에 매칭되는 행이 없던 host" — 클라이언트에서 분리 토스트로 안내한다.
-      const { deleted, missing } = domainRepo.bulkDelete(hosts);
-      const synced = await syncToProxy(domainRepo);
-      if (!synced) {
+      // (#312) 단건 DELETE(#311) 와 동일한 정책으로 bulk 도 트랜잭션으로 감싼다.
+      // 기존 구현은 bulkDelete + optimization_events 정리를 트랜잭션 밖에서 즉시 수행한 뒤
+      // syncToProxy 가 실패하면 502 만 반환하고 DB 롤백을 하지 않아, 사용자에겐 "실패" 가
+      // 안내됐는데도 도메인/통계/이벤트가 영구 삭제되는 데이터 손실이 있었다.
+      // BEGIN IMMEDIATE → bulkDelete + deleteByHosts(events) → await syncToProxy → 결과에
+      // 따라 COMMIT/ROLLBACK 으로 감싸면 ROLLBACK 시 도메인 행, FK CASCADE 로 묶인
+      // domain_stats, 그리고 같은 트랜잭션 안에서 삭제한 optimization_events 가 모두 원형 복원된다.
+      const optEventsRepo = new OptimizationEventsRepository(domainRepo.database);
+      const txResult = await domainRepo.runInTransactionAsync<{
+        synced: boolean;
+        deleted: number;
+        missing: string[];
+      }>(async () => {
+        // (#212) 부분 실패 분리 안내를 위해 bulkDelete 가 deleted + missing 을 함께 반환하도록 확장.
+        // missing 은 "요청에 포함되었으나 DB에 매칭되는 행이 없던 host" — 클라이언트에서 분리 토스트로 안내한다.
+        const { deleted, missing } = domainRepo.bulkDelete(hosts);
+        // (#185) optimization_events 는 FK 제약이 없어 CASCADE 가 동작하지 않으므로 명시적으로 정리.
+        // 트랜잭션 안에서 함께 삭제 → ROLLBACK 시 자동 복원되어 도메인 복원 경로와 일관성 유지.
+        optEventsRepo.deleteByHosts(hosts);
+        // syncToProxy 는 같은 better-sqlite3 커넥션으로 SELECT 하므로 트랜잭션 내부의 미커밋
+        // 상태(=해당 host 들이 빠진 목록)를 그대로 읽어 Proxy 에 보낸다. 실패 시 ROLLBACK.
+        const synced = await syncToProxy(domainRepo);
+        return { commit: synced, value: { synced, deleted, missing } };
+      });
+      if (!txResult.synced) {
         return reply.status(502).send({ error: 'Proxy 동기화 실패' });
       }
       await fanOutGrpc(app, domainRepo);
-      // 도메인 삭제 후 해당 호스트의 optimization_events orphan을 정리한다 (#185).
-      // optimization_events 테이블에는 FK 제약이 없어 CASCADE가 동작하지 않으므로
-      // 라우트에서 명시적으로 cleanup. proxy 동기화 성공 이후(point of no return)에
-      // 호출해 도메인 복원 경로와의 일관성을 유지한다.
-      const optEventsRepo = new OptimizationEventsRepository(domainRepo.database);
-      optEventsRepo.deleteByHosts(hosts);
       // requested 는 사용자가 보낸 호스트 수(중복 포함 원본 길이) — 토스트의 "요청 N건 중 M건"의 N에 해당.
-      return reply.status(200).send({ deleted, requested: rawHosts.length, missing });
+      return reply.status(200).send({
+        deleted: txResult.deleted,
+        requested: rawHosts.length,
+        missing: txResult.missing,
+      });
     },
   );
 

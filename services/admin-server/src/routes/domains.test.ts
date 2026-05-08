@@ -1272,6 +1272,73 @@ describe('DELETE /api/domains/bulk', () => {
     expect(repo.findByHost('exists.test')).toBeDefined();
   });
 
+  // (#312) Proxy 동기화 실패 시 트랜잭션 ROLLBACK 으로 도메인/CASCADE/optimization_events 모두 복원되어야 한다.
+  // 기존 구현은 단건 DELETE(#311) 와 정책이 어긋나 bulk 만 502 응답에도 데이터가 영구 삭제됐다.
+  it('syncToProxy 실패 시 도메인 + domain_stats CASCADE + optimization_events 가 ROLLBACK 으로 보존된다 (#312)', async () => {
+    const axiosMod = await import('axios');
+    vi.mocked(axiosMod.default.post).mockRejectedValueOnce(new Error('Network error'));
+
+    // FK CASCADE 동작을 검증하기 위해 makeRepo 의 기본 스키마 대신 실제 마이그레이션 스키마(FK 포함)를 재현.
+    const db = new Database(':memory:');
+    db.pragma('foreign_keys = ON');
+    db.exec(DOMAIN_SCHEMA);
+    db.exec(`
+      CREATE TABLE domain_stats (
+        host TEXT NOT NULL, timestamp INTEGER NOT NULL,
+        requests INTEGER NOT NULL DEFAULT 0,
+        cache_hits INTEGER NOT NULL DEFAULT 0,
+        cache_misses INTEGER NOT NULL DEFAULT 0,
+        bandwidth INTEGER NOT NULL DEFAULT 0,
+        avg_response_time INTEGER NOT NULL DEFAULT 0,
+        l1_hits INTEGER NOT NULL DEFAULT 0,
+        l2_hits INTEGER NOT NULL DEFAULT 0,
+        bypass_method INTEGER NOT NULL DEFAULT 0,
+        bypass_nocache INTEGER NOT NULL DEFAULT 0,
+        bypass_size INTEGER NOT NULL DEFAULT 0,
+        bypass_other INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (host, timestamp),
+        FOREIGN KEY (host) REFERENCES domains(host) ON DELETE CASCADE
+      );
+    `);
+    db.exec(OPTIMIZATION_EVENTS_SCHEMA);
+    const repo = new DomainRepository(db);
+    repo.upsert('a.test', 'https://a.test');
+    repo.upsert('b.test', 'https://b.test');
+
+    // 시계열 통계 사전 적재 (CASCADE 보존 검증용)
+    const insertStat = db.prepare(
+      `INSERT INTO domain_stats (host, timestamp, requests, cache_hits, cache_misses, bandwidth, avg_response_time)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    );
+    insertStat.run('a.test', 1700000000, 100, 80, 20, 1024, 50);
+    insertStat.run('a.test', 1700003600, 200, 150, 50, 2048, 60);
+    insertStat.run('b.test', 1700000000, 300, 200, 100, 4096, 70);
+
+    // optimization_events 사전 적재 (트랜잭션 내부 삭제 → ROLLBACK 으로 복원 검증)
+    const eventsRepo = new OptimizationEventsRepository(db);
+    eventsRepo.insertBatch([
+      { event_type: 'media_cache', host: 'a.test', url: 'https://a.test/1', decision: 'served_206', elapsed_ms: 1 },
+      { event_type: 'media_cache', host: 'b.test', url: 'https://b.test/2', decision: 'served_206', elapsed_ms: 1 },
+    ]);
+
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'DELETE', url: '/api/domains/bulk',
+      payload: { hosts: ['a.test', 'b.test'] },
+    });
+    expect(res.statusCode).toBe(502);
+
+    // 핵심 회귀 가드: 도메인 행, CASCADE 된 domain_stats, optimization_events 모두 보존
+    expect(repo.findByHost('a.test')).toBeDefined();
+    expect(repo.findByHost('b.test')).toBeDefined();
+    const remainingStats = db
+      .prepare('SELECT COUNT(*) as cnt FROM domain_stats WHERE host IN (?, ?)')
+      .get('a.test', 'b.test') as { cnt: number };
+    expect(remainingStats.cnt).toBe(3);
+    expect(eventsRepo.query({ host: 'a.test' })).toHaveLength(1);
+    expect(eventsRepo.query({ host: 'b.test' })).toHaveLength(1);
+  });
+
   // (#212) 부분 실패 — 요청 host 중 일부만 매칭되어 삭제된 경우 deleted/requested/missing이 정확히 분리되어야 한다.
   it('부분 실패 시 deleted/requested/missing을 분리해 반환한다 (#212)', async () => {
     const repo = makeRepo();
