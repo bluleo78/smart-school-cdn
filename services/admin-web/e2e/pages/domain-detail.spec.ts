@@ -823,6 +823,49 @@ test.describe('도메인 상세 — Overview 탭', () => {
     }
   });
 
+  /**
+   * 이슈 #285 회귀 방지 — BarSparkline 단일 데이터 포인트 솔리드 블록
+   * 수정 전: timeseries 길이 1(예: hits=[422])일 때 BarSparkline이 viewBox=`0 0 5 36`
+   *          + preserveAspectRatio="none"로 단일 <rect>가 120×36 슬롯 전체를 솔리드 블록으로 채움
+   *          → 사용자가 "차트 깨짐" 또는 "데이터 없음"으로 오인.
+   * 수정 후: values.length<2 이면 BarSparkline은 SVG 대신 em-dash(—) placeholder div를 렌더하여
+   *          "추세를 표시할 데이터가 부족함"을 명시.
+   */
+  test('Overview — KPI 4-카드 단일 데이터 포인트일 때 솔리드 블록 대신 placeholder 표시 (회귀: #285)', async ({ page }) => {
+    await setupDetailMocks(page);
+    // stats를 단일 버킷 timeseries로 오버라이드 — 이슈 재현 조건
+    await page.unroute('**/api/domains/textbook.com/stats*');
+    await page.route('**/api/domains/textbook.com/stats*', (route) =>
+      route.fulfill({
+        json: {
+          ...createDomainStats(),
+          timeseries: {
+            labels: ['00:00'],
+            hits: [422],
+            misses: [226],
+            bandwidth: [104857600],
+            responseTime: [42],
+          },
+        },
+      }),
+    );
+
+    await page.goto('/domains/textbook.com');
+    await expect(page.getByTestId('domain-stat-cards')).toBeVisible();
+
+    // 솔리드 블록(viewBox="0 0 5 36" 단일 rect) 이 더 이상 렌더되지 않음
+    const solidBlocks = await page.locator('svg[viewBox="0 0 5 36"]').count();
+    expect(solidBlocks).toBe(0);
+
+    // 카드 2·3·4 sparkline 슬롯이 placeholder로 대체됨 (sparkline-empty testid)
+    const placeholders = page.getByTestId('sparkline-empty');
+    expect(await placeholders.count()).toBeGreaterThanOrEqual(3);
+    // placeholder가 카드 sparkline 슬롯과 동일하게 36px 높이를 유지
+    const firstBox = await placeholders.first().boundingBox();
+    expect(firstBox).not.toBeNull();
+    expect(Math.round(firstBox!.height)).toBe(36);
+  });
+
   test('Overview — Quick Actions 4개 버튼이 동일 y 오프셋에 정렬된다', async ({ page }) => {
     await setupDetailMocks(page);
     await page.goto('/domains/textbook.com');

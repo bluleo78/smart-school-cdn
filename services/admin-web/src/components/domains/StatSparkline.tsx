@@ -9,8 +9,24 @@
  *  - baseline floor 12px — 평탄/0 데이터에서도 차트 영역(36)의 1/3 이상 표시 (#258).
  */
 export function BarSparkline({ values }: { values: number[] }) {
-  const max = Math.max(...values, 1);
   const n = values.length;
+  // 단일/빈 데이터 가드 (#285) — 점 하나로는 추세를 표현할 수 없으므로 BarSparkline 대신
+  // placeholder 표시. 기존 구현은 length=1일 때 viewBox=`0 0 5 36` + preserveAspectRatio="none"
+  // 으로 단일 <rect>가 120×36 슬롯 전체를 솔리드 블록으로 채워 "차트 깨짐"으로 오인됨.
+  // h-9(36px)로 시각 무게 유지, em-dash로 "데이터 부족" 의미 전달.
+  if (n < 2) {
+    return (
+      <div
+        className="block w-full h-9 flex items-center justify-center text-xs text-muted-foreground"
+        aria-hidden="true"
+        data-testid="sparkline-empty"
+        title="추세를 표시할 데이터가 부족합니다"
+      >
+        —
+      </div>
+    );
+  }
+  const max = Math.max(...values, 1);
   // viewBox 좌표계 — bar 5 + gap 2 = 7 단위, 마지막 bar 뒤 gap 제외
   const BAR = 5;
   const GAP = 2;
