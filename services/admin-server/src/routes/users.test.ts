@@ -205,4 +205,46 @@ describe('usersRoutes', () => {
     expect(r.statusCode).toBe(400);
     expect(r.json().error).toBe('cannot_disable_self');
   });
+
+  // #325 — :id 정수 검증 가드. 비숫자/오버플로우/0/음수가 NaN 또는 부정확한
+  // 정수로 변환되어 user_not_found(404)에 가려지던 문제를 사전 400 으로 거부.
+  describe(':id 정수 검증 (#325)', () => {
+    const invalidIds = [
+      'abc',                           // 비숫자
+      '99999999999999999999',          // 안전 정수 범위 초과
+      '0',                             // 0 — userRepo id 는 1 이상
+      '-1',                            // 음수 (정규식에서 거부)
+      '1.5',                           // 소수
+      '1e10',                          // 지수 표기
+      '',                              // 빈 문자열은 라우팅 자체 실패라 제외
+    ].filter((v) => v !== '');
+
+    for (const bad of invalidIds) {
+      it(`DELETE /api/users/${bad} → 400 invalid_input`, async () => {
+        const r = await ctx.app.inject({
+          method: 'DELETE', url: `/api/users/${bad}`,
+          cookies: ctx.cookies,
+        });
+        expect(r.statusCode).toBe(400);
+        expect(r.json().error).toBe('invalid_input');
+      });
+      it(`PUT /api/users/${bad}/enable → 400 invalid_input`, async () => {
+        const r = await ctx.app.inject({
+          method: 'PUT', url: `/api/users/${bad}/enable`,
+          cookies: ctx.cookies,
+        });
+        expect(r.statusCode).toBe(400);
+        expect(r.json().error).toBe('invalid_input');
+      });
+      it(`PUT /api/users/${bad}/password → 400 invalid_input`, async () => {
+        const r = await ctx.app.inject({
+          method: 'PUT', url: `/api/users/${bad}/password`,
+          cookies: ctx.cookies,
+          payload: { password: 'newpassword1' },
+        });
+        expect(r.statusCode).toBe(400);
+        expect(r.json().error).toBe('invalid_input');
+      });
+    }
+  });
 });

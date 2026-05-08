@@ -26,6 +26,29 @@ const passwordSchema = z.object({
   currentPassword: z.string().min(1).max(256).optional(),
 });
 
+// path param `:id` 검증 — 비숫자/오버플로우/음수/0/소수가 들어오면 NaN 또는
+// 부정확한 정수로 변환되어 user_not_found(404)에 가려지던 문제(#325) 방지.
+// `^\d+$` 로 양의 정수 문자열만 허용 후 `Number.isSafeInteger` 로 안전 정수
+// 범위(2^53-1) 내 + 1 이상만 통과시킨다.
+const userIdSchema = z
+  .string()
+  .regex(/^\d+$/)
+  .transform((v) => Number(v))
+  .refine((n) => Number.isSafeInteger(n) && n >= 1, { message: 'invalid_user_id' });
+
+/**
+ * users 라우트 공용 :id 파서 — 검증 실패 시 400 invalid_input 응답을 직접
+ * 보내고 null 을 반환한다. 호출 측은 null 이면 즉시 return 해야 한다.
+ */
+function parseUserId(raw: string, reply: import('fastify').FastifyReply): number | null {
+  const parsed = userIdSchema.safeParse(raw);
+  if (!parsed.success) {
+    reply.code(400).send({ error: 'invalid_input' });
+    return null;
+  }
+  return parsed.data;
+}
+
 function publicUser(u: {
   id: number; username: string; created_at: string; updated_at: string;
   disabled_at: string | null; last_login_at: string | null;
@@ -73,7 +96,8 @@ export const usersRoutes: FastifyPluginAsync<{ userRepo: UserRepository }> = asy
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid_input' });
     }
-    const id = Number(req.params.id);
+    const id = parseUserId(req.params.id, reply);
+    if (id === null) return;
     const targetUser = userRepo.findById(id);
     if (!targetUser) {
       return reply.code(404).send({ error: 'user_not_found' });
@@ -99,7 +123,8 @@ export const usersRoutes: FastifyPluginAsync<{ userRepo: UserRepository }> = asy
 
   // 비활성화된 사용자를 재활성화 — disabled_at 을 NULL 로 초기화
   app.put<{ Params: { id: string } }>('/api/users/:id/enable', async (req, reply) => {
-    const id = Number(req.params.id);
+    const id = parseUserId(req.params.id, reply);
+    if (id === null) return;
     const user = userRepo.findById(id);
     if (!user) {
       return reply.code(404).send({ error: 'user_not_found' });
@@ -113,7 +138,8 @@ export const usersRoutes: FastifyPluginAsync<{ userRepo: UserRepository }> = asy
   });
 
   app.delete<{ Params: { id: string } }>('/api/users/:id', async (req, reply) => {
-    const id = Number(req.params.id);
+    const id = parseUserId(req.params.id, reply);
+    if (id === null) return;
     // 자기 자신을 비활성화하면 즉시 시스템 락아웃 위험 → 막는다.
     if (req.user && Number(req.user.sub) === id) {
       return reply.code(400).send({ error: 'cannot_disable_self' });
