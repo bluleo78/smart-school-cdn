@@ -48,6 +48,19 @@ export function broadcastAuthEvent(event: AuthBroadcastEvent): void {
     try {
       const payload = JSON.stringify({ ...event, _ts: Date.now() });
       window.localStorage.setItem(STORAGE_FALLBACK_KEY, payload);
+      // 잔재 정리(#345): storage 이벤트는 setItem 시점에 이미 다른 탭으로 발화 완료되었으므로
+      // 폴백 신호 데이터를 영구 저장소에 남길 필요가 없다. 같은 탭의 다음 microtask에서
+      // 즉시 removeItem 하여 devtools 노출/사용자 전환 시 잔재를 제거한다.
+      // (removeItem 자체도 storage 이벤트를 발화하지만 newValue=null 이라 수신측에서 무시)
+      queueMicrotask(() => {
+        try {
+          if (window.localStorage.getItem(STORAGE_FALLBACK_KEY) === payload) {
+            window.localStorage.removeItem(STORAGE_FALLBACK_KEY);
+          }
+        } catch {
+          // 정리 실패는 치명적이지 않음 — 다음 broadcast 시 덮어쓰기로 회수
+        }
+      });
     } catch {
       // quota/private mode 등에서 실패해도 BroadcastChannel 경로가 살아있으면 OK
     }
