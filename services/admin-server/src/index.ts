@@ -12,10 +12,11 @@ import { systemRoutes } from './routes/system.js';
 import { DomainRepository, DOMAIN_SCHEMA } from './db/domain-repo.js';
 import { DomainStatsRepository } from './db/domain-stats-repo.js';
 import { DnsMetricsRepository, DNS_METRICS_SCHEMA } from './db/dns-metrics-repo.js';
-import { OPTIMIZATION_EVENTS_SCHEMA } from './db/optimization-events-repo.js';
+import { OPTIMIZATION_EVENTS_SCHEMA, OptimizationEventsRepository } from './db/optimization-events-repo.js';
 import { USER_SCHEMA, UserRepository } from './db/user-repo.js';
 import { startStatsCollector } from './stats-collector.js';
 import { startDnsMetricsCollector } from './dns-metrics-collector.js';
+import { startOptimizationEventsPruner } from './optimization-events-pruner.js';
 import { createStorageClient } from './grpc/storage_client.js';
 import { createTlsClient } from './grpc/tls_client.js';
 import { createDnsClient } from './grpc/dns_client.js';
@@ -307,6 +308,11 @@ try {
   startDnsMetricsCollector({
     getStats: () => dnsClient.getStats(),
     repo: dnsMetricsRepo,
+    log: app.log,
+  });
+  // optimization_events retention 프루너 시작 — 1시간마다 30일 이전 이벤트 삭제 (#337)
+  startOptimizationEventsPruner({
+    repo: new OptimizationEventsRepository(db),
     log: app.log,
   });
 } catch (err) {
