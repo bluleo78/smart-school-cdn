@@ -1,0 +1,14 @@
+{
+  "name": "Smart School CDN Admin",
+  "short_name": "CDN Admin",
+  "description": "학교 내부망 온프레미스 CDN 관리자 — PWA 미지원, 표준 경로 요청에 대한 최소 manifest 응답",
+  "start_url": "/",
+  "display": "browser",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

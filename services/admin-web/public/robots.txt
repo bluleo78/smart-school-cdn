@@ -1,0 +1,4 @@
+# Smart School CDN Admin — 학교 내부망 전용 어드민
+# 외부 크롤러/봇 색인 전면 차단 (외부 노출 의도 없음)
+User-agent: *
+Disallow: /
