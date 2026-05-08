@@ -72,6 +72,18 @@ docker compose up -d
 docker compose -f docker-compose.prod.yml down
 ```
 
+## admin.db 백업
+
+admin-server는 SQLite를 **WAL 모드**로 운영한다 (`journal_mode=WAL`, `synchronous=NORMAL`, `busy_timeout=5000`, `wal_autocheckpoint=1000`). 백업 시 다음 중 하나를 사용한다:
+
+- **권장**: 온라인 백업 — 일관성 보장, 서비스 중단 없음
+  ```bash
+  sqlite3 services/admin-server/data/admin.db ".backup '/backup/admin-$(date +%Y%m%d).db'"
+  # 또는
+  sqlite3 services/admin-server/data/admin.db "VACUUM INTO '/backup/admin-$(date +%Y%m%d).db'"
+  ```
+- **파일 직접 카피**: WAL 모드에서는 `.db` 단독 카피 시 최신 변경분이 누락될 수 있다 — `admin.db`, `admin.db-wal`, `admin.db-shm` **세 파일을 함께** 복사해야 한다.
+
 ## GHCR 인증
 
 GHCR push 권한이 필요하다:

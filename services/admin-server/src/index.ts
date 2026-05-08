@@ -46,6 +46,18 @@ if (!process.env.INTERNAL_API_TOKEN || process.env.INTERNAL_API_TOKEN.length < 3
 
 // SQLite DB 초기화 — 앱 기동 시 1회 실행
 const db = new Database(process.env.DB_PATH || './data/admin.db');
+
+// 운영 PRAGMA — 동시성·내구성·백업 안전성 균형
+// - WAL: 단일 라이터/다중 리더 동시성 향상 (SSE/스트림 + stats-collector 환경에서 SQLITE_BUSY 회피)
+// - synchronous=NORMAL: WAL과 짝, FULL 대비 fsync 비용 절감하면서도 충분한 내구성
+// - busy_timeout=5000: 짧은 락 경합 시 즉시 SQLITE_BUSY 대신 5초까지 대기 후 재시도
+// - wal_autocheckpoint=1000: WAL 파일 비대화 방지 (1000 페이지 ≈ 4MB 마다 자동 체크포인트)
+// 백업 시 admin.db / admin.db-wal / admin.db-shm 동행 카피 또는 .backup/VACUUM INTO 사용 필요.
+db.pragma('journal_mode = WAL');
+db.pragma('synchronous = NORMAL');
+db.pragma('busy_timeout = 5000');
+db.pragma('wal_autocheckpoint = 1000');
+
 db.exec(DOMAIN_SCHEMA);
 
 // 마이그레이션: 기존 DB에 새 컬럼이 없으면 추가 (003-domain-enhanced)
