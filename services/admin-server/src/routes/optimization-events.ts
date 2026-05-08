@@ -17,6 +17,27 @@ const ALLOWED_EVENT_TYPES: ReadonlySet<OptimizationEventType> = new Set([
   'media_cache', 'image_optimize', 'text_compress',
 ]);
 
+/**
+ * 허용 decision 화이트리스트 — Phase 13/14/15 + 공통 bypass의 합집합.
+ * GET /api/optimization/events / /api/optimization/stats가 받는 `decision` 쿼리에 적용.
+ * 없는 값을 받으면 SQL exact match에서 silent 0건이 되어 운영자가 "필터가 안 먹는다 / 데이터가 진짜 없다"를
+ * 구분할 수 없으므로 (#318), since/period(#300)와 동일하게 400으로 거부한다.
+ *
+ * 정의는 `db/optimization-events-repo.ts` 헤더 주석 + proxy/optimizer-service의 emit 경로와 일치한다.
+ */
+const ALLOWED_DECISIONS: ReadonlySet<string> = new Set([
+  // media_cache
+  'served_200', 'served_206', 'stored_new', 'invalid_range_416',
+  // image_optimize (optimizer-service의 OptimizeDecision::as_str)
+  'optimized', 'passthrough_larger', 'passthrough_error', 'passthrough_unsupported',
+  // image_optimize 추가 분류 (rejected/skipped/error)
+  'converted', 'rejected_size', 'skipped_small', 'skipped_type', 'error',
+  // text_compress (proxy compress 경로)
+  'compressed_br', 'compressed_gzip',
+  // 공통 bypass — proxy lib.rs / events.rs에서 발행
+  'bypass_nocache', 'bypass_size', 'bypass_method', 'bypass_other',
+]);
+
 /** period 문자열 → 초 매핑. 기본 24시간. */
 const PERIOD_TO_SEC: Record<string, number> = {
   '1h':  3600,
@@ -70,6 +91,19 @@ export async function optimizationEventsRoutes(app: FastifyInstance) {
   app.get<{
     Querystring: { type?: string; host?: string; decision?: string; since?: string; limit?: string };
   }>('/api/optimization/events', async (req, reply) => {
+    // type 화이트리스트 검증 — 빈 문자열/미지정은 필터 비활성, 그 외 모르는 값은 400 거부 (#318).
+    // since/period(#300)와 정책을 통일해 silent 0건 혼란을 막는다.
+    const typeRaw = req.query.type;
+    if (typeRaw !== undefined && typeRaw !== ''
+        && !ALLOWED_EVENT_TYPES.has(typeRaw as OptimizationEventType)) {
+      return reply.status(400).send({ error: `invalid type: ${typeRaw}` });
+    }
+    // decision 화이트리스트 검증 — type과 동일 정책 (#318)
+    const decisionRaw = req.query.decision;
+    if (decisionRaw !== undefined && decisionRaw !== ''
+        && !ALLOWED_DECISIONS.has(decisionRaw)) {
+      return reply.status(400).send({ error: `invalid decision: ${decisionRaw}` });
+    }
     // since가 들어왔다면 ISO 8601 파싱 가능해야 함 — 'Invalid Date'면 거부
     const sinceRaw = req.query.since;
     if (sinceRaw !== undefined && sinceRaw !== '') {
@@ -80,9 +114,9 @@ export async function optimizationEventsRoutes(app: FastifyInstance) {
     }
     const limitNum = req.query.limit !== undefined ? Number(req.query.limit) : undefined;
     const events = repo.query({
-      event_type: req.query.type,
+      event_type: typeRaw !== '' ? typeRaw : undefined,
       host:       normalizeHostQuery(req.query.host),
-      decision:   req.query.decision,
+      decision:   decisionRaw !== '' ? decisionRaw : undefined,
       since:      sinceRaw,
       limit:      Number.isFinite(limitNum) ? (limitNum as number) : undefined,
     });
@@ -97,13 +131,20 @@ export async function optimizationEventsRoutes(app: FastifyInstance) {
   app.get<{
     Querystring: { type?: string; host?: string; period?: string };
   }>('/api/optimization/stats', async (req, reply) => {
+    // type 화이트리스트 검증 — events 라우트와 동일 정책 (#318).
+    // 잘못된 type이 들어오면 silent 0건 집계가 되어 "기간/타입 변경이 안 먹는다"는 운영자 혼란을 유발.
+    const typeRaw = req.query.type;
+    if (typeRaw !== undefined && typeRaw !== ''
+        && !ALLOWED_EVENT_TYPES.has(typeRaw as OptimizationEventType)) {
+      return reply.status(400).send({ error: `invalid type: ${typeRaw}` });
+    }
     const period = req.query.period ?? '24h';
     const period_sec = PERIOD_TO_SEC[period];
     if (period_sec === undefined) {
       return reply.status(400).send({ error: `invalid period: ${period}` });
     }
     const by_decision = repo.statsByDecision({
-      event_type: req.query.type,
+      event_type: typeRaw !== '' ? typeRaw : undefined,
       host:       normalizeHostQuery(req.query.host),
       period_sec,
     });

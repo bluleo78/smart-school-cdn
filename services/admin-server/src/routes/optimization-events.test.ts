@@ -186,6 +186,37 @@ describe('GET /api/optimization/events', () => {
     expect(r2.statusCode).toBe(200);
   });
 
+  it('type이 화이트리스트 밖이면 400 거부 (#318)', async () => {
+    const { app } = mkApp();
+    const r1 = await app.inject({ method: 'GET', url: '/api/optimization/events?type=NOT_A_TYPE' });
+    expect(r1.statusCode).toBe(400);
+    expect(r1.json().error).toMatch(/invalid type/);
+    // 빈 문자열은 필터 비활성 (200)
+    const r2 = await app.inject({ method: 'GET', url: '/api/optimization/events?type=' });
+    expect(r2.statusCode).toBe(200);
+    // 허용 값은 200
+    const r3 = await app.inject({ method: 'GET', url: '/api/optimization/events?type=media_cache' });
+    expect(r3.statusCode).toBe(200);
+  });
+
+  it('decision이 화이트리스트 밖이면 400 거부 (#318)', async () => {
+    const { app } = mkApp();
+    const r1 = await app.inject({ method: 'GET', url: '/api/optimization/events?decision=evil-payload' });
+    expect(r1.statusCode).toBe(400);
+    expect(r1.json().error).toMatch(/invalid decision/);
+    // 옛 이름/오타도 거부
+    const r2 = await app.inject({ method: 'GET', url: '/api/optimization/events?decision=image_optimize' });
+    expect(r2.statusCode).toBe(400);
+    // 빈 문자열은 필터 비활성 (200)
+    const r3 = await app.inject({ method: 'GET', url: '/api/optimization/events?decision=' });
+    expect(r3.statusCode).toBe(200);
+    // 허용 값은 200 (대표 샘플)
+    for (const d of ['served_206', 'stored_new', 'optimized', 'compressed_br', 'bypass_nocache']) {
+      const r = await app.inject({ method: 'GET', url: `/api/optimization/events?decision=${d}` });
+      expect(r.statusCode).toBe(200);
+    }
+  });
+
   it('limit 파라미터 적용', async () => {
     const { app } = mkApp();
     await app.inject({
@@ -264,6 +295,19 @@ describe('GET /api/optimization/stats', () => {
       method: 'GET', url: '/api/optimization/stats?host=%20httpbin.org%20',
     });
     expect(padded.json().total).toBe(2);
+  });
+
+  it('type이 화이트리스트 밖이면 400 거부 (#318)', async () => {
+    const { app } = mkApp();
+    const r1 = await app.inject({ method: 'GET', url: '/api/optimization/stats?type=NOT_A_TYPE' });
+    expect(r1.statusCode).toBe(400);
+    expect(r1.json().error).toMatch(/invalid type/);
+    // 빈 문자열은 필터 비활성 (200)
+    const r2 = await app.inject({ method: 'GET', url: '/api/optimization/stats?type=' });
+    expect(r2.statusCode).toBe(200);
+    // 허용 값은 200
+    const r3 = await app.inject({ method: 'GET', url: '/api/optimization/stats?type=text_compress' });
+    expect(r3.statusCode).toBe(200);
   });
 
   it('period=1h로 요청하면 period_sec=3600', async () => {
