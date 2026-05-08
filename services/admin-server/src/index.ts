@@ -252,8 +252,8 @@ await app.register(domainRoutes, { domainRepo });
 /** 시스템 헬스체크 API 라우트 등록 */
 await app.register(systemRoutes);
 
-/** 최적화 프로파일 + 절감 통계 API 라우트 등록 */
-await app.register(optimizerRoutes);
+/** 최적화 프로파일 + 절감 통계 API 라우트 등록 — PUT 시 멤버십 검증을 위해 domainRepo 주입 (#309) */
+await app.register(optimizerRoutes, { domainRepo });
 
 /** DNS 상태/레코드/쿼리/메트릭 API 라우트 등록 */
 await app.register(dnsRoutes);
