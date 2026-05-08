@@ -210,7 +210,7 @@ describe('GET /api/domains', () => {
         const app = buildApp(repo);
         const res = await app.inject({ method: 'GET', url: `/api/domains?enabled=${encodeURIComponent(val)}` });
         expect(res.statusCode).toBe(400);
-        expect(JSON.parse(res.body).error).toContain('enabled');
+        expect(JSON.parse(res.body).message).toContain('enabled');
       });
     }
 
@@ -231,7 +231,7 @@ describe('GET /api/domains', () => {
         const app = buildApp(repo);
         const res = await app.inject({ method: 'GET', url: `/api/domains?sort=${encodeURIComponent(val)}` });
         expect(res.statusCode).toBe(400);
-        expect(JSON.parse(res.body).error).toContain('sort');
+        expect(JSON.parse(res.body).message).toContain('sort');
       });
     }
 
@@ -252,7 +252,7 @@ describe('GET /api/domains', () => {
         const app = buildApp(repo);
         const res = await app.inject({ method: 'GET', url: `/api/domains?order=${encodeURIComponent(val)}` });
         expect(res.statusCode).toBe(400);
-        expect(JSON.parse(res.body).error).toContain('order');
+        expect(JSON.parse(res.body).message).toContain('order');
       });
     }
 
@@ -262,7 +262,7 @@ describe('GET /api/domains', () => {
       const longQ = 'a'.repeat(201);
       const res = await app.inject({ method: 'GET', url: `/api/domains?q=${longQ}` });
       expect(res.statusCode).toBe(400);
-      expect(JSON.parse(res.body).error).toContain('q');
+      expect(JSON.parse(res.body).message).toContain('q');
     });
 
     it('q 200자 정확히는 200 (경계값 허용)', async () => {
@@ -321,7 +321,7 @@ describe('POST /api/domains', () => {
       payload: { host: '<script>alert(1)</script>.evil.com', origin: 'https://origin.test' },
     });
     expect(res.statusCode).toBe(400);
-    expect(JSON.parse(res.body).error).toContain('유효한 도메인 형식이 아닙니다');
+    expect(JSON.parse(res.body).message).toContain('유효한 도메인 형식이 아닙니다');
   });
 
   it('특수문자가 포함된 host는 400을 반환한다 (#37)', async () => {
@@ -333,7 +333,7 @@ describe('POST /api/domains', () => {
       payload: { host: 'in valid!domain', origin: 'https://origin.test' },
     });
     expect(res.statusCode).toBe(400);
-    expect(JSON.parse(res.body).error).toContain('유효한 도메인 형식이 아닙니다');
+    expect(JSON.parse(res.body).message).toContain('유효한 도메인 형식이 아닙니다');
   });
 
   it('와일드카드 도메인(*.sub.com)은 201을 반환한다 (#37)', async () => {
@@ -396,7 +396,7 @@ describe('POST /api/domains', () => {
     });
     expect(res.statusCode).toBe(502);
     const body = JSON.parse(res.body);
-    expect(body.error).toContain('Proxy 동기화 실패');
+    expect(body.message).toContain('Proxy 동기화 실패');
     expect(body.domain?.host).toBe('textbook.com');
     // DB에는 이미 저장되어 있다 — HealthMonitor가 proxy online 전환 시 재동기화한다
     expect(repo.findByHost('textbook.com')?.origin).toBe('https://textbook.com');
@@ -440,7 +440,7 @@ describe('POST /api/domains', () => {
       payload: { host: 'textbook.com', origin: 'javascript:alert(1)' },
     });
     expect(res.statusCode).toBe(400);
-    expect(JSON.parse(res.body).error).toContain('유효한 origin URL이 아닙니다');
+    expect(JSON.parse(res.body).message).toContain('유효한 origin URL이 아닙니다');
   });
 
   it('ftp:// scheme origin은 400을 반환한다 (#42)', async () => {
@@ -451,7 +451,7 @@ describe('POST /api/domains', () => {
       payload: { host: 'textbook.com', origin: 'ftp://textbook.com' },
     });
     expect(res.statusCode).toBe(400);
-    expect(JSON.parse(res.body).error).toContain('유효한 origin URL이 아닙니다');
+    expect(JSON.parse(res.body).message).toContain('유효한 origin URL이 아닙니다');
   });
 
   it('scheme 없는 origin(textbook.com)은 400을 반환한다 (#42)', async () => {
@@ -462,7 +462,7 @@ describe('POST /api/domains', () => {
       payload: { host: 'textbook.com', origin: 'textbook.com' },
     });
     expect(res.statusCode).toBe(400);
-    expect(JSON.parse(res.body).error).toContain('유효한 origin URL이 아닙니다');
+    expect(JSON.parse(res.body).message).toContain('유효한 origin URL이 아닙니다');
   });
 
   /** origin 정규화 — trailing slash/host casing/path 표준화 (#191) */
@@ -497,7 +497,7 @@ describe('POST /api/domains', () => {
       payload: { host: 'a.test', origin: 'https://example.com/api/v2' },
     });
     expect(res.statusCode).toBe(400);
-    expect(JSON.parse(res.body).error).toContain('유효한 origin URL이 아닙니다');
+    expect(JSON.parse(res.body).message).toContain('유효한 origin URL이 아닙니다');
   });
 
   it('query/hash 가 포함된 origin 은 400 으로 거부된다 (#191)', async () => {
@@ -571,8 +571,8 @@ describe('POST /api/domains/bulk', () => {
     });
     expect(res.statusCode).toBe(400);
     const body = JSON.parse(res.body);
-    expect(body.error).toContain('최대 500');
-    expect(body.error).toContain('501');
+    expect(body.message).toContain('최대 500');
+    expect(body.message).toContain('501');
     // 어느 것도 저장되지 않아야 한다 — 부분 저장 방지
     expect(repo.findByHost('host0.example.com')).toBeUndefined();
   });
@@ -599,7 +599,7 @@ describe('POST /api/domains/bulk', () => {
       payload: {},
     });
     expect(res.statusCode).toBe(400);
-    expect(JSON.parse(res.body).error).toContain('필수');
+    expect(JSON.parse(res.body).message).toContain('필수');
   });
 
   /** origin scheme 검증 — javascript: 등 비정상 scheme 차단 (#42) */
@@ -611,7 +611,7 @@ describe('POST /api/domains/bulk', () => {
       payload: { domains: [{ host: 'textbook.com', origin: 'javascript:alert(1)' }] },
     });
     expect(res.statusCode).toBe(400);
-    expect(JSON.parse(res.body).error).toContain('유효한 origin URL이 아닙니다');
+    expect(JSON.parse(res.body).message).toContain('유효한 origin URL이 아닙니다');
   });
 
   it('ftp:// scheme origin을 포함한 bulk 요청은 400을 반환한다 (#42)', async () => {
@@ -622,7 +622,7 @@ describe('POST /api/domains/bulk', () => {
       payload: { domains: [{ host: 'a.com', origin: 'ftp://a.com' }] },
     });
     expect(res.statusCode).toBe(400);
-    expect(JSON.parse(res.body).error).toContain('유효한 origin URL이 아닙니다');
+    expect(JSON.parse(res.body).message).toContain('유효한 origin URL이 아닙니다');
   });
 
   it('혼합 목록에서 하나라도 비정상 scheme이 있으면 전체 400 반환한다 (#42)', async () => {
@@ -638,7 +638,7 @@ describe('POST /api/domains/bulk', () => {
       },
     });
     expect(res.statusCode).toBe(400);
-    expect(JSON.parse(res.body).error).toContain('유효한 origin URL이 아닙니다');
+    expect(JSON.parse(res.body).message).toContain('유효한 origin URL이 아닙니다');
     // 정상 도메인도 저장되지 않아야 한다 (검증 실패 시 전체 요청을 거부)
     expect(repo.findByHost('good.com')).toBeUndefined();
   });
@@ -652,7 +652,7 @@ describe('POST /api/domains/bulk', () => {
       payload: { domains: [{ host: '<script>alert(1)</script>.invalid', origin: 'http://example.com' }] },
     });
     expect(res.statusCode).toBe(400);
-    expect(JSON.parse(res.body).error).toContain('유효한 도메인 형식이 아닙니다');
+    expect(JSON.parse(res.body).message).toContain('유효한 도메인 형식이 아닙니다');
   });
 
   it('path traversal host는 400을 반환한다 (#152)', async () => {
@@ -663,7 +663,7 @@ describe('POST /api/domains/bulk', () => {
       payload: { domains: [{ host: '../traversal', origin: 'http://example.com' }] },
     });
     expect(res.statusCode).toBe(400);
-    expect(JSON.parse(res.body).error).toContain('유효한 도메인 형식이 아닙니다');
+    expect(JSON.parse(res.body).message).toContain('유효한 도메인 형식이 아닙니다');
   });
 
   it('혼합 목록에서 하나라도 비정상 host가 있으면 전체 400 반환한다 (#152)', async () => {
@@ -729,8 +729,8 @@ describe('POST /api/domains/bulk', () => {
     });
     expect(res.statusCode).toBe(400);
     const body = JSON.parse(res.body);
-    expect(body.error).toContain('중복된 host');
-    expect(body.error).toContain('dup.example.com');
+    expect(body.message).toContain('중복된 host');
+    expect(body.message).toContain('dup.example.com');
     // 어느 것도 저장되지 않아야 한다 — 부분 저장으로 인한 의도 손실 방지
     expect(repo.findByHost('dup.example.com')).toBeUndefined();
   });
@@ -836,7 +836,7 @@ describe('PUT /api/domains/:host', () => {
       payload: { origin: 'http://' },
     });
     expect(res.statusCode).toBe(400);
-    expect(JSON.parse(res.body).error).toContain('유효한 origin URL이 아닙니다');
+    expect(JSON.parse(res.body).message).toContain('유효한 origin URL이 아닙니다');
     // 원래 origin이 그대로 유지되어야 한다 (검증 실패 시 DB 변경 금지)
     expect(repo.findByHost('httpbin.org')?.origin).toBe('https://httpbin.org');
   });
@@ -928,7 +928,7 @@ describe('PUT /api/domains/:host', () => {
       payload: { description: 'a'.repeat(501) },
     });
     expect(res.statusCode).toBe(400);
-    expect(JSON.parse(res.body).error).toContain('500자');
+    expect(JSON.parse(res.body).message).toContain('500자');
     // DB에 저장되지 않았는지 확인
     expect(repo.findByHost('httpbin.org')?.description).toBe('');
   });
@@ -958,7 +958,7 @@ describe('PUT /api/domains/:host', () => {
       payload: { enabled: 99 },
     });
     expect(res.statusCode).toBe(400);
-    expect(JSON.parse(res.body).error).toContain('0 또는 1');
+    expect(JSON.parse(res.body).message).toContain('0 또는 1');
     // DB에 반영되지 않았는지 확인
     expect(repo.findByHost('httpbin.org')?.enabled).toBe(1);
   });
@@ -1267,7 +1267,7 @@ describe('DELETE /api/domains/bulk', () => {
     });
     expect(res.statusCode).toBe(400);
     const body = JSON.parse(res.body);
-    expect(body.error).toMatch(/문자열 host/);
+    expect(body.message).toMatch(/문자열 host/);
     // 거부됐으므로 DB에서 삭제되지 않아야 한다 (부수 효과 없음 보장).
     expect(repo.findByHost('exists.test')).toBeDefined();
   });

@@ -200,27 +200,35 @@ export async function domainRoutes(
         } else if (ENABLED_FALSE_VALUES.has(normalized)) {
           enabledFilter = false;
         } else {
+          // 표준 envelope (#329): 머신 코드는 `error`, 사람 표시 메시지는 `message`로 분리
           return reply.status(400).send({
-            error: `enabled는 true|false|1|0|yes|no 중 하나여야 합니다 (받은 값: "${enabled}").`,
+            error: 'invalid_input',
+            message: `enabled는 true|false|1|0|yes|no 중 하나여야 합니다 (받은 값: "${enabled}").`,
           });
         }
       }
       // sort strict 검증 (#295) — 화이트리스트 외 값(예: 'invalid', 'DROP_TABLE')은 명시 거부
       if (sort !== undefined && !SORT_ALLOWED.has(sort)) {
+        // 표준 envelope (#329)
         return reply.status(400).send({
-          error: `sort는 host|created_at|updated_at 중 하나여야 합니다 (받은 값: "${sort}").`,
+          error: 'invalid_input',
+          message: `sort는 host|created_at|updated_at 중 하나여야 합니다 (받은 값: "${sort}").`,
         });
       }
       // order strict 검증 (#295) — 'asc'|'desc' 외 값은 명시 거부 (대소문자 무시)
       if (order !== undefined && !ORDER_ALLOWED.has(order.toLowerCase())) {
+        // 표준 envelope (#329)
         return reply.status(400).send({
-          error: `order는 asc|desc 중 하나여야 합니다 (받은 값: "${order}").`,
+          error: 'invalid_input',
+          message: `order는 asc|desc 중 하나여야 합니다 (받은 값: "${order}").`,
         });
       }
       // q 길이 가드 (#295) — UI 검색박스 maxLength와 정합. 비정상적 폭주 입력 차단.
       if (q !== undefined && q.length > Q_MAX_LENGTH) {
+        // 표준 envelope (#329)
         return reply.status(400).send({
-          error: `q는 ${Q_MAX_LENGTH}자 이하여야 합니다 (받은 길이: ${q.length}).`,
+          error: 'invalid_input',
+          message: `q는 ${Q_MAX_LENGTH}자 이하여야 합니다 (받은 길이: ${q.length}).`,
         });
       }
       // limit/offset: 문자열 → 숫자 변환. NaN/음수/0은 undefined로 처리해 페이지네이션을 적용하지 않는다.
@@ -391,15 +399,18 @@ export async function domainRoutes(
       const rawBody = request.body ?? {};
       const domains = Array.isArray(rawBody.domains) ? rawBody.domains : undefined;
       if (!Array.isArray(domains) || domains.length === 0) {
-        return reply.status(400).send({ error: 'domains 배열은 필수 항목입니다.' });
+        // 표준 envelope (#329)
+        return reply.status(400).send({ error: 'invalid_input', message: 'domains 배열은 필수 항목입니다.' });
       }
       // (#255) 일괄 등록 상한 가드 — admin-web Textarea의 줄 수 상한과 일치시켜
       // 직접 API 호출이나 mock 우회로 거대한 배열이 들어오는 경우에도 동일하게 거부한다.
       // Fastify body-limit(1MB) 외 별도의 length 가드가 없어 long-running 트랜잭션 / 503 위험을 사전 차단.
       const BULK_MAX_DOMAINS = 500;
       if (domains.length > BULK_MAX_DOMAINS) {
+        // 표준 envelope (#329)
         return reply.status(400).send({
-          error: `한 번에 등록할 수 있는 도메인은 최대 ${BULK_MAX_DOMAINS}개입니다 (요청: ${domains.length}개).`,
+          error: 'invalid_input',
+          message: `한 번에 등록할 수 있는 도메인은 최대 ${BULK_MAX_DOMAINS}개입니다 (요청: ${domains.length}개).`,
         });
       }
       // host 정규화 (#201) — DNS case-insensitive. 정규화 후 검증/저장 모두 lowercase 입력으로 일관.
@@ -412,7 +423,11 @@ export async function domainRoutes(
       // 단일 추가(/api/domains)와 동일한 검증을 적용하여 비정상 host가 DB에 저장되는 것을 방지
       for (const d of normalizedHostDomains) {
         if (typeof d.host !== 'string' || !DOMAIN_RE.test(d.host)) {
-          return reply.status(400).send({ error: `유효한 도메인 형식이 아닙니다: "${d.host}"` });
+          // 표준 envelope (#329)
+          return reply.status(400).send({
+            error: 'domain_invalid_format',
+            message: `유효한 도메인 형식이 아닙니다: "${d.host}"`,
+          });
         }
       }
       // 동일 host 중복 줄 방어 (#225) — 클라이언트가 사전 검출하지만, 직접 API 호출 시
@@ -422,8 +437,10 @@ export async function domainRoutes(
       for (const d of normalizedHostDomains) {
         if (typeof d.host !== 'string') continue;
         if (seenHosts.has(d.host)) {
+          // 표준 envelope (#329)
           return reply.status(400).send({
-            error: `중복된 host: ${d.host}. 한 번에는 같은 host를 한 번만 입력해 주세요.`,
+            error: 'duplicate_host',
+            message: `중복된 host: ${d.host}. 한 번에는 같은 host를 한 번만 입력해 주세요.`,
           });
         }
         seenHosts.add(d.host);
@@ -435,7 +452,11 @@ export async function domainRoutes(
           // 에러 메시지에 입력값 일부를 포함 — 5000자 폭주 방지 위해 80자로 잘라낸다
           const raw: unknown = d.origin;
           const preview = typeof raw === 'string' ? raw.slice(0, 80) : String(raw);
-          return reply.status(400).send({ error: `${ORIGIN_INVALID_MSG} (입력: "${preview}")` });
+          // 표준 envelope (#329)
+          return reply.status(400).send({
+            error: 'origin_invalid',
+            message: `${ORIGIN_INVALID_MSG} (입력: "${preview}")`,
+          });
         }
       }
       // origin 정규화 — trailing slash/host 대소문자/path 자동 추가가 동일 origin 을
@@ -446,7 +467,8 @@ export async function domainRoutes(
       const result = domainRepo.bulkInsert(normalizedDomains);
       const synced = await syncToProxy(domainRepo);
       if (!synced) {
-        return reply.status(502).send({ error: 'Proxy 동기화 실패', result });
+        // 표준 envelope (#329) — `result`는 부분 진행 정보로 함께 전달
+        return reply.status(502).send({ error: 'proxy_sync_failed', message: 'Proxy 동기화 실패', result });
       }
       await fanOutGrpc(app, domainRepo);
       // 신규 추가된 host 에만 기본 최적화 프로파일 생성 — skipped(기존 host) 는 이미 프로파일이 있다고 가정 (#197).
@@ -475,7 +497,8 @@ export async function domainRoutes(
     async (request, reply) => {
       const rawHosts = request.body?.hosts;
       if (!Array.isArray(rawHosts) || rawHosts.length === 0) {
-        return reply.status(400).send({ error: 'hosts 배열은 필수 항목입니다.' });
+        // 표준 envelope (#329)
+        return reply.status(400).send({ error: 'invalid_input', message: 'hosts 배열은 필수 항목입니다.' });
       }
       // 비문자열 항목 사전 거부 (#310) — 과거에는 비문자열을 그대로 통과시켜 better-sqlite3
       // prepared statement 바인딩에서 raw "Too few parameter values were provided" 500 으로 크래시했다.
@@ -483,7 +506,8 @@ export async function domainRoutes(
       // 입력 경계에서 즉시 거부해 일관된 정책을 유지한다.
       const invalidHost = rawHosts.find((h) => typeof h !== 'string');
       if (invalidHost !== undefined) {
-        return reply.status(400).send({ error: 'hosts 배열에는 문자열 host만 허용됩니다.' });
+        // 표준 envelope (#329)
+        return reply.status(400).send({ error: 'invalid_input', message: 'hosts 배열에는 문자열 host만 허용됩니다.' });
       }
       // host 정규화 (#201) — 같은 도메인의 대소문자 변형이 섞여 들어와도 일관되게 lowercase 키로 삭제.
       const hosts = (rawHosts as string[]).map((h) => normalizeHost(h));
@@ -512,7 +536,8 @@ export async function domainRoutes(
         return { commit: synced, value: { synced, deleted, missing } };
       });
       if (!txResult.synced) {
-        return reply.status(502).send({ error: 'Proxy 동기화 실패' });
+        // 표준 envelope (#329)
+        return reply.status(502).send({ error: 'proxy_sync_failed', message: 'Proxy 동기화 실패' });
       }
       await fanOutGrpc(app, domainRepo);
       // requested 는 사용자가 보낸 호스트 수(중복 포함 원본 길이) — 토스트의 "요청 N건 중 M건"의 N에 해당.
@@ -534,24 +559,32 @@ export async function domainRoutes(
       const host = typeof rawBody.host === 'string' ? normalizeHost(rawBody.host) : rawBody.host;
       const origin = rawBody.origin;
       if (!host || !origin) {
-        return reply.status(400).send({ error: 'host와 origin은 필수 항목입니다.' });
+        // 표준 envelope (#329)
+        return reply.status(400).send({ error: 'invalid_input', message: 'host와 origin은 필수 항목입니다.' });
       }
       // host 형식 검증 — upsert 전에 수행하여 유효하지 않은 도메인이 DB에 저장되는 것을 방지
       if (!DOMAIN_RE.test(host)) {
-        return reply.status(400).send({ error: '유효한 도메인 형식이 아닙니다. (예: example.com, *.sub.com)' });
+        // 표준 envelope (#329)
+        return reply.status(400).send({
+          error: 'domain_invalid_format',
+          message: '유효한 도메인 형식이 아닙니다. (예: example.com, *.sub.com)',
+        });
       }
       // origin URL 종합 검증 — scheme/host/길이/공백 (#167)
       // PUT과 동일한 이중 방어 패턴 — javascript: 등 비정상 scheme + 빈 host + 과도 길이 + 공백 모두 차단
       if (!isValidOrigin(origin)) {
-        return reply.status(400).send({ error: ORIGIN_INVALID_MSG });
+        // 표준 envelope (#329)
+        return reply.status(400).send({ error: 'origin_invalid', message: ORIGIN_INVALID_MSG });
       }
       // origin 정규화 — `URL.origin` 으로 trailing slash/host casing 표준화 (#191)
       const normalizedOrigin = normalizeOrigin(origin);
       domainRepo.upsert(host, normalizedOrigin);
       const synced = await syncToProxy(domainRepo);
       if (!synced) {
+        // 표준 envelope (#329) — `domain`은 부분 진행 정보로 함께 전달
         return reply.status(502).send({
-          error: 'Proxy 동기화 실패',
+          error: 'proxy_sync_failed',
+          message: 'Proxy 동기화 실패',
           domain: domainRepo.findByHost(host),
         });
       }
@@ -571,7 +604,7 @@ export async function domainRoutes(
     const host = normalizeHost(decodeURIComponent(request.params.host));
     const domain = domainRepo.findByHost(host);
     if (!domain) {
-      return reply.status(404).send({ error: '도메인을 찾을 수 없습니다.' });
+      return reply.status(404).send({ error: 'domain_not_found', message: '도메인을 찾을 수 없습니다.' });
     }
     return domain;
   });
@@ -588,32 +621,39 @@ export async function domainRoutes(
     const { origin, enabled, description } = request.body ?? {};
     // origin이 전달되었는데 빈 문자열이면 400 — POST와 동일한 필수값 보장
     if (origin !== undefined && origin.trim() === '') {
-      return reply.status(400).send({ error: 'origin은 빈 문자열로 저장할 수 없습니다.' });
+      // 표준 envelope (#329)
+      return reply.status(400).send({ error: 'invalid_input', message: 'origin은 빈 문자열로 저장할 수 없습니다.' });
     }
     // origin이 전달되었으면 종합 검증 — scheme/host/길이/공백 (#167)
     // 클라이언트·서버 이중 방어 — Proxy가 올바르게 업스트림에 연결하려면 hostname/scheme 모두 유효해야 함 (#103, #167)
     if (origin !== undefined && !isValidOrigin(origin)) {
-      return reply.status(400).send({ error: ORIGIN_INVALID_MSG });
+      // 표준 envelope (#329)
+      return reply.status(400).send({ error: 'origin_invalid', message: ORIGIN_INVALID_MSG });
     }
     // origin 정규화 — 검증 통과 시 표준형으로 변환 (#191).
     // origin 이 undefined 면 그대로 유지(부분 업데이트 의미 보존)하고, 정의되었을 때만 표준화.
     const normalizedOrigin = origin !== undefined ? normalizeOrigin(origin) : undefined;
     // enabled는 0 또는 1만 허용 — 임의 정수가 DB에 저장되면 UI가 상태를 오판한다 (#156)
     if (enabled !== undefined && enabled !== 0 && enabled !== 1) {
-      return reply.status(400).send({ error: 'enabled는 0 또는 1이어야 합니다.' });
+      // 표준 envelope (#329)
+      return reply.status(400).send({ error: 'invalid_input', message: 'enabled는 0 또는 1이어야 합니다.' });
     }
     // description 최대 500자 — 무제한 저장 방지 (#155)
     if (description !== undefined && description.length > 500) {
-      return reply.status(400).send({ error: 'description은 500자 이하여야 합니다.' });
+      // 표준 envelope (#329)
+      return reply.status(400).send({
+        error: 'description_too_long',
+        message: 'description은 500자 이하여야 합니다.',
+      });
     }
     // 롤백을 위해 수정 전 원본 값을 먼저 저장한다
     const original = domainRepo.findByHost(host);
     if (!original) {
-      return reply.status(404).send({ error: '도메인을 찾을 수 없습니다.' });
+      return reply.status(404).send({ error: 'domain_not_found', message: '도메인을 찾을 수 없습니다.' });
     }
     const updated = domainRepo.update(host, { origin: normalizedOrigin, enabled, description });
     if (!updated) {
-      return reply.status(404).send({ error: '도메인을 찾을 수 없습니다.' });
+      return reply.status(404).send({ error: 'domain_not_found', message: '도메인을 찾을 수 없습니다.' });
     }
     const synced = await syncToProxy(domainRepo);
     if (!synced) {
@@ -623,7 +663,8 @@ export async function domainRoutes(
         enabled: original.enabled,
         description: original.description,
       });
-      return reply.status(502).send({ error: 'Proxy 동기화 실패' });
+      // 표준 envelope (#329)
+      return reply.status(502).send({ error: 'proxy_sync_failed', message: 'Proxy 동기화 실패' });
     }
     await fanOutGrpc(app, domainRepo);
     return updated;
@@ -646,17 +687,18 @@ export async function domainRoutes(
       // 롤백 시 절대값 복원을 위해 변경 전 enabled 값을 먼저 캡처
       const original = domainRepo.findByHost(host);
       if (!original) {
-        return reply.status(404).send({ error: '도메인을 찾을 수 없습니다.' });
+        return reply.status(404).send({ error: 'domain_not_found', message: '도메인을 찾을 수 없습니다.' });
       }
       const toggled = domainRepo.toggleEnabled(host);
       if (!toggled) {
-        return reply.status(404).send({ error: '도메인을 찾을 수 없습니다.' });
+        return reply.status(404).send({ error: 'domain_not_found', message: '도메인을 찾을 수 없습니다.' });
       }
       const synced = await syncToProxy(domainRepo);
       if (!synced) {
         // 롤백 — 절대값(원본 enabled)으로 복원하여 invert 누적 문제 방지 (#192)
         domainRepo.update(host, { enabled: original.enabled });
-        return reply.status(502).send({ error: 'Proxy 동기화 실패' });
+        // 표준 envelope (#329)
+      return reply.status(502).send({ error: 'proxy_sync_failed', message: 'Proxy 동기화 실패' });
       }
       await fanOutGrpc(app, domainRepo);
       return toggled;
@@ -668,7 +710,7 @@ export async function domainRoutes(
     const host = normalizeHost(decodeURIComponent(request.params.host));
     const domain = domainRepo.findByHost(host);
     if (!domain) {
-      return reply.status(404).send({ error: '도메인을 찾을 수 없습니다.' });
+      return reply.status(404).send({ error: 'domain_not_found', message: '도메인을 찾을 수 없습니다.' });
     }
 
     const results = { proxy: false, tls: false, dns: false };
@@ -694,15 +736,17 @@ export async function domainRoutes(
     const host = normalizeHost(decodeURIComponent(request.params.host));
     const domain = domainRepo.findByHost(host);
     if (!domain) {
-      return reply.status(404).send({ error: '도메인을 찾을 수 없습니다.' });
+      return reply.status(404).send({ error: 'domain_not_found', message: '도메인을 찾을 수 없습니다.' });
     }
     try {
       // Proxy는 /domains/{host}/purge 엔드포인트를 노출함 (올바른 URL 사용)
       await axios.post(`${PROXY_ADMIN_URL}/domains/${encodeURIComponent(host)}/purge`, {}, { timeout: 5000 });
       return reply.status(200).send({ ok: true });
     } catch (err) {
+      // 표준 envelope (#329)
       return reply.status(502).send({
-        error: 'Proxy 캐시 퍼지 실패',
+        error: 'proxy_purge_failed',
+        message: 'Proxy 캐시 퍼지 실패',
         detail: err instanceof Error ? err.message : String(err),
       });
     }
@@ -715,7 +759,7 @@ export async function domainRoutes(
       const host = normalizeHost(decodeURIComponent(request.params.host));
       const domain = domainRepo.findByHost(host);
       if (!domain) {
-        return reply.status(404).send({ error: '도메인을 찾을 수 없습니다.' });
+        return reply.status(404).send({ error: 'domain_not_found', message: '도메인을 찾을 수 없습니다.' });
       }
       const summary = statsRepo.getSummaryForHost(host);
       return {
@@ -741,7 +785,7 @@ export async function domainRoutes(
       const host = normalizeHost(decodeURIComponent(request.params.host));
       const domain = domainRepo.findByHost(host);
       if (!domain) {
-        return reply.status(404).send({ error: '도메인을 찾을 수 없습니다.' });
+        return reply.status(404).send({ error: 'domain_not_found', message: '도메인을 찾을 수 없습니다.' });
       }
       const q = request.query;
       // 1h, custom 추가 — 기존 24h/7d/30d 동작 유지
@@ -757,7 +801,11 @@ export async function domainRoutes(
         const from = Number(q.from);
         const to = Number(q.to);
         if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) {
-          return reply.code(400).send({ error: 'period=custom requires numeric from < to' });
+          // 표준 envelope (#329)
+          return reply.code(400).send({
+            error: 'invalid_period',
+            message: 'period=custom requires numeric from < to',
+          });
         }
         range = { from, to };
       }
@@ -811,7 +859,7 @@ export async function domainRoutes(
     const host = normalizeHost(decodeURIComponent(request.params.host));
     const domain = domainRepo.findByHost(host);
     if (!domain) {
-      return reply.status(404).send({ error: '도메인을 찾을 수 없습니다.' });
+      return reply.status(404).send({ error: 'domain_not_found', message: '도메인을 찾을 수 없습니다.' });
     }
 
     // 음수 limit/offset은 SQLite에서 예기치 않은 동작을 유발할 수 있으므로 클램프
@@ -842,7 +890,11 @@ export async function domainRoutes(
         const fromNum = Number(request.query.from);
         const toNum   = Number(request.query.to);
         if (!Number.isFinite(fromNum) || !Number.isFinite(toNum) || toNum <= fromNum) {
-          return reply.code(400).send({ error: 'period=custom requires numeric from < to' });
+          // 표준 envelope (#329)
+          return reply.code(400).send({
+            error: 'invalid_period',
+            message: 'period=custom requires numeric from < to',
+          });
         }
         since = fromNum;
         until = toNum;
@@ -938,7 +990,11 @@ export async function domainRoutes(
         // custom: from/to 필수 — 누락·비정수·역전 시 400 반환
         const f = Number(q.from), t = Number(q.to);
         if (!Number.isFinite(f) || !Number.isFinite(t) || t <= f) {
-          return reply.code(400).send({ error: 'period=custom requires numeric from < to' });
+          // 표준 envelope (#329)
+          return reply.code(400).send({
+            error: 'invalid_period',
+            message: 'period=custom requires numeric from < to',
+          });
         }
         since = f; until = t;
       } else {
@@ -1012,7 +1068,7 @@ export async function domainRoutes(
     // ROLLBACK 시 도메인 행은 created_at 포함 원형 그대로, domain_stats CASCADE 도 자동 복원된다.
     // 빠른 404 경로 — 트랜잭션 진입 전에 존재 여부 확인 (없으면 BEGIN IMMEDIATE 비용 절약)
     if (!domainRepo.findByHost(host)) {
-      return reply.status(404).send({ error: '도메인을 찾을 수 없습니다.' });
+      return reply.status(404).send({ error: 'domain_not_found', message: '도메인을 찾을 수 없습니다.' });
     }
     const txResult = await domainRepo.runInTransactionAsync<{ ok: boolean; existed: boolean }>(async () => {
       const deleted = domainRepo.delete(host);
@@ -1027,10 +1083,11 @@ export async function domainRoutes(
       return { commit: synced, value: { ok: synced, existed: true } };
     });
     if (!txResult.existed) {
-      return reply.status(404).send({ error: '도메인을 찾을 수 없습니다.' });
+      return reply.status(404).send({ error: 'domain_not_found', message: '도메인을 찾을 수 없습니다.' });
     }
     if (!txResult.ok) {
-      return reply.status(502).send({ error: 'Proxy 동기화 실패' });
+      // 표준 envelope (#329)
+      return reply.status(502).send({ error: 'proxy_sync_failed', message: 'Proxy 동기화 실패' });
     }
     // gRPC fan-out: tls-service + dns-service 도메인 동기화
     await fanOutGrpc(app, domainRepo);
