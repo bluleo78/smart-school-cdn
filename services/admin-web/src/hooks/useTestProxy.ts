@@ -13,6 +13,8 @@ export function useTestProxy() {
       queryClient.invalidateQueries({ queryKey: ['proxy', 'requests'] });
       queryClient.invalidateQueries({ queryKey: ['cache', 'stats'] });
       queryClient.invalidateQueries({ queryKey: ['cache', 'popular'] });
+      // ['cache','series'] : 캐시 시계열 차트(CacheHitRateChart)가 stale로 남지 않도록 함께 무효화 (#335)
+      queryClient.invalidateQueries({ queryKey: ['cache', 'series'] });
     },
   });
 }
