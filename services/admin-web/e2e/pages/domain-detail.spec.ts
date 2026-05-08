@@ -3849,3 +3849,88 @@ test.describe('도메인 상세 — TLS 인증서 조회 실패 시 에러 분�
     await expect(page.getByTestId('tls-renew-settings')).toBeDisabled();
   });
 });
+
+// ─── 도메인 상세 5xx/네트워크 실패 분리 처리 (#307 회귀) ────────────────
+test.describe('도메인 상세 — API 5xx/네트워크 실패 분리 처리 (#307)', () => {
+  /**
+   * 수정 전: useDomain.isError 분기에서 status를 보지 않아 5xx도 404와 동일하게
+   *   '해당 도메인을 찾을 수 없습니다.' 토스트 + /domains 강제 redirect 처리됨.
+   * 수정 후:
+   *   - 404 → 기존 동작 유지 (not-found redirect)
+   *   - 5xx/네트워크 → 인라인 에러 카드 + '다시 시도' 버튼 노출, redirect 금지
+   */
+
+  test('5xx 응답 시 redirect 없이 인라인 에러 카드 + 재시도 버튼이 표시된다 (#307)', async ({ page }) => {
+    await setupDetailMocks(page);
+    // 도메인 상세만 500 으로 덮어쓰기 — react-query 재시도(3회) 모두 500 반환
+    await page.route('**/api/domains/textbook.com', (route) => {
+      if (route.request().method() === 'GET') {
+        return route.fulfill({
+          status: 500,
+          json: { error: 'internal_error', message: 'simulated 5xx' },
+        });
+      }
+      return route.fallback();
+    });
+
+    await page.goto('/domains/textbook.com');
+
+    // 에러 카드가 표시되어야 한다
+    await expect(page.getByTestId('domain-detail-error')).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('domain-detail-error')).toContainText(
+      '도메인 정보를 불러오지 못했습니다',
+    );
+    // 재시도 버튼 / 목록으로 버튼 노출
+    await expect(page.getByTestId('domain-detail-error-retry')).toBeVisible();
+    await expect(page.getByTestId('domain-detail-error-back')).toBeVisible();
+    // 핵심: redirect 되지 않고 detail URL 에 머물러 있어야 한다
+    expect(page.url()).toContain('/domains/textbook.com');
+  });
+
+  test('5xx 후 다시 시도 버튼 클릭 시 200 응답이 들어오면 정상 화면으로 회복된다 (#307)', async ({ page }) => {
+    await setupDetailMocks(page);
+    // 첫 호출들은 500, 재시도 버튼 클릭 후의 호출들은 200으로 전환
+    let recovered = false;
+    await page.route('**/api/domains/textbook.com', (route) => {
+      if (route.request().method() !== 'GET') return route.fallback();
+      if (recovered) return route.fulfill({ json: createDomain() });
+      return route.fulfill({
+        status: 500,
+        json: { error: 'internal_error', message: 'simulated 5xx' },
+      });
+    });
+
+    await page.goto('/domains/textbook.com');
+
+    await expect(page.getByTestId('domain-detail-error')).toBeVisible({ timeout: 10000 });
+
+    // 백엔드 회복 시뮬레이션 → 다시 시도 클릭
+    recovered = true;
+    await page.getByTestId('domain-detail-error-retry').click();
+
+    // 정상 헤더가 표시되어야 한다
+    await expect(page.getByRole('heading', { name: 'textbook.com' })).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId('domain-detail-error')).toHaveCount(0);
+  });
+
+  test('404 응답은 기존처럼 not-found 토스트 + /domains 로 redirect 된다 (#307)', async ({ page }) => {
+    await setupDetailMocks(page);
+    await page.route('**/api/domains/textbook.com', (route) => {
+      if (route.request().method() === 'GET') {
+        return route.fulfill({
+          status: 404,
+          json: { error: 'not_found', message: 'domain not found' },
+        });
+      }
+      return route.fallback();
+    });
+
+    await page.goto('/domains/textbook.com');
+
+    // 목록으로 redirect 되어야 한다
+    await page.waitForURL('**/domains', { timeout: 10000 });
+    expect(page.url()).toMatch(/\/domains$/);
+    // not-found 토스트
+    await expect(page.getByText('해당 도메인을 찾을 수 없습니다')).toBeVisible();
+  });
+});
