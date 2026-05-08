@@ -120,7 +120,11 @@ export async function cacheRoutes(app: FastifyInstance) {
     const range = req.query.range ?? '1h';
     const cfg = RANGE_TABLE[range];
     if (!cfg) {
-      return reply.status(400).send({ error: `invalid range: ${range}` });
+      // 표준 envelope (#327): 머신 코드는 `error`, 사용자 표시용 메시지는 `message`로 분리.
+      return reply.status(400).send({
+        error: 'invalid_range',
+        message: `invalid range: ${range}`,
+      });
     }
     const sinceSec = Math.floor(Date.now() / 1000) - cfg.windowSec;
     const host = req.query.host;
@@ -202,14 +206,16 @@ export async function cacheRoutes(app: FastifyInstance) {
         (i) => i.path.length === 1 && i.path[0] === 'target',
       );
       if (targetMissing) {
-        // type은 url/domain 중 하나로 좁혀진 뒤 target만 누락된 경우
+        // type은 url/domain 중 하나로 좁혀진 뒤 target만 누락된 경우 — 표준 envelope (#327)
         const typeFromBody = (request.body as { type?: unknown } | null)?.type;
         return reply.status(400).send({
-          error: `type이 "${String(typeFromBody)}"이면 target은 필수입니다.`,
+          error: 'invalid_input',
+          message: `type이 "${String(typeFromBody)}"이면 target은 필수입니다.`,
         });
       }
       return reply.status(400).send({
-        error: 'type은 "url" | "domain" | "all" 중 하나여야 합니다.',
+        error: 'invalid_input',
+        message: 'type은 "url" | "domain" | "all" 중 하나여야 합니다.',
         issues,
       });
     }
@@ -226,7 +232,11 @@ export async function cacheRoutes(app: FastifyInstance) {
         // 동일한 헬퍼를 통과시켜 비교 키 일관성을 명시한다.
         hostname = normalizeHost(new URL(body.target).hostname);
       } catch {
-        return reply.status(400).send({ error: '유효하지 않은 URL 형식입니다.' });
+        // 표준 envelope (#327)
+        return reply.status(400).send({
+          error: 'invalid_url',
+          message: '유효하지 않은 URL 형식입니다.',
+        });
       }
       // 1) 정확히 일치하는 일반 도메인 확인
       const exact = app.db
@@ -247,7 +257,11 @@ export async function cacheRoutes(app: FastifyInstance) {
         registered = !!wildcardHit;
       }
       if (!registered) {
-        return reply.status(400).send({ error: `${hostname}은(는) 등록된 도메인이 아닙니다.` });
+        // 표준 envelope (#327)
+        return reply.status(400).send({
+          error: 'domain_not_registered',
+          message: `${hostname}은(는) 등록된 도메인이 아닙니다.`,
+        });
       }
     }
 
@@ -261,9 +275,13 @@ export async function cacheRoutes(app: FastifyInstance) {
         .prepare('SELECT 1 FROM domains WHERE host = ? LIMIT 1')
         .get(target);
       if (!registered) {
+        // 표준 envelope (#327)
         return reply
           .status(400)
-          .send({ error: `${target}은(는) 등록된 도메인이 아닙니다.` });
+          .send({
+            error: 'domain_not_registered',
+            message: `${target}은(는) 등록된 도메인이 아닙니다.`,
+          });
       }
       // 후속 storageClient.purgeDomain 호출도 정규화된 값을 사용해 매칭 일관성을 보장한다.
       body.target = target;
@@ -285,7 +303,11 @@ export async function cacheRoutes(app: FastifyInstance) {
       // "0건 삭제" 성공 토스트를 띄우는 회귀를 차단).
       return { purged_count: Number(res.purged_files), freed_bytes: Number(res.freed_bytes) };
     } catch {
-      return reply.status(502).send({ error: 'storage-service에 연결할 수 없습니다.' });
+      // 표준 envelope (#327)
+      return reply.status(502).send({
+        error: 'storage_unreachable',
+        message: 'storage-service에 연결할 수 없습니다.',
+      });
     }
   });
 }

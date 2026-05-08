@@ -32,7 +32,11 @@ export async function tlsRoutes(app: FastifyInstance, opts: TlsRouteOptions = {}
         .header('Content-Disposition', 'attachment; filename="smart-school-cdn-ca.crt"')
         .send(res.cert_pem);
     } catch {
-      return reply.status(502).send({ error: 'tls-service에 연결할 수 없습니다.' });
+      // 표준 envelope (#327)
+      return reply.status(502).send({
+        error: 'tls_unreachable',
+        message: 'tls-service에 연결할 수 없습니다.',
+      });
     }
   });
 
@@ -48,7 +52,11 @@ export async function tlsRoutes(app: FastifyInstance, opts: TlsRouteOptions = {}
         .header('Content-Disposition', 'attachment; filename="smart-school-cdn.mobileconfig"')
         .send(res.data);
     } catch {
-      return reply.status(502).send({ error: 'Proxy 서버에 연결할 수 없습니다.' });
+      // 표준 envelope (#327)
+      return reply.status(502).send({
+        error: 'proxy_unreachable',
+        message: 'Proxy 서버에 연결할 수 없습니다.',
+      });
     }
   });
 
@@ -58,7 +66,11 @@ export async function tlsRoutes(app: FastifyInstance, opts: TlsRouteOptions = {}
       const res = await app.tlsClient.listCertificates();
       return res.certs ?? [];
     } catch {
-      return reply.status(502).send({ error: 'tls-service에 연결할 수 없습니다.' });
+      // 표준 envelope (#327)
+      return reply.status(502).send({
+        error: 'tls_unreachable',
+        message: 'tls-service에 연결할 수 없습니다.',
+      });
     }
   });
 
@@ -75,15 +87,21 @@ export async function tlsRoutes(app: FastifyInstance, opts: TlsRouteOptions = {}
     if (domainRepo) {
       const domain = domainRepo.findByHost(host);
       if (!domain) {
-        return reply.status(404).send({ error: '도메인을 찾을 수 없습니다.' });
+        // 표준 envelope (#327)
+        return reply.status(404).send({
+          error: 'domain_not_found',
+          message: '도메인을 찾을 수 없습니다.',
+        });
       }
     }
     try {
       await app.tlsClient.syncDomains([{ host, origin: '' }]);
       return { success: true, host };
     } catch (err) {
+      // 표준 envelope (#327)
       return reply.status(502).send({
-        error: 'TLS 갱신 실패',
+        error: 'tls_renew_failed',
+        message: 'TLS 갱신 실패',
         detail: (err as Error).message,
       });
     }

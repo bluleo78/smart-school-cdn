@@ -388,7 +388,9 @@ describe('DELETE /api/cache/purge', () => {
       payload: { type: 'url', target: 'https://totally-different-domain.com/secret/path' },
     });
     expect(res.statusCode).toBe(400);
-    expect(res.json().error).toContain('등록된 도메인');
+    // 표준 envelope (#327): 머신 코드는 `error`, 사용자 표시 메시지는 `message`
+    expect(res.json().error).toBe('domain_not_registered');
+    expect(res.json().message).toContain('등록된 도메인');
     // purgeUrl은 호출되지 않아야 한다
     expect(mock.purgeUrl).not.toHaveBeenCalled();
   });
@@ -436,7 +438,9 @@ describe('DELETE /api/cache/purge', () => {
       payload: { type: 'url', target: 'https://other.example.com/x' },
     });
     expect(res.statusCode).toBe(400);
-    expect(res.json().error).toContain('등록된 도메인');
+    // 표준 envelope (#327): 머신 코드는 `error`, 사용자 표시 메시지는 `message`
+    expect(res.json().error).toBe('domain_not_registered');
+    expect(res.json().message).toContain('등록된 도메인');
     expect(mock.purgeUrl).not.toHaveBeenCalled();
   });
 
@@ -450,7 +454,9 @@ describe('DELETE /api/cache/purge', () => {
       payload: { type: 'url', target: 'not-a-url' },
     });
     expect(res.statusCode).toBe(400);
-    expect(res.json().error).toContain('유효하지 않은 URL');
+    // 표준 envelope (#327)
+    expect(res.json().error).toBe('invalid_url');
+    expect(res.json().message).toContain('유효하지 않은 URL');
     expect(mock.purgeUrl).not.toHaveBeenCalled();
   });
 
@@ -482,7 +488,9 @@ describe('DELETE /api/cache/purge', () => {
       payload: { type: 'domain', target: 'unknown.example.com' },
     });
     expect(res.statusCode).toBe(400);
-    expect(res.json().error).toContain('등록된 도메인');
+    // 표준 envelope (#327): 머신 코드는 `error`, 사용자 표시 메시지는 `message`
+    expect(res.json().error).toBe('domain_not_registered');
+    expect(res.json().message).toContain('등록된 도메인');
     expect(mock.purgeDomain).not.toHaveBeenCalled();
   });
 
@@ -532,7 +540,9 @@ describe('DELETE /api/cache/purge', () => {
       });
       expect(res.statusCode).toBe(400);
       // trim + lowercase 적용된 값이 메시지에 노출되어야 사용자 혼란이 적다
-      expect(res.json().error).toBe('unknown.example.com은(는) 등록된 도메인이 아닙니다.');
+      // 표준 envelope (#327): 머신 코드는 `error`, 정규화된 host는 message에 노출
+      expect(res.json().error).toBe('domain_not_registered');
+      expect(res.json().message).toBe('unknown.example.com은(는) 등록된 도메인이 아닙니다.');
     });
 
     it('url 타입 + 대문자 hostname이어도 등록된 와일드카드 도메인으로 매칭된다', async () => {
@@ -633,6 +643,10 @@ describe('DELETE /api/cache/purge', () => {
       payload: { type: 'all' },
     });
     expect(res.statusCode).toBe(502);
-    expect(res.json()).toEqual({ error: 'storage-service에 연결할 수 없습니다.' });
+    // 표준 envelope (#327): 머신 코드는 `error`, 사용자 표시 메시지는 `message`
+    expect(res.json()).toEqual({
+      error: 'storage_unreachable',
+      message: 'storage-service에 연결할 수 없습니다.',
+    });
   });
 });

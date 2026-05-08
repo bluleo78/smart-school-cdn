@@ -27,7 +27,11 @@ describe('GET /api/logs/:service', () => {
       url: '/api/logs/unknown-service',
     });
     expect(res.statusCode).toBe(400);
-    expect(res.json()).toEqual({ error: '허용되지 않은 서비스입니다.' });
+    // 표준 envelope (#327)
+    expect(res.json()).toEqual({
+      error: 'service_not_allowed',
+      message: '허용되지 않은 서비스입니다.',
+    });
   });
 
   it('허용된 서비스명 6개를 모두 수락한다', async () => {

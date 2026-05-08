@@ -127,7 +127,11 @@ export async function logRoutes(app: FastifyInstance) {
     const containerName = SERVICE_CONTAINER_MAP[service];
 
     if (!containerName) {
-      return reply.status(400).send({ error: '허용되지 않은 서비스입니다.' });
+      // 표준 envelope (#327)
+      return reply.status(400).send({
+        error: 'service_not_allowed',
+        message: '허용되지 않은 서비스입니다.',
+      });
     }
 
     const tailRaw = parseInt(request.query.tail ?? '100', 10);
@@ -214,7 +218,11 @@ export async function logRoutes(app: FastifyInstance) {
               resolve();
             });
             dockerRes.on('error', () => {
-              reply.status(500).send({ error: 'Docker API 오류' });
+              // 표준 envelope (#327)
+              reply.status(500).send({
+                error: 'docker_api_error',
+                message: 'Docker API 오류',
+              });
               resolve();
             });
           }
@@ -222,7 +230,11 @@ export async function logRoutes(app: FastifyInstance) {
       );
 
       req.on('error', () => {
-        reply.status(500).send({ error: 'Docker socket 연결 실패' });
+        // 표준 envelope (#327)
+        reply.status(500).send({
+          error: 'docker_socket_error',
+          message: 'Docker socket 연결 실패',
+        });
         resolve();
       });
 

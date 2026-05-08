@@ -162,7 +162,9 @@ describe('GET /api/optimization/events', () => {
     // 완전히 무의미한 문자열
     const r1 = await app.inject({ method: 'GET', url: '/api/optimization/events?since=hello' });
     expect(r1.statusCode).toBe(400);
-    expect(r1.json().error).toMatch(/invalid since/);
+    // 표준 envelope (#327): 머신 코드는 `error`, 사용자 표시 메시지는 `message`
+    expect(r1.json().error).toBe('invalid_since');
+    expect(r1.json().message).toMatch(/invalid since/);
     // 잘못된 형식
     const r2 = await app.inject({ method: 'GET', url: '/api/optimization/events?since=invalid-date' });
     expect(r2.statusCode).toBe(400);
@@ -190,7 +192,9 @@ describe('GET /api/optimization/events', () => {
     const { app } = mkApp();
     const r1 = await app.inject({ method: 'GET', url: '/api/optimization/events?type=NOT_A_TYPE' });
     expect(r1.statusCode).toBe(400);
-    expect(r1.json().error).toMatch(/invalid type/);
+    // 표준 envelope (#327)
+    expect(r1.json().error).toBe('invalid_type');
+    expect(r1.json().message).toMatch(/invalid type/);
     // 빈 문자열은 필터 비활성 (200)
     const r2 = await app.inject({ method: 'GET', url: '/api/optimization/events?type=' });
     expect(r2.statusCode).toBe(200);
@@ -203,7 +207,9 @@ describe('GET /api/optimization/events', () => {
     const { app } = mkApp();
     const r1 = await app.inject({ method: 'GET', url: '/api/optimization/events?decision=evil-payload' });
     expect(r1.statusCode).toBe(400);
-    expect(r1.json().error).toMatch(/invalid decision/);
+    // 표준 envelope (#327)
+    expect(r1.json().error).toBe('invalid_decision');
+    expect(r1.json().message).toMatch(/invalid decision/);
     // 옛 이름/오타도 거부
     const r2 = await app.inject({ method: 'GET', url: '/api/optimization/events?decision=image_optimize' });
     expect(r2.statusCode).toBe(400);
@@ -257,7 +263,9 @@ describe('GET /api/optimization/stats', () => {
     // 임의 문자열
     const r1 = await app.inject({ method: 'GET', url: '/api/optimization/stats?period=invalid' });
     expect(r1.statusCode).toBe(400);
-    expect(r1.json().error).toMatch(/invalid period/);
+    // 표준 envelope (#327)
+    expect(r1.json().error).toBe('invalid_period');
+    expect(r1.json().message).toMatch(/invalid period/);
     // 형식만 비슷하지만 화이트리스트 밖 (999d)
     const r2 = await app.inject({ method: 'GET', url: '/api/optimization/stats?period=999d' });
     expect(r2.statusCode).toBe(400);
@@ -301,7 +309,9 @@ describe('GET /api/optimization/stats', () => {
     const { app } = mkApp();
     const r1 = await app.inject({ method: 'GET', url: '/api/optimization/stats?type=NOT_A_TYPE' });
     expect(r1.statusCode).toBe(400);
-    expect(r1.json().error).toMatch(/invalid type/);
+    // 표준 envelope (#327)
+    expect(r1.json().error).toBe('invalid_type');
+    expect(r1.json().message).toMatch(/invalid type/);
     // 빈 문자열은 필터 비활성 (200)
     const r2 = await app.inject({ method: 'GET', url: '/api/optimization/stats?type=' });
     expect(r2.statusCode).toBe(200);

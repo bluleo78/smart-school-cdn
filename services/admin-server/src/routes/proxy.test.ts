@@ -226,7 +226,9 @@ describe('프록시 라우트', () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json().error).toContain('등록되지 않은 도메인');
+    // 표준 envelope (#327): 머신 코드는 `error`, 사용자 표시 메시지는 `message`
+    expect(res.json().error).toBe('domain_not_registered');
+    expect(res.json().message).toContain('등록되지 않은 도메인');
     expect(mockAxiosGet).not.toHaveBeenCalled();
   });
 
@@ -262,7 +264,9 @@ describe('프록시 라우트', () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json().error).toContain('유효하지 않은 경로');
+    // 표준 envelope (#327)
+    expect(res.json().error).toBe('invalid_path');
+    expect(res.json().message).toContain('유효하지 않은 경로');
     expect(mockAxiosGet).not.toHaveBeenCalled();
   });
 });

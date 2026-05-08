@@ -75,7 +75,11 @@ export async function dnsRoutes(app: FastifyInstance) {
     const range = req.query.range ?? '1h';
     const windowMs = RANGE_MS[range];
     if (windowMs === undefined) {
-      return reply.status(400).send({ error: `invalid range: ${range}` });
+      // 표준 envelope (#327): 머신 코드는 `error`, 사용자 표시용 메시지는 `message`로 분리.
+      return reply.status(400).send({
+        error: 'invalid_range',
+        message: `invalid range: ${range}`,
+      });
     }
     const now = Date.now();
     const buckets = app.dnsMetricsRepo.range(now - windowMs, now);

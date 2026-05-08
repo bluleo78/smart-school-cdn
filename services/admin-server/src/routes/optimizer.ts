@@ -70,13 +70,21 @@ export async function optimizerRoutes(app: FastifyInstance, opts: OptimizerRoute
     const domain = normalizeHost(decodeURIComponent(req.params.domain));
     // 형식 검증 — 빈 문자열/메타문자/traversal 거부 (도메인 추가와 동일 메시지)
     if (!domain || !DOMAIN_RE.test(domain)) {
-      return reply.status(400).send({ error: '유효하지 않은 도메인 형식입니다.' });
+      // 표준 envelope (#327)
+      return reply.status(400).send({
+        error: 'invalid_domain',
+        message: '유효하지 않은 도메인 형식입니다.',
+      });
     }
     // 멤버십 검증 — domainRepo가 주입된 경우에만 활성화 (테스트 호환성 유지)
     if (domainRepo) {
       const found = domainRepo.findByHost(domain);
       if (!found) {
-        return reply.status(404).send({ error: '도메인을 찾을 수 없습니다.' });
+        // 표준 envelope (#327)
+        return reply.status(404).send({
+          error: 'domain_not_found',
+          message: '도메인을 찾을 수 없습니다.',
+        });
       }
     }
     const { quality, max_width, enabled } = req.body;

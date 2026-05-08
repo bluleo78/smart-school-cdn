@@ -64,7 +64,11 @@ export async function proxyRoutes(app: FastifyInstance, opts: ProxyRouteOptions 
     const { domain: rawDomain, path, protocol = 'http' } = request.body;
 
     if (!rawDomain || !path) {
-      return reply.status(400).send({ error: 'domain과 path는 필수 항목입니다.' });
+      // 표준 envelope (#327)
+      return reply.status(400).send({
+        error: 'invalid_input',
+        message: 'domain과 path는 필수 항목입니다.',
+      });
     }
 
     // 도메인 입력 정규화 — DNS 호스트는 case-insensitive(RFC 1035 §2.3.3)이고
@@ -76,14 +80,22 @@ export async function proxyRoutes(app: FastifyInstance, opts: ProxyRouteOptions 
     if (domainRepo) {
       const found = domainRepo.findByHost(domain);
       if (!found) {
-        return reply.status(400).send({ error: '등록되지 않은 도메인입니다.' });
+        // 표준 envelope (#327)
+        return reply.status(400).send({
+          error: 'domain_not_registered',
+          message: '등록되지 않은 도메인입니다.',
+        });
       }
     }
 
     // URL 조작 방지 — 인코딩 해제 후 상대 경로(..), 프로토콜 상대 URL(//), @ 포함 시 거부
     const decodedPath = decodeURIComponent(path);
     if (decodedPath.includes('..') || path.startsWith('//') || path.includes('@')) {
-      return reply.status(400).send({ error: '유효하지 않은 경로입니다.' });
+      // 표준 envelope (#327)
+      return reply.status(400).send({
+        error: 'invalid_path',
+        message: '유효하지 않은 경로입니다.',
+      });
     }
 
     const baseUrl = protocol === 'https' ? PROXY_HTTPS_URL : PROXY_URL;

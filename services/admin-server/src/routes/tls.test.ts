@@ -60,7 +60,11 @@ describe('TLS 라우트', () => {
       const res = await app.inject({ method: 'GET', url: '/api/tls/ca' });
 
       expect(res.statusCode).toBe(502);
-      expect(res.json()).toEqual({ error: 'tls-service에 연결할 수 없습니다.' });
+      // 표준 envelope (#327)
+      expect(res.json()).toEqual({
+        error: 'tls_unreachable',
+        message: 'tls-service에 연결할 수 없습니다.',
+      });
     });
   });
 
@@ -89,7 +93,11 @@ describe('TLS 라우트', () => {
       const res = await app.inject({ method: 'GET', url: '/api/tls/ca/mobileconfig' });
 
       expect(res.statusCode).toBe(502);
-      expect(res.json()).toEqual({ error: 'Proxy 서버에 연결할 수 없습니다.' });
+      // 표준 envelope (#327)
+      expect(res.json()).toEqual({
+        error: 'proxy_unreachable',
+        message: 'Proxy 서버에 연결할 수 없습니다.',
+      });
     });
   });
 
@@ -127,7 +135,11 @@ describe('TLS 라우트', () => {
       const res = await app.inject({ method: 'GET', url: '/api/tls/certificates' });
 
       expect(res.statusCode).toBe(502);
-      expect(res.json()).toEqual({ error: 'tls-service에 연결할 수 없습니다.' });
+      // 표준 envelope (#327)
+      expect(res.json()).toEqual({
+        error: 'tls_unreachable',
+        message: 'tls-service에 연결할 수 없습니다.',
+      });
     });
   });
 
@@ -149,7 +161,11 @@ describe('TLS 라우트', () => {
       });
 
       expect(res.statusCode).toBe(404);
-      expect(res.json()).toEqual({ error: '도메인을 찾을 수 없습니다.' });
+      // 표준 envelope (#327)
+      expect(res.json()).toEqual({
+        error: 'domain_not_found',
+        message: '도메인을 찾을 수 없습니다.',
+      });
       expect(domainRepo.findByHost).toHaveBeenCalledWith('nope.example');
       // 미등록 도메인은 tls-service까지 가지 않는다
       expect(mockTlsClient.syncDomains).not.toHaveBeenCalled();
@@ -217,7 +233,11 @@ describe('TLS 라우트', () => {
       });
 
       expect(res.statusCode).toBe(502);
-      expect(res.json()).toMatchObject({ error: 'TLS 갱신 실패' });
+      // 표준 envelope (#327)
+      expect(res.json()).toMatchObject({
+        error: 'tls_renew_failed',
+        message: 'TLS 갱신 실패',
+      });
     });
   });
 });

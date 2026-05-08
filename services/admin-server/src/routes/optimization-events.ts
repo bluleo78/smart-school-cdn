@@ -70,12 +70,20 @@ export async function optimizationEventsRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const events = req.body?.events;
       if (!Array.isArray(events)) {
-        return reply.status(400).send({ error: 'events 배열 필수' });
+        // 표준 envelope (#327)
+        return reply.status(400).send({
+          error: 'invalid_input',
+          message: 'events 배열 필수',
+        });
       }
       // event_type 화이트리스트 검증 — 모르는 타입이 하나라도 섞이면 전체 거절
       for (const ev of events) {
         if (!ALLOWED_EVENT_TYPES.has(ev.event_type as OptimizationEventType)) {
-          return reply.status(400).send({ error: `unknown event_type: ${ev.event_type}` });
+          // 표준 envelope (#327)
+          return reply.status(400).send({
+            error: 'invalid_input',
+            message: `unknown event_type: ${ev.event_type}`,
+          });
         }
       }
       const inserted = repo.insertBatch(events);
@@ -96,20 +104,32 @@ export async function optimizationEventsRoutes(app: FastifyInstance) {
     const typeRaw = req.query.type;
     if (typeRaw !== undefined && typeRaw !== ''
         && !ALLOWED_EVENT_TYPES.has(typeRaw as OptimizationEventType)) {
-      return reply.status(400).send({ error: `invalid type: ${typeRaw}` });
+      // 표준 envelope (#327)
+      return reply.status(400).send({
+        error: 'invalid_type',
+        message: `invalid type: ${typeRaw}`,
+      });
     }
     // decision 화이트리스트 검증 — type과 동일 정책 (#318)
     const decisionRaw = req.query.decision;
     if (decisionRaw !== undefined && decisionRaw !== ''
         && !ALLOWED_DECISIONS.has(decisionRaw)) {
-      return reply.status(400).send({ error: `invalid decision: ${decisionRaw}` });
+      // 표준 envelope (#327)
+      return reply.status(400).send({
+        error: 'invalid_decision',
+        message: `invalid decision: ${decisionRaw}`,
+      });
     }
     // since가 들어왔다면 ISO 8601 파싱 가능해야 함 — 'Invalid Date'면 거부
     const sinceRaw = req.query.since;
     if (sinceRaw !== undefined && sinceRaw !== '') {
       const d = new Date(sinceRaw);
       if (Number.isNaN(d.getTime())) {
-        return reply.status(400).send({ error: `invalid since: ${sinceRaw}` });
+        // 표준 envelope (#327)
+        return reply.status(400).send({
+          error: 'invalid_since',
+          message: `invalid since: ${sinceRaw}`,
+        });
       }
     }
     const limitNum = req.query.limit !== undefined ? Number(req.query.limit) : undefined;
@@ -136,12 +156,20 @@ export async function optimizationEventsRoutes(app: FastifyInstance) {
     const typeRaw = req.query.type;
     if (typeRaw !== undefined && typeRaw !== ''
         && !ALLOWED_EVENT_TYPES.has(typeRaw as OptimizationEventType)) {
-      return reply.status(400).send({ error: `invalid type: ${typeRaw}` });
+      // 표준 envelope (#327)
+      return reply.status(400).send({
+        error: 'invalid_type',
+        message: `invalid type: ${typeRaw}`,
+      });
     }
     const period = req.query.period ?? '24h';
     const period_sec = PERIOD_TO_SEC[period];
     if (period_sec === undefined) {
-      return reply.status(400).send({ error: `invalid period: ${period}` });
+      // 표준 envelope (#327)
+      return reply.status(400).send({
+        error: 'invalid_period',
+        message: `invalid period: ${period}`,
+      });
     }
     const by_decision = repo.statsByDecision({
       event_type: typeRaw !== '' ? typeRaw : undefined,
