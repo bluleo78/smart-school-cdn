@@ -214,6 +214,36 @@ test.describe('AppLayout', () => {
     });
   });
 
+  test('브라우저 뒤로가기 시 이전 페이지 스크롤 위치가 복원된다 (#324)', async ({ page }) => {
+    // #146 후속: PUSH 시에는 0으로 초기화하되, POP(브라우저 뒤로/앞으로)에서는
+    // 이전 scrollTop을 복원해야 한다. 기존엔 location.pathname만 의존해 POP에서도 0으로 리셋됐다.
+    await page.goto('/system');
+
+    // 메인 콘텐츠 영역을 일정 위치까지 스크롤
+    const main = page.locator('main');
+    await main.evaluate((el) => {
+      el.scrollTop = 600;
+    });
+    const scrollBefore = await main.evaluate((el) => el.scrollTop);
+    expect(scrollBefore).toBeGreaterThan(0);
+
+    // PUSH로 다른 페이지 이동 — 이때는 상단으로 초기화되어야 한다 (#146 동작 유지)
+    await page.getByRole('link', { name: 'DNS' }).click();
+    await expect(page.getByRole('heading', { name: 'DNS' })).toBeVisible();
+    expect(await main.evaluate((el) => el.scrollTop)).toBe(0);
+
+    // 브라우저 뒤로가기(POP) — /system으로 복귀했을 때 이전 scrollTop으로 돌아가야 한다
+    await page.goBack();
+    await expect(page.getByRole('heading', { name: '시스템' })).toBeVisible();
+    // scroll 복원 검증 — 콘텐츠 height가 렌더 사이 약간 변할 수 있어 정확값 비교 대신
+    // "유의미하게 복원됐는가"(0이 아니라 이전 위치 근처)를 확인한다.
+    await expect
+      .poll(async () => main.evaluate((el) => el.scrollTop), {
+        timeout: 2000,
+      })
+      .toBeGreaterThan(scrollBefore * 0.5);
+  });
+
   test('페이지 이동 시 메인 콘텐츠 스크롤이 상단으로 초기화된다 (#146)', async ({ page }) => {
     // 시스템 페이지(긴 콘텐츠)에서 스크롤 후 다른 페이지로 이동하면
     // 이전 스크롤 위치가 유지되는 버그 회귀 방지

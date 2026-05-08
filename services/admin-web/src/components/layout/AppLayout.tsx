@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { NavLink, Outlet, useLocation } from 'react-router';
+import { NavLink, Outlet, useLocation, useNavigationType } from 'react-router';
 import {
   LayoutDashboard,
   Globe,
@@ -27,10 +27,16 @@ const navItems = [
 export function AppLayout() {
   const { state } = useAuth();
   const location = useLocation();
+  // 라우트 전환 종류(POP=뒤로/앞으로, PUSH=새 진입, REPLACE=치환) — 스크롤 복원/초기화 분기 기준
+  const navigationType = useNavigationType();
 
-  // 메인 콘텐츠 영역 ref — 페이지 이동 시 스크롤 위치 초기화에 사용
+  // 메인 콘텐츠 영역 ref — 페이지 이동 시 스크롤 위치 초기화/복원에 사용
   // window가 아닌 <main> 요소에 overflow-auto가 적용되므로 ref로 직접 참조
   const mainRef = useRef<HTMLElement>(null);
+
+  // 라우트별 스크롤 위치 저장소 — location.key를 키로 사용 (같은 path여도 history entry마다 별도 키).
+  // useRef로 보관해 컴포넌트 리렌더에 영향 받지 않고, AppLayout 인스턴스 유지 동안 누적된다.
+  const scrollPositions = useRef<Map<string, number>>(new Map());
 
   // 모바일 사이드바 열림 상태 — 라우트 변경 시 자동 닫힘
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -52,12 +58,43 @@ export function AppLayout() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [mobileOpen]);
 
-  // 페이지 이동 시 메인 콘텐츠 영역을 상단으로 스크롤 리셋
-  // BrowserRouter + overflow-auto <main>을 사용하기 때문에 window.scrollTo가 아닌
-  // <main> 요소의 scrollTop을 직접 초기화해야 한다 (ScrollRestoration 미사용 대안)
+  // 페이지 이동 시 스크롤 위치 처리 — POP/PUSH/REPLACE를 구분해 분기 (#324)
+  // - PUSH/REPLACE: 새로 진입한 화면이므로 상단(0)으로 초기화 (#146 동작 유지)
+  // - POP: 브라우저 뒤로/앞으로 — 이전에 기억해 둔 scrollTop으로 복원해야 흐름이 끊기지 않음
+  // BrowserRouter는 데이터 라우터가 아니라 <ScrollRestoration />이 없고,
+  // 스크롤 컨테이너가 window가 아닌 <main>(overflow-auto)이라 브라우저 자동 복원 대상도 아니므로
+  // location.key를 키로 한 Map에 직접 기록/복원한다.
+  //
+  // 스크롤 보존 전략: <main>에 scroll 이벤트 리스너를 달아 사용자가 스크롤할 때마다
+  // "현재 라우트 키" 자리에 scrollTop을 누적 기록한다. 라우트 변경 시점에 한 번 읽는 방식
+  // (effect cleanup 등)은 새 페이지로 교체되며 scrollHeight가 줄어들면 scrollTop이 0으로
+  // 자동 클램프되어 정확한 값을 잡지 못한다.
+  const currentKeyRef = useRef(location.key);
   useEffect(() => {
-    mainRef.current?.scrollTo({ top: 0, behavior: 'instant' });
-  }, [location.pathname]);
+    currentKeyRef.current = location.key;
+  }, [location.key]);
+
+  useEffect(() => {
+    const main = mainRef.current;
+    if (!main) return;
+    // 사용자 스크롤을 추적해 현재 라우트 키 자리에 위치를 누적 보존
+    const onScroll = () => {
+      scrollPositions.current.set(currentKeyRef.current, main.scrollTop);
+    };
+    main.addEventListener('scroll', onScroll, { passive: true });
+    return () => main.removeEventListener('scroll', onScroll);
+  }, []);
+
+  useEffect(() => {
+    const main = mainRef.current;
+    if (!main) return;
+    // POP이면 저장된 위치(없으면 0), 그 외(PUSH/REPLACE)는 상단으로 초기화
+    const target =
+      navigationType === 'POP'
+        ? (scrollPositions.current.get(location.key) ?? 0)
+        : 0;
+    main.scrollTo({ top: target, behavior: 'instant' });
+  }, [location.key, navigationType]);
 
   // 페이지 이동 시 document.title 업데이트 — WCAG 2.4.2 Page Titled 준수
   // navItems에서 현재 pathname에 매핑되는 레이블을 찾아 "레이블 | Smart School CDN" 형태로 설정.
