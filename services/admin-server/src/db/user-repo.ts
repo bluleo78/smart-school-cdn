@@ -64,9 +64,12 @@ export class UserRepository {
     this.db.prepare('UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?').run(passwordHash, now, id);
   }
 
+  // 이슈 #343 — last_login_at 갱신은 행을 변경하는 mutation 이므로 다른 update 들과
+  // 동일하게 updated_at 도 함께 갱신하여 "행이 마지막으로 수정된 시점" 의미를 일관되게 유지.
+  // disable/enable/updatePassword 와 동일 패턴.
   updateLastLogin(id: number): void {
     const now = new Date().toISOString();
-    this.db.prepare('UPDATE users SET last_login_at = ? WHERE id = ?').run(now, id);
+    this.db.prepare('UPDATE users SET last_login_at = ?, updated_at = ? WHERE id = ?').run(now, now, id);
   }
 
   disable(id: number): void {

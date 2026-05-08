@@ -84,6 +84,22 @@ describe('UserRepository', () => {
     expect(found?.last_login_at).not.toBeNull();
   });
 
+  // 이슈 #343 회귀 방지 — updateLastLogin 은 다른 update 들과 일관되게
+  // updated_at 도 함께 갱신해야 한다 (disable/enable/updatePassword 와 동일 패턴).
+  it('updateLastLogin 은 updated_at 도 함께 갱신한다 (#343)', async () => {
+    const u = repo.create('a@b.c', 'h');
+    const before = repo.findById(u.id)!;
+    // ISO 문자열 비교를 확실히 하기 위해 짧게 대기 (now() 가 같은 ms 일 수 있음)
+    await new Promise((r) => setTimeout(r, 5));
+    repo.updateLastLogin(u.id);
+    const after = repo.findById(u.id)!;
+    expect(after.last_login_at).not.toBeNull();
+    expect(after.updated_at).not.toBe(before.updated_at);
+    expect(after.updated_at >= before.updated_at).toBe(true);
+    // last_login_at 과 updated_at 이 동일 시점 (같은 now 사용)
+    expect(after.updated_at).toBe(after.last_login_at);
+  });
+
   it('list 는 password_hash 를 포함하되 순서는 id 오름차순', () => {
     repo.create('c@b.c', 'h');
     repo.create('a@b.c', 'h');
