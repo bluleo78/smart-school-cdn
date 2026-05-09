@@ -146,7 +146,9 @@ export function DomainBulkAddDialog({ open, onOpenChange }: DomainBulkAddDialogP
         {/* shadcn Textarea 컴포넌트 사용 — 포커스 링 두께/스타일을 Input과 통일 (#107) */}
         <Textarea
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          // 입력 변경 시 이전 parseError 즉시 클리어 — 단건 폼(DomainsPage)과 동작 일치 (#380)
+          // stale 에러가 유효한 입력 위에 잔존하면 사용자가 입력에 문제가 있다고 오인함
+          onChange={(e) => { setText(e.target.value); setParseError(null); }}
           rows={8}
           className="font-mono resize-y"
           placeholder={"textbook.com https://textbook.com\ncdn.school.kr https://origin.school.kr"}

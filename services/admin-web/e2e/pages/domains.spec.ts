@@ -940,6 +940,33 @@ test.describe('도메인 관리 — 일괄 추가 (#55)', () => {
   });
 
   /**
+   * 이슈 #380 회귀 방지 — 입력 변경 후에도 이전 parseError 메시지 잔존
+   * 잘못된 형식 제출로 에러 노출 → textarea 내용을 유효 입력으로 교체 →
+   * onChange에서 setParseError(null)이 호출되어 stale 에러가 즉시 사라져야 한다.
+   * (단건 폼 DomainsPage host/origin onChange의 setHostError/setOriginError clear 패턴과 대칭)
+   */
+  test('입력 변경 시 이전 parseError 메시지가 즉시 클리어된다 (#380)', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', createDomains());
+
+    await page.goto('/domains');
+
+    // 1. 일괄 추가 다이얼로그 열기
+    await page.getByRole('button', { name: '일괄 추가' }).click();
+    await expect(page.getByTestId('bulk-add-dialog')).toBeVisible();
+
+    // 2. 잘못된 형식 입력 + 제출 → 에러 노출
+    await page.getByTestId('bulk-add-textarea').fill('test1.example.com http://example.com nope');
+    await page.getByTestId('bulk-add-submit').click();
+    await expect(page.getByTestId('bulk-add-error')).toBeVisible();
+
+    // 3. 유효한 입력으로 교체 → onChange에서 setParseError(null) 호출 → 에러가 즉시 사라져야 함 (#380 핵심)
+    await page.getByTestId('bulk-add-textarea').fill('good.example.com https://good.example.com');
+    await expect(page.getByTestId('bulk-add-error')).not.toBeVisible();
+    await expect(page.getByTestId('bulk-add-preview')).toHaveText('1줄 / 도메인 1개');
+  });
+
+  /**
    * 이슈 #42 회귀 방지 — 일괄 추가 시 origin URL 형식 검증 없음 (javascript: scheme 등 허용)
    * javascript:, ftp:// 같은 비정상 scheme이 클라이언트에서 차단되어
    * POST /api/domains/bulk 요청이 전송되지 않아야 한다.
