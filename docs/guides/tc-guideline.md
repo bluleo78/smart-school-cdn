@@ -45,6 +45,7 @@ E2E 테스트 (End-to-End)
 | `services/storage-service` (Rust) | ✅ 필수 | 선택 | — | **≥ 70%** |
 | `services/tls-service` (Rust) | ✅ 필수 | 선택 | — | **≥ 70%** |
 | `services/dns-service` (Rust) | ✅ 필수 | 선택 | — | **≥ 70%** |
+| `services/optimizer-service` (Rust) | ✅ 필수 | 선택 | — | **≥ 70%** |
 | `services/admin-server` | ✅ 필수 | 선택 | — | **≥ 70%** |
 | `services/admin-web` | — | — | ✅ 필수 | **주요 플로우 100%** |
 
@@ -251,6 +252,14 @@ test.describe('캐시 관리 페이지 — URL 퍼지', () => {
 | 모듈 | 단위 TC 필수 항목 |
 |------|------------------|
 | `grpc.rs` | sync_domains 맵 갱신, sync 전체 교체, 빈 목록 처리, health |
+
+### services/optimizer-service (Rust)
+
+| 모듈 | 단위 TC 필수 항목 | 통합 TC 필수 항목 |
+|------|------------------|------------------|
+| `encoder.rs` (포맷별 순수 인코더) | JPEG 품질별 인코딩, PNG + oxipng 재압축, WebP lossy/lossless 인코딩, 인코더 실패 시 `EncodeError::Encode` 반환 | — |
+| `optimizer.rs` (포맷 보존 재인코딩 + size-guard) | `optimize()` happy path (out < orig → Optimized), out ≥ orig → PassthroughLarger, decode/encode 실패 → PassthroughError, 미지원 content_type/애니메이션 GIF → PassthroughUnsupported, 도메인 프로파일 조회·절감 통계 누적 | — |
+| `grpc.rs` | Optimize RPC decision 문자열 매핑(optimized/passthrough_*), health, 입력 검증 실패 코드 매핑 | proxy↔optimizer 왕복 happy path, optimizer 다운 시 proxy fallback(원본 그대로 전달) |
 
 ### services/admin-server
 
