@@ -6,7 +6,7 @@
 
 - **Rust 엔진**: Proxy(443/8080), TLS — 고성능 네트워크 처리
 - **Node.js Admin**: Fastify API(4001) — 내부 전용, 외부 미노출
-- **Admin Web**: React + nginx(7777) — API 리버스 프록시 내장
+- **Admin Web**: React + nginx — API 리버스 프록시 내장 (dev: 4173 / 로컬 prod 테스트: 7778 / 운영: 7777)
 - **통신**: Admin↔Proxy HTTP (`http://proxy:8081`)
 - **DB**: SQLite (Admin: 설정/통계/로그)
 - **배포**: Docker Compose (로컬 테스트 / 운영 분리)
@@ -14,7 +14,7 @@
 ## Commands
 
 - `pnpm dev` / `pnpm build` / `pnpm test` / `pnpm lint`
-- `pnpm docker:build` / `pnpm docker:up` / `pnpm docker:down` — 로컬 통합 테스트용 (포트: 8082/4443/7778)
+- `pnpm docker:build` / `pnpm docker:up` / `pnpm docker:down` — 로컬 통합 테스트용 `docker-compose.prod.yml` 기반 (노출 포트: proxy 80→8080, 443→443, DNS 53/udp, admin-web 7778→80). 운영용 분리 파일은 `deploy/docker-compose.yml` (admin-web 기본 7777, optimizer 등 추가 서비스 포함)
 
 ## Deploy
 
