@@ -84,6 +84,137 @@ describe('POST /internal/events/batch', () => {
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ inserted: 0 });
   });
+
+  // ─── #364: event_type 외 host/url/decision/elapsed_ms 필드 검증 ─────────
+  // 기존엔 event_type만 화이트리스트 검증되어 host/url 누락·음수 elapsed_ms·
+  // 화이트리스트 밖 decision이 그대로 INSERT 되어 invariant가 깨졌다. zod로 일괄 검증.
+
+  it('host 누락이면 400 (#364)', async () => {
+    const { app } = mkApp();
+    const ev = sampleEvent();
+    delete (ev as Record<string, unknown>).host;
+    const res = await app.inject({
+      method: 'POST', url: '/internal/events/batch',
+      headers: { 'content-type': 'application/json' },
+      payload: { events: [ev] },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('invalid_input');
+  });
+
+  it('host 빈 문자열이면 400 (#364)', async () => {
+    const { app } = mkApp();
+    const res = await app.inject({
+      method: 'POST', url: '/internal/events/batch',
+      headers: { 'content-type': 'application/json' },
+      payload: { events: [sampleEvent({ host: '' })] },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('invalid_input');
+  });
+
+  it('url 누락이면 400 (#364)', async () => {
+    const { app } = mkApp();
+    const ev = sampleEvent();
+    delete (ev as Record<string, unknown>).url;
+    const res = await app.inject({
+      method: 'POST', url: '/internal/events/batch',
+      headers: { 'content-type': 'application/json' },
+      payload: { events: [ev] },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('invalid_input');
+  });
+
+  it('decision이 ALLOWED_DECISIONS 화이트리스트 밖이면 400 (#364) — query와 동일 정책', async () => {
+    const { app } = mkApp();
+    const res = await app.inject({
+      method: 'POST', url: '/internal/events/batch',
+      headers: { 'content-type': 'application/json' },
+      payload: { events: [sampleEvent({ decision: 'made_up_decision' })] },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('invalid_input');
+  });
+
+  it('elapsed_ms가 음수이면 400 (#364)', async () => {
+    const { app } = mkApp();
+    const res = await app.inject({
+      method: 'POST', url: '/internal/events/batch',
+      headers: { 'content-type': 'application/json' },
+      payload: { events: [sampleEvent({ elapsed_ms: -1 })] },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('invalid_input');
+  });
+
+  it('elapsed_ms가 비숫자(문자열)이면 400 (#364)', async () => {
+    const { app } = mkApp();
+    const res = await app.inject({
+      method: 'POST', url: '/internal/events/batch',
+      headers: { 'content-type': 'application/json' },
+      payload: { events: [sampleEvent({ elapsed_ms: 'fast' })] },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('invalid_input');
+  });
+
+  it('orig_size/out_size가 음수이면 400 (#364)', async () => {
+    const { app } = mkApp();
+    const r1 = await app.inject({
+      method: 'POST', url: '/internal/events/batch',
+      headers: { 'content-type': 'application/json' },
+      payload: { events: [sampleEvent({ orig_size: -100 })] },
+    });
+    expect(r1.statusCode).toBe(400);
+    const r2 = await app.inject({
+      method: 'POST', url: '/internal/events/batch',
+      headers: { 'content-type': 'application/json' },
+      payload: { events: [sampleEvent({ out_size: -1 })] },
+    });
+    expect(r2.statusCode).toBe(400);
+  });
+
+  it('orig_size/out_size가 null/undefined면 통과 (bypass 케이스 보존, #364)', async () => {
+    const { app } = mkApp();
+    const ev = sampleEvent({ decision: 'bypass_nocache', orig_size: null, out_size: null });
+    delete (ev as Record<string, unknown>).range_header;
+    const res = await app.inject({
+      method: 'POST', url: '/internal/events/batch',
+      headers: { 'content-type': 'application/json' },
+      payload: { events: [ev] },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ inserted: 1 });
+  });
+
+  it('한 건이라도 위반이면 전체 거절 (#364)', async () => {
+    const { app, db } = mkApp();
+    const res = await app.inject({
+      method: 'POST', url: '/internal/events/batch',
+      headers: { 'content-type': 'application/json' },
+      payload: { events: [
+        sampleEvent(),                                  // 정상
+        sampleEvent({ decision: 'made_up_decision' }),  // 위반
+      ] },
+    });
+    expect(res.statusCode).toBe(400);
+    // 정상 1건도 INSERT 되지 않았는지 확인 (트랜잭션성 보존)
+    const cnt = db.prepare('SELECT COUNT(*) AS c FROM optimization_events').get() as { c: number };
+    expect(cnt.c).toBe(0);
+  });
+
+  it('events 배열 길이가 1000을 초과하면 400 (#364)', async () => {
+    const { app } = mkApp();
+    const events = Array.from({ length: 1001 }).map(() => sampleEvent());
+    const res = await app.inject({
+      method: 'POST', url: '/internal/events/batch',
+      headers: { 'content-type': 'application/json' },
+      payload: { events },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('invalid_input');
+  });
 });
 
 // ─── GET /api/optimization/events ──────────────────────────────────────────

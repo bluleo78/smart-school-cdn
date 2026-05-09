@@ -6,6 +6,7 @@
 ///  - GET  /api/optimization/events → 관리자/대시보드 조회 (nginx 프록시)
 ///  - GET  /api/optimization/stats  → decision별 집계 (nginx 프록시)
 import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
 import {
   OptimizationEventsRepository,
   type OptimizationEventInput,
@@ -58,35 +59,61 @@ function normalizeHostQuery(input: string | undefined): string | undefined {
   return v.length > 0 ? v : undefined;
 }
 
+/**
+ * 배치 인입 단일 이벤트 zod 스키마 — host/url/decision/elapsed_ms 등 필드 무검증으로 인한
+ * 비정상 row INSERT를 막는다 (#364). GET 라우트의 `decision` 화이트리스트(#318)와 동일한
+ * ALLOWED_DECISIONS·ALLOWED_EVENT_TYPES를 적용해 query/ingest 정책을 일치시킨다.
+ *  - host/url: 빈 문자열 거부 (DB schema는 NOT NULL이지만 ''는 통과시키므로 런타임에서 차단)
+ *  - decision: 화이트리스트 밖 값 거부 (proxy/optimizer-service emit 값과 동기 — repo 헤더 주석 참조)
+ *  - orig_size/out_size: 음수 거부, null·undefined 허용 (bypass 케이스 보존)
+ *  - elapsed_ms: 음수 거부 (better-sqlite3는 -1도 INSERT 허용하므로 런타임에서 차단)
+ */
+const eventInputSchema = z.object({
+  ts:           z.string().optional(),
+  event_type:   z.enum(['media_cache', 'image_optimize', 'text_compress']),
+  host:         z.string().min(1),
+  url:          z.string().min(1),
+  decision:     z.string().refine((d) => ALLOWED_DECISIONS.has(d), {
+    message: 'invalid decision',
+  }),
+  orig_size:    z.number().int().nonnegative().nullable().optional(),
+  out_size:     z.number().int().nonnegative().nullable().optional(),
+  range_header: z.string().nullable().optional(),
+  content_type: z.string().nullable().optional(),
+  elapsed_ms:   z.number().int().nonnegative(),
+});
+
+/**
+ * 배치 전체 스키마 — 한 번의 호출에서 너무 많은 이벤트가 들어오면 INSERT 트랜잭션이 길어져
+ * admin-server 응답이 지연되므로 1000건으로 상한을 둔다 (proxy 측 배치 크기와 정합).
+ */
+const eventBatchSchema = z.object({
+  events: z.array(eventInputSchema).max(1000),
+});
+
 export async function optimizationEventsRoutes(app: FastifyInstance) {
   const repo = new OptimizationEventsRepository(app.db);
 
   /**
    * 내부 배치 인입 엔드포인트 — proxy만 호출.
    * nginx 설정에서 `/api/*`만 외부에 노출하므로 `/internal/*`은 docker 네트워크 안에서만 접근 가능.
+   *
+   * 이벤트 한 건이라도 스키마 위반이면 전체 거절 (현재 정책 보존). proxy 측 emit 코드가
+   * 비정상 페이로드(host/url 누락, 음수 elapsed_ms, 화이트리스트 밖 decision)를 보내면
+   * 무성공/무경고로 invariant가 깨진 row가 누적되던 #364 회귀를 막는다.
    */
-  app.post<{ Body: { events?: OptimizationEventInput[] } }>(
+  app.post(
     '/internal/events/batch',
     async (req, reply) => {
-      const events = req.body?.events;
-      if (!Array.isArray(events)) {
-        // 표준 envelope (#327)
+      const parsed = eventBatchSchema.safeParse(req.body);
+      if (!parsed.success) {
+        // 표준 envelope (#327) — dns/cache 라우트와 동일하게 issues 동봉
         return reply.status(400).send({
           error: 'invalid_input',
-          message: 'events 배열 필수',
+          issues: parsed.error.issues,
         });
       }
-      // event_type 화이트리스트 검증 — 모르는 타입이 하나라도 섞이면 전체 거절
-      for (const ev of events) {
-        if (!ALLOWED_EVENT_TYPES.has(ev.event_type as OptimizationEventType)) {
-          // 표준 envelope (#327)
-          return reply.status(400).send({
-            error: 'invalid_input',
-            message: `unknown event_type: ${ev.event_type}`,
-          });
-        }
-      }
-      const inserted = repo.insertBatch(events);
+      const inserted = repo.insertBatch(parsed.data.events as OptimizationEventInput[]);
       return { inserted };
     },
   );
