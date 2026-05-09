@@ -2417,6 +2417,72 @@ test.describe('도메인 상세 — 설정 탭', () => {
   });
 
   /**
+   * 이슈 #381 회귀 방지 — OriginSection 편집 중 ESC 무경고 폐기
+   *
+   * 수정 전: dirty 상태에서 ESC를 누르면 handleCancel이 즉시 실행되어 입력값이
+   *   조용히 손실되었다. SPA 이탈 가드(#171)는 작동하는데 ESC 경로만 비대칭.
+   * 수정 후: dirty 상태 ESC는 같은 AlertDialog를 띄우고, "취소" 시 편집 모드
+   *   유지 + 입력값 보존, "떠나기" 시 handleCancel 실행.
+   *
+   * 검증 파이프라인: 편집 진입 → origin 변경 → ESC →
+   *   (1) AlertDialog 표시, (2) 편집 폼 유지, (3) 취소 시 입력값 보존,
+   *   (4) 다시 ESC → 떠나기 시 편집 모드 닫힘 + 원본 복원.
+   */
+  test('OriginSection — 편집 중 dirty 상태 ESC는 확인 다이얼로그를 띄운다 (회귀: #381)', async ({ page }) => {
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com?tab=settings');
+    await expect(page.getByTestId('domain-settings-tab')).toBeVisible();
+
+    // 편집 모드 진입 → origin 변경 (dirty 상태)
+    await page.getByTestId('edit-domain-btn').click();
+    await page.getByTestId('origin-input').fill('https://changed-via-esc.example');
+
+    // ESC — dirty이므로 AlertDialog가 떠야 한다 (조용한 폐기 X)
+    await page.getByTestId('origin-input').press('Escape');
+    await expect(page.getByTestId('unsaved-changes-dialog')).toBeVisible();
+    // 편집 폼은 유지되어야 함
+    await expect(page.getByTestId('origin-input')).toBeVisible();
+
+    // "취소" 클릭 → 다이얼로그 닫힘, 편집 모드 유지, 입력값 보존
+    await page.getByTestId('unsaved-cancel-btn').click();
+    await expect(page.getByTestId('unsaved-changes-dialog')).not.toBeVisible();
+    await expect(page.getByTestId('origin-input')).toHaveValue(
+      'https://changed-via-esc.example',
+    );
+
+    // 다시 ESC → "떠나기" 클릭 → 편집 모드 닫힘 + 원본 복원
+    await page.getByTestId('origin-input').press('Escape');
+    await expect(page.getByTestId('unsaved-changes-dialog')).toBeVisible();
+    await page.getByTestId('unsaved-leave-btn').click();
+    await expect(page.getByTestId('unsaved-changes-dialog')).not.toBeVisible();
+    // 편집 모드가 닫히면 origin-input은 사라지고 편집 버튼이 다시 노출된다
+    await expect(page.getByTestId('edit-domain-btn')).toBeVisible();
+    await expect(page.getByTestId('origin-input')).toHaveCount(0);
+  });
+
+  /**
+   * 이슈 #381 보강 — dirty가 아닌 상태에서 ESC는 즉시 편집 모드를 닫는다
+   *
+   * 수정으로 ESC 동작이 분기되었으므로 "변경 없음 → 즉시 닫힘" 경로도 회귀 테스트로
+   *   고정한다. dirty 가드만 추가되고 정상 경로가 깨지지 않는지 검증.
+   */
+  test('OriginSection — 편집 중 변경 없으면 ESC가 즉시 닫는다 (회귀: #381)', async ({ page }) => {
+    await setupDetailMocks(page);
+    await page.goto('/domains/textbook.com?tab=settings');
+    await expect(page.getByTestId('domain-settings-tab')).toBeVisible();
+
+    // 편집 진입만 하고 입력값은 변경하지 않음 (dirty=false)
+    await page.getByTestId('edit-domain-btn').click();
+    await expect(page.getByTestId('origin-input')).toBeVisible();
+
+    // ESC → 다이얼로그 없이 즉시 편집 모드 닫혀야 한다
+    await page.getByTestId('origin-input').press('Escape');
+    await expect(page.getByTestId('unsaved-changes-dialog')).not.toBeVisible();
+    await expect(page.getByTestId('edit-domain-btn')).toBeVisible();
+    await expect(page.getByTestId('origin-input')).toHaveCount(0);
+  });
+
+  /**
    * 이슈 #254 회귀 방지 — OriginSection 오리진 입력 maxLength 누락
    *
    * 수정 전: origin Input에 maxLength prop이 없어 사용자가 임의 길이의 문자열을
@@ -3054,6 +3120,7 @@ test.describe('도메인 상세 — 설정 탭', () => {
 
   test('OriginSection — origin 입력 필드에서 Esc 키로 편집 취소가 동작한다 (회귀: #80)', async ({ page }) => {
     // form 레벨 onKeyDown Escape 처리 적용 후 Esc 취소가 동작해야 한다 (수정 전: onKeyDown 핸들러 없어 Esc 미동작)
+    // #381 이후: dirty 상태 ESC는 확인 다이얼로그를 띄우므로 "떠나기" 클릭 후 취소 완료를 검증.
     await setupDetailMocks(page);
     await page.goto('/domains/textbook.com');
 
@@ -3063,7 +3130,11 @@ test.describe('도메인 상세 — 설정 탭', () => {
     await page.getByTestId('origin-input').fill('https://changed-value.com');
     await page.getByTestId('origin-input').press('Escape');
 
-    // Esc 키로 편집 모드가 해제되어야 한다 (edit-domain-btn이 다시 보임)
+    // #381 가드: dirty 상태 ESC는 확인 다이얼로그를 띄운다 → "떠나기"로 폐기 확정
+    await expect(page.getByTestId('unsaved-changes-dialog')).toBeVisible();
+    await page.getByTestId('unsaved-leave-btn').click();
+
+    // Esc + 떠나기로 편집 모드가 해제되어야 한다 (edit-domain-btn이 다시 보임)
     await expect(page.getByTestId('edit-domain-btn')).toBeVisible();
     // 저장 버튼이 사라져야 한다
     await expect(page.getByTestId('save-domain-btn')).not.toBeVisible();
@@ -3104,8 +3175,11 @@ test.describe('도메인 상세 — 설정 탭', () => {
     // 입력값이 보존되어야 한다
     await expect(descInput).toHaveValue('테스트 설');
 
-    // 대조: IME 조합이 끝난 일반 Escape는 정상적으로 편집 취소를 트리거해야 한다
+    // 대조: IME 조합이 끝난 일반 Escape는 정상적으로 편집 취소 흐름을 트리거해야 한다
+    // #381 이후: dirty 상태이므로 확인 다이얼로그가 뜬 뒤 "떠나기"로 폐기 확정.
     await descInput.press('Escape');
+    await expect(page.getByTestId('unsaved-changes-dialog')).toBeVisible();
+    await page.getByTestId('unsaved-leave-btn').click();
     await expect(page.getByTestId('edit-domain-btn')).toBeVisible();
     await expect(page.getByTestId('save-domain-btn')).not.toBeVisible();
   });

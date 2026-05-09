@@ -69,11 +69,42 @@ function OriginSection({ domain }: { domain: Domain }) {
   const { pendingNavigation, confirmNavigation, cancelNavigation } =
     useUnsavedChangesPrompt({ isDirty });
 
+  /**
+   * ESC 키로 편집을 폐기하려는 시도 — dirty일 때만 set 되어 같은 AlertDialog를 띄운다.
+   * 페이지 이탈 가드와 동일한 UX 일관성 확보 (#381). pendingNavigation과 별도 state인
+   * 이유: ESC 폐기는 페이지 이동이 아니므로 confirmNavigation/cancelNavigation의
+   * history 조작 경로를 타지 않는다 — 같은 다이얼로그를 재사용하되 핸들러만 분기.
+   */
+  const [pendingDiscard, setPendingDiscard] = useState(false);
+
   /** 편집 취소 — 원래 값으로 복원 */
   function handleCancel() {
     setOrigin(domain.origin);
     setDescription(domain.description);
     setEditing(false);
+  }
+
+  /**
+   * ESC 키 처리 — dirty일 때는 즉시 폐기하지 않고 확인 다이얼로그를 띄운다 (#381).
+   * dirty가 아니면 입력값이 원본과 동일하므로 곧장 편집 모드만 닫는다.
+   */
+  function handleEscape() {
+    if (isDirty) {
+      setPendingDiscard(true);
+      return;
+    }
+    handleCancel();
+  }
+
+  /** 다이얼로그에서 "떠나기" — 폐기를 확정하고 편집 취소 */
+  function confirmDiscard() {
+    setPendingDiscard(false);
+    handleCancel();
+  }
+
+  /** 다이얼로그에서 "취소" — 편집 모드 유지, 입력값 보존 */
+  function cancelDiscard() {
+    setPendingDiscard(false);
   }
 
   /** 저장 — origin 빈값·스킴 클라이언트 검증 후 뮤테이션 호출, 편집 모드 해제 */
@@ -149,7 +180,9 @@ function OriginSection({ domain }: { domain: Domain }) {
             onKeyDown={(e) => {
               // IME 조합 중 Escape는 IME에 위임 — 편집 취소로 처리하지 않음
               if (e.nativeEvent.isComposing || e.keyCode === 229) return;
-              if (e.key === 'Escape') handleCancel();
+              // dirty 시 즉시 폐기하지 않고 확인 다이얼로그를 띄운다 (#381) —
+              // 페이지 이탈 가드(#171)와 일관된 UX 보장.
+              if (e.key === 'Escape') handleEscape();
             }}
           >
             {/* Origin 입력 */}
@@ -221,19 +254,25 @@ function OriginSection({ domain }: { domain: Domain }) {
         )}
       </CardContent>
 
-      {/* 미저장 변경 확인 다이얼로그 — useUnsavedChangesPrompt가 SPA 이동을 차단하면 표시.
-          "취소"는 현재 페이지 유지, "떠나기"는 차단된 이동을 재개. */}
-      <AlertDialog open={pendingNavigation !== null} onClose={cancelNavigation}>
+      {/* 미저장 변경 확인 다이얼로그 — 두 트리거를 같은 AlertDialog로 통합한다.
+          1) useUnsavedChangesPrompt: SPA 페이지 이동(사이드바/뒤로가기 등) 차단 시 (#171)
+          2) ESC 폐기 시도: 편집 폼에서 dirty 상태로 ESC 누른 경우 (#381)
+          핸들러만 분기 — 이동 가드는 confirm/cancelNavigation, ESC는 confirm/cancelDiscard. */}
+      <AlertDialog
+        open={pendingNavigation !== null || pendingDiscard}
+        onClose={pendingDiscard ? cancelDiscard : cancelNavigation}
+      >
         <AlertDialogContent className="max-w-sm" data-testid="unsaved-changes-dialog">
           <AlertDialogTitle>저장하지 않은 변경 사항이 있습니다</AlertDialogTitle>
           <p className="text-sm text-muted-foreground">
-            오리진 설정에 저장하지 않은 변경 사항이 있습니다. 페이지를 떠나면
-            입력한 내용이 사라집니다. 정말 떠나시겠습니까?
+            {pendingDiscard
+              ? '오리진 설정에 저장하지 않은 변경 사항이 있습니다. 편집을 취소하면 입력한 내용이 사라집니다. 정말 취소하시겠습니까?'
+              : '오리진 설정에 저장하지 않은 변경 사항이 있습니다. 페이지를 떠나면 입력한 내용이 사라집니다. 정말 떠나시겠습니까?'}
           </p>
           <div className="flex justify-end gap-2 pt-2">
             <Button
               variant="outline"
-              onClick={cancelNavigation}
+              onClick={pendingDiscard ? cancelDiscard : cancelNavigation}
               size="sm"
               data-testid="unsaved-cancel-btn"
             >
@@ -241,7 +280,7 @@ function OriginSection({ domain }: { domain: Domain }) {
             </Button>
             <Button
               variant="destructive"
-              onClick={confirmNavigation}
+              onClick={pendingDiscard ? confirmDiscard : confirmNavigation}
               size="sm"
               data-testid="unsaved-leave-btn"
             >
