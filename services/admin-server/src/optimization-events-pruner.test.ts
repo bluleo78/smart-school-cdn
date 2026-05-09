@@ -18,6 +18,16 @@ function quietLog(): PrunerOpts['log'] {
 function mkRepo() {
   const db = new Database(':memory:');
   db.exec(OPTIMIZATION_EVENTS_SCHEMA);
+  // (#379) reconcileOrphans 가 의존하는 domains 테이블도 함께 준비 — 라우트에서 쓰는
+  //        실제 스키마의 필수 컬럼만 둔다. 미생성 시 reconcileOrphans 가 SQL 에러 → tick 이 0 반환.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS domains (
+      host       TEXT PRIMARY KEY,
+      origin     TEXT NOT NULL,
+      created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+      enabled    INTEGER NOT NULL DEFAULT 1
+    );
+  `);
   return { db, repo: new OptimizationEventsRepository(db) };
 }
 
@@ -41,9 +51,16 @@ function insertAt(repo: OptimizationEventsRepository, ts: string) {
   });
 }
 
+/** 기존 retention 테스트용 host 를 domains 에 등록해 reconcileOrphans 와 분리 — 같은 tick 안에서
+ *  retention prune 만 검증할 수 있도록 한다 (#379). */
+function registerHost(db: Database.Database, host = 'h.example.com') {
+  db.prepare(`INSERT OR IGNORE INTO domains (host, origin) VALUES (?, ?)`).run(host, 'https://o');
+}
+
 describe('OptimizationEventsPruner', () => {
   it('30일 이전 이벤트만 삭제하고 30일 이내는 유지한다', () => {
     const { db, repo } = mkRepo();
+    registerHost(db);
     insertAt(repo, isoMinusDays(31));
     insertAt(repo, isoMinusDays(40));
     insertAt(repo, isoMinusDays(29));
@@ -63,7 +80,8 @@ describe('OptimizationEventsPruner', () => {
     const prev = process.env.OPT_EVENTS_RETENTION_DAYS;
     process.env.OPT_EVENTS_RETENTION_DAYS = '90';
     try {
-      const { repo } = mkRepo();
+      const { db, repo } = mkRepo();
+      registerHost(db);
       insertAt(repo, isoMinusDays(8));
       insertAt(repo, isoMinusDays(3));
       const pruner = new OptimizationEventsPruner({
@@ -83,7 +101,8 @@ describe('OptimizationEventsPruner', () => {
     const prev = process.env.OPT_EVENTS_RETENTION_DAYS;
     process.env.OPT_EVENTS_RETENTION_DAYS = '7';
     try {
-      const { repo } = mkRepo();
+      const { db, repo } = mkRepo();
+      registerHost(db);
       insertAt(repo, isoMinusDays(10));
       insertAt(repo, isoMinusDays(5));
       const pruner = new OptimizationEventsPruner({ repo, now: () => NOW, log: quietLog() });
@@ -98,7 +117,8 @@ describe('OptimizationEventsPruner', () => {
     const prev = process.env.OPT_EVENTS_RETENTION_DAYS;
     process.env.OPT_EVENTS_RETENTION_DAYS = 'not-a-number';
     try {
-      const { repo } = mkRepo();
+      const { db, repo } = mkRepo();
+      registerHost(db);
       insertAt(repo, isoMinusDays(31));
       insertAt(repo, isoMinusDays(20));
       const pruner = new OptimizationEventsPruner({ repo, now: () => NOW, log: quietLog() });
@@ -106,6 +126,51 @@ describe('OptimizationEventsPruner', () => {
     } finally {
       if (prev === undefined) delete process.env.OPT_EVENTS_RETENTION_DAYS;
       else process.env.OPT_EVENTS_RETENTION_DAYS = prev;
+    }
+  });
+
+  // (#379) tick 이 retention prune 외에 reconcileOrphans 도 실행하는지 검증
+  it('domains 에 없는 host 의 orphan 이벤트를 reconcile 한다', () => {
+    const { db, repo } = mkRepo();
+    registerHost(db, 'live.test');
+    // retention 안쪽(2일치) 이벤트를 두 host 로 삽입 — orphan 만 정리되는지 확인
+    repo.insert({
+      ts: isoMinusDays(2),
+      event_type: 'media_cache',
+      host: 'live.test',
+      url: 'https://live.test/a',
+      decision: 'served_200',
+      elapsed_ms: 1,
+    });
+    repo.insert({
+      ts: isoMinusDays(2),
+      event_type: 'media_cache',
+      host: 'orphan.test',
+      url: 'https://orphan.test/a',
+      decision: 'served_200',
+      elapsed_ms: 1,
+    });
+    const pruner = new OptimizationEventsPruner({ repo, now: () => NOW, log: quietLog() });
+    // retention prune 0 + orphan 1 = 1
+    expect(pruner.tick()).toBe(1);
+    const remaining = db.prepare('SELECT host FROM optimization_events').all() as Array<{ host: string }>;
+    expect(remaining).toEqual([{ host: 'live.test' }]);
+  });
+
+  it('reconcileOrphans 예외는 삼키고 retention 결과만 반환한다', () => {
+    const { db, repo } = mkRepo();
+    registerHost(db);
+    insertAt(repo, isoMinusDays(31)); // 1건은 retention 으로 삭제됨
+    // reconcileOrphans 가 throw 하도록 monkey-patch — pruner 가 예외를 삼키는지 확인
+    const original = repo.reconcileOrphans.bind(repo);
+    repo.reconcileOrphans = () => {
+      throw new Error('boom');
+    };
+    try {
+      const pruner = new OptimizationEventsPruner({ repo, now: () => NOW, log: quietLog() });
+      expect(() => pruner.tick()).not.toThrow();
+    } finally {
+      repo.reconcileOrphans = original;
     }
   });
 

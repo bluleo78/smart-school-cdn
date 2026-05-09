@@ -247,6 +247,22 @@ export class OptimizationEventsRepository {
   }
 
   /**
+   * (#379) `domains` 테이블에 더 이상 존재하지 않는 host 의 orphan 이벤트를 정리한다.
+   * `optimization_events.host` 에는 FK 제약이 없어 라우트 외 경로(직접 SQL·외부 도구·시드 누락 등)
+   * 로 도메인이 삭제되면 해당 host 의 이벤트 행이 그대로 잔존한다.
+   * 주기적 reconcile 로 잠재적 누수 경로를 안전하게 회수한다 (low-risk option).
+   * 삭제된 행 수를 반환한다.
+   */
+  reconcileOrphans(): number {
+    return this.db
+      .prepare(
+        `DELETE FROM optimization_events
+         WHERE host NOT IN (SELECT host FROM domains)`,
+      )
+      .run().changes;
+  }
+
+  /**
    * 특정 호스트의 모든 이벤트 삭제. 삭제된 행 수 반환.
    * 도메인 삭제 시 orphan optimization_events 누적을 방지하기 위해 사용한다 (#185).
    * `optimization_events` 테이블에는 FK 제약이 없어 CASCADE가 동작하지 않으므로

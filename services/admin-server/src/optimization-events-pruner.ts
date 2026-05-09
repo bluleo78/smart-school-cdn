@@ -34,22 +34,41 @@ export class OptimizationEventsPruner {
     this.retentionMs = days * 24 * 60 * 60 * 1000;
   }
 
-  /** 1회 prune 실행. 삭제 행 수를 반환 — 테스트/관찰 용. 예외는 로그만 남기고 삼킨다. */
+  /**
+   * 1회 prune 실행. 삭제 행 수(retention 초과 + orphan reconcile 합계)를 반환한다 — 테스트/관찰 용.
+   * (#379) retention prune 직후 `reconcileOrphans()` 를 호출하여 `domains` 에 없는 host 의 잔존 이벤트도
+   *        함께 정리한다. FK 제약이 없는 설계상 라우트 외 경로(직접 SQL 등)에서 누수가 발생할 수 있으므로
+   *        주기적 reconcile 로 회수한다. 두 작업은 독립적이며, 한쪽이 실패해도 다른 쪽은 시도한다.
+   * 예외는 로그만 남기고 삼킨다 — pruner 가 이벤트 루프를 죽이지 않도록 유지.
+   */
   tick(): number {
+    let removed = 0;
     try {
       const beforeIso = new Date(this.now() - this.retentionMs).toISOString();
-      const removed = this.opts.repo.prune(beforeIso);
-      if (removed > 0) {
+      const r = this.opts.repo.prune(beforeIso);
+      if (r > 0) {
         this.opts.log.info(
-          { removed, beforeIso },
+          { removed: r, beforeIso },
           '[opt-events-pruner] retention 초과 이벤트 삭제',
         );
       }
-      return removed;
+      removed += r;
     } catch (err) {
       this.opts.log.warn({ err }, '[opt-events-pruner] prune 실패');
-      return 0;
     }
+    try {
+      const orphan = this.opts.repo.reconcileOrphans();
+      if (orphan > 0) {
+        this.opts.log.info(
+          { removed: orphan },
+          '[opt-events-pruner] orphan(host 미등록) 이벤트 정리',
+        );
+      }
+      removed += orphan;
+    } catch (err) {
+      this.opts.log.warn({ err }, '[opt-events-pruner] reconcileOrphans 실패');
+    }
+    return removed;
   }
 }
 

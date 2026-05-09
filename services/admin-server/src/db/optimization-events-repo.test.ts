@@ -297,6 +297,55 @@ describe('OptimizationEventsRepository', () => {
     });
   });
 
+  // ─── reconcileOrphans (#379) ────────────────────────────────────────────
+  describe('reconcileOrphans', () => {
+    /**
+     * domains 테이블이 같은 DB 에 존재해야 reconcile SQL 의 서브쿼리가 동작한다.
+     * 라우트 핸들러에서 사용하는 실제 schema 와 동일하게 host PK + 필수 컬럼만 둔다.
+     */
+    beforeEach(() => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS domains (
+          host       TEXT PRIMARY KEY,
+          origin     TEXT NOT NULL,
+          created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+          enabled    INTEGER NOT NULL DEFAULT 1
+        );
+      `);
+    });
+
+    it('domains 에 없는 host 의 이벤트만 삭제하고 등록된 host 는 유지한다', () => {
+      db.prepare(`INSERT INTO domains (host, origin) VALUES (?, ?)`).run('live.test', 'https://o');
+      repo.insertBatch([
+        sample({ host: 'live.test' }),
+        sample({ host: 'live.test' }),
+        sample({ host: 'gone.test' }),
+        sample({ host: 'gone.test' }),
+        sample({ host: 'gone.test' }),
+      ]);
+
+      const removed = repo.reconcileOrphans();
+
+      expect(removed).toBe(3);
+      const remaining = repo.query();
+      expect(remaining).toHaveLength(2);
+      expect(remaining.every((r) => r.host === 'live.test')).toBe(true);
+    });
+
+    it('domains 가 비었으면 모든 이벤트를 삭제한다', () => {
+      repo.insertBatch([sample({ host: 'a.test' }), sample({ host: 'b.test' })]);
+      expect(repo.reconcileOrphans()).toBe(2);
+      expect(repo.query()).toHaveLength(0);
+    });
+
+    it('orphan 이 없으면 0 을 반환한다', () => {
+      db.prepare(`INSERT INTO domains (host, origin) VALUES (?, ?)`).run('a.test', 'https://o');
+      repo.insertBatch([sample({ host: 'a.test' })]);
+      expect(repo.reconcileOrphans()).toBe(0);
+      expect(repo.query()).toHaveLength(1);
+    });
+  });
+
   describe('deleteByHosts', () => {
     it('여러 호스트 이벤트를 일괄 삭제하고 삭제 개수를 반환한다', () => {
       repo.insertBatch([
