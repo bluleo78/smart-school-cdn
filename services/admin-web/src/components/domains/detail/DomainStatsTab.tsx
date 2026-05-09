@@ -76,7 +76,11 @@ export function DomainStatsTab({ host, period, onPeriodChange, refresh, onRefres
   const degraded = isSeriesDegraded(period);
   const isCustom = period.period === 'custom';
   // 텍스트 압축/URL 최적화 섹션에 실제로 전달되는 표시 기간 (custom은 24h로 폴백).
-  const effectiveStatsPeriod: '1h' | '24h' | '7d' | '30d' = isCustom ? '24h' : period.period;
+  // isCustom 분기 후에도 TS가 period.period 유니온을 좁히지 못하므로(객체 프로퍼티 narrowing 한계)
+  // 단언으로 'custom' 제외임을 명시. 분기 가드(isCustom)와 의미가 일치한다.
+  const effectiveStatsPeriod: '1h' | '24h' | '7d' | '30d' = isCustom
+    ? '24h'
+    : (period.period as '1h' | '24h' | '7d' | '30d');
 
   // 캐시 섹션 통합 빈 상태 판정 (#267) —
   // DomainCacheCards / DomainStackedChart 두 자식이 동일 useCacheSeries(range, host) 키를 공유하므로
