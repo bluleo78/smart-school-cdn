@@ -317,4 +317,29 @@ describe('OptimizationEventsRepository', () => {
       expect(repo.query()).toHaveLength(1);
     });
   });
+
+  // ─── 인덱스 회귀: (event_type, ts) — #378 ──────────────────────────────
+  describe('schema 인덱스 (#378)', () => {
+    /**
+     * UI 의 'event_type 단독 필터 + 최근 N건' 쿼리(`WHERE event_type = ? ORDER BY ts DESC LIMIT N`)는
+     * 기존 인덱스(host_ts / type_decision / ts) 만으로는 ORDER BY 를 만족시키지 못해
+     * SQLite 가 TEMP B-TREE 를 만들어 정렬했다. (event_type, ts) 복합 인덱스가 추가되었으므로
+     * EXPLAIN QUERY PLAN 결과에 'TEMP B-TREE' 가 나타나지 않아야 한다.
+     */
+    it('event_type 단독 필터 + ts 정렬 쿼리는 TEMP B-TREE 없이 인덱스로 처리된다', () => {
+      const plan = db
+        .prepare(
+          `EXPLAIN QUERY PLAN
+             SELECT * FROM optimization_events
+             WHERE event_type = ?
+             ORDER BY ts DESC
+             LIMIT 100`,
+        )
+        .all('image_optimize') as Array<{ detail: string }>;
+      const detail = plan.map((p) => p.detail).join('\n');
+      expect(detail).not.toMatch(/TEMP B-TREE/);
+      // 신규 인덱스가 실제 선택되었는지도 확인 (옵티마이저가 어느 인덱스를 골랐는지 명시)
+      expect(detail).toMatch(/idx_opt_events_type_ts/);
+    });
+  });
 });

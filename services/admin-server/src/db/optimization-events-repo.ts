@@ -33,6 +33,11 @@ export const OPTIMIZATION_EVENTS_SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_opt_events_host_ts       ON optimization_events(host, ts);
   CREATE INDEX IF NOT EXISTS idx_opt_events_type_decision ON optimization_events(event_type, decision);
   CREATE INDEX IF NOT EXISTS idx_opt_events_ts            ON optimization_events(ts);
+  -- (#378) UI 의 'WHERE event_type = ? ORDER BY ts DESC LIMIT N' 패턴(host 미지정)은
+  -- 기존 인덱스 중 어느 것도 ORDER BY ts 정렬을 만족시키지 못해 SQLite 가 TEMP B-TREE 로
+  -- 정렬을 수행한다. (event_type, ts) 복합 인덱스를 추가하여 정렬용 임시 인덱스 없이
+  -- 인덱스 스캔만으로 응답하도록 한다. idempotent 하므로 기존 DB 에도 안전 적용.
+  CREATE INDEX IF NOT EXISTS idx_opt_events_type_ts       ON optimization_events(event_type, ts);
 `;
 
 /** 허용 event_type — 라우트/repo 양쪽에서 검증에 사용 */
