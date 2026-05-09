@@ -14,6 +14,8 @@ import { useAuth } from '../auth/use-auth';
 import { UserNav } from './UserNav';
 // 전역 TooltipProvider — Radix Tooltip이 동작하려면 트리 최상위에 한 번만 있어야 한다
 import { TooltipProvider } from '../ui/tooltip';
+// 본문 영역 한정 ErrorBoundary — 한 페이지의 렌더 예외가 사이드바/헤더까지 죽이지 않도록 격리 (#372)
+import { ErrorBoundary } from '../error/ErrorBoundary';
 
 /** 사이드바 네비게이션 항목 — 대시보드/도메인/DNS/사용자/시스템 */
 const navItems = [
@@ -237,7 +239,12 @@ export function AppLayout() {
         )}
         <main ref={mainRef} className="flex-1 overflow-auto bg-gradient-main">
           <div className="p-4 md:p-6">
-            <Outlet />
+            {/* 라우트 단위 ErrorBoundary — 본문(<Outlet/>)에서 발생한 렌더 예외를
+                사이드바/헤더는 유지한 채 본문 영역만 폴백으로 대체한다.
+                resetKey=location.key 로 다른 페이지로 이동하면 자동 복구. (#372) */}
+            <ErrorBoundary variant="inline" resetKey={location.key}>
+              <Outlet />
+            </ErrorBoundary>
           </div>
         </main>
       </div>

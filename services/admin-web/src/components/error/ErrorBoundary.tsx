@@ -13,26 +13,53 @@ interface Props {
   children: ReactNode;
   /** 오류 발생 시 보여줄 대체 UI (미지정 시 기본 폴백 사용) */
   fallback?: ReactNode;
+  /**
+   * 폴백 UI 레이아웃 변형.
+   * - 'fullscreen' (기본): 화면 전체(min-h-screen)를 차지 — 트리 최상위 boundary용
+   * - 'inline': 부모 영역(min-h-[40vh])만 차지 — 라우트/카드 단위 boundary용으로
+   *   사이드바·헤더를 살려둔 채 본문 영역만 폴백으로 대체할 때 사용 (#372)
+   */
+  variant?: 'fullscreen' | 'inline';
+  /**
+   * resetKey가 바뀌면 boundary 내부 error 상태를 자동 초기화한다.
+   * 라우트 단위 boundary에서 location.key를 넘겨 다른 페이지로 이동하면
+   * 폴백이 풀려 정상 렌더로 돌아오도록 사용. (#372)
+   */
+  resetKey?: string;
 }
 
 interface State {
   /** 포착된 오류 — null이면 정상 상태 */
   error: Error | null;
+  /** 마지막으로 적용된 resetKey — 변경 감지로 error 자동 초기화 */
+  appliedResetKey: string | undefined;
 }
 
 /** 전역 에러 바운더리 — 렌더 예외 포착 및 폴백 UI 표시 */
 export class ErrorBoundary extends Component<Props, State> {
   constructor(props: Props) {
     super(props);
-    this.state = { error: null };
+    this.state = { error: null, appliedResetKey: props.resetKey };
   }
 
   /**
    * 렌더 중 자식 트리에서 예외 발생 시 state를 업데이트한다.
    * static 메서드로 순수하게 새 state를 반환 — side effect 없음.
+   * appliedResetKey는 그대로 유지 — props 변경(라우트 이동) 시 getDerivedStateFromProps에서 리셋된다.
    */
-  static getDerivedStateFromError(error: Error): State {
+  static getDerivedStateFromError(error: Error): Partial<State> {
     return { error };
+  }
+
+  /**
+   * resetKey prop이 바뀌면 error 상태를 초기화한다.
+   * 라우트 단위 boundary에서 다음 페이지로 이동하면 자동 복구되도록 한다. (#372)
+   */
+  static getDerivedStateFromProps(props: Props, state: State): Partial<State> | null {
+    if (props.resetKey !== state.appliedResetKey) {
+      return { error: null, appliedResetKey: props.resetKey };
+    }
+    return null;
   }
 
   /**
@@ -53,7 +80,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
   render() {
     const { error } = this.state;
-    const { children, fallback } = this.props;
+    const { children, fallback, variant = 'fullscreen' } = this.props;
 
     // 오류 상태: 사용자 지정 폴백이 있으면 그것을, 없으면 기본 폴백 UI 표시
     if (error !== null) {
@@ -61,11 +88,17 @@ export class ErrorBoundary extends Component<Props, State> {
         return fallback;
       }
 
+      // variant 별 컨테이너 높이 — fullscreen은 화면 전체, inline은 본문 영역만 차지하여
+      // 사이드바/헤더 같은 부모 레이아웃을 가리지 않는다. (#372)
+      const containerHeight =
+        variant === 'inline' ? 'min-h-[40vh]' : 'min-h-screen';
+
       // 기본 폴백 — 오류 안내 문구 + 대시보드 복귀 버튼
       return (
         <div
           data-testid="error-boundary-fallback"
-          className="flex flex-col items-center justify-center min-h-screen gap-4 text-muted-foreground p-6"
+          data-variant={variant}
+          className={`flex flex-col items-center justify-center ${containerHeight} gap-4 text-muted-foreground p-6`}
         >
           <p className="text-4xl font-bold text-destructive">⚠</p>
           <p className="text-lg font-semibold text-foreground">오류가 발생했습니다.</p>

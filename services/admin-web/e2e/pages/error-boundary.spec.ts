@@ -39,4 +39,23 @@ test.describe('ErrorBoundary — 렌더 예외 처리', () => {
     await page.getByTestId('error-boundary-home-btn').click();
     await expect(page).toHaveURL('/');
   });
+
+  test('라우트 단위 boundary — 한 페이지 throw 시 사이드바/헤더는 살아있다 (#372)', async ({ page }) => {
+    // 입력: 본문에서 렌더 예외 | 처리: AppLayout 내 inline ErrorBoundary 격리
+    // 출력: 사이드바/헤더 유지 + 본문 영역만 inline 폴백으로 대체
+    await page.goto('/__e2e/throw');
+
+    // inline 변형 폴백이 표시되어야 한다 (fullscreen 풀스크린 폴백 X)
+    const fallback = page.getByTestId('error-boundary-fallback');
+    await expect(fallback).toBeVisible({ timeout: 5000 });
+    await expect(fallback).toHaveAttribute('data-variant', 'inline');
+
+    // 사이드바 — "도메인 관리" NavLink 와 사용자 메뉴가 살아있어야 한다
+    await expect(page.getByRole('link', { name: '도메인 관리' })).toBeVisible();
+
+    // 다른 페이지로 이동하면 폴백이 풀리고 정상 렌더 — resetKey=location.key 동작 검증
+    await page.getByRole('link', { name: '대시보드', exact: true }).click();
+    await expect(page).toHaveURL('/');
+    await expect(page.getByTestId('error-boundary-fallback')).not.toBeVisible();
+  });
 });
