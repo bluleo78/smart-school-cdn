@@ -12,7 +12,13 @@ export function useBulkAddDomains() {
   return useMutation({
     mutationFn: ({ domains }: BulkAddVars) => bulkAddDomains(domains),
     onSuccess: (data) => {
+      // 일괄 추가도 단건 추가와 동일하게 admin-server에서 tlsClient.syncDomains + dnsClient.syncDomains 를
+      // 호출하므로 TLS/DNS/캐시 인기 URL·통계 쿼리를 함께 무효화한다. (#371, delete와 대칭 #334)
       void queryClient.invalidateQueries({ queryKey: ['domains'] });
+      void queryClient.invalidateQueries({ queryKey: ['tls'] });
+      void queryClient.invalidateQueries({ queryKey: ['dns'] });
+      void queryClient.invalidateQueries({ queryKey: ['cache', 'popular'] });
+      void queryClient.invalidateQueries({ queryKey: ['cache', 'stats'] });
 
       // (#197) added/skipped/failed 분리 안내 — 기존 host 는 덮어쓰지 않고 skipped 로 분류된다.
       // 사용자에게 신규 추가 / 이미 존재 / 실패 건수를 명시적으로 보여주어 origin 무결성을 인지하도록 한다.
