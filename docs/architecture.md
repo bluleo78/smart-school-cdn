@@ -436,7 +436,7 @@ admin-web:    7777 포트 (nginx — /api/* → admin-server:4001 리버스 프�
 | Storage gRPC | **50051** | 내부 통신 | HTTP health :8080 |
 | TLS gRPC | **50052** | 내부 통신 | HTTP health :8081 |
 | DNS gRPC | **50053** | 내부 통신 | HTTP health :8082 |
-| Optimizer gRPC | **50054** | 내부 통신 (미구현) | |
+| Optimizer gRPC | **50054** | 내부 통신 | 구현 완료 (Phase 7, 2026-04-13) |
 | Proxy gRPC | **50055** | 내부 통신 (미구현) | |
 
 ### smart-fire-hub 포트 (참고, 충돌 방지용)
@@ -458,141 +458,33 @@ admin-web:    7777 포트 (nginx — /api/* → admin-server:4001 리버스 프�
 
 > smart-fire-hub 패턴 참고: 개발용 / 프로덕션용 docker-compose 분리
 
-### 10-1. docker-compose.yml (개발용)
+### 10-1. 개발 환경 (Docker compose 미사용)
 
-```yaml
-services:
-  storage:
-    build: ./services/storage
-    volumes:
-      - cache-data:/data
-      - ./data/storage.db:/data/storage.db
-    environment:
-      - GRPC_PORT=50051
-      - CACHE_MAX_SIZE=10g
-      - LOG_LEVEL=debug
+개발 시에는 `docker-compose.yml`을 두지 않고 **`pnpm dev`(Turborepo)** 로 각 서비스를 호스트에서 직접 실행한다. Rust 서비스는 `cargo run`, Node 서비스는 `tsx`/`vite`가 watch 모드로 동작하므로 빌드 캐시·핫리로드가 가장 빠르다.
 
-  proxy:
-    build: ./services/proxy
-    ports:
-      - "443:443"
-    volumes:
-      - certs:/certs:ro
-    environment:
-      - STORAGE_GRPC=storage:50051
-      - OPTIMIZER_GRPC=optimizer:50053
-      - TLS_GRPC=tls:50054
-      - LOG_LEVEL=debug
-    depends_on: [storage, optimizer, tls]
-
-  optimizer:
-    build: ./services/optimizer
-    environment:
-      - GRPC_PORT=50053
-      - DEFAULT_IMAGE_QUALITY=80
-      - LOG_LEVEL=debug
-
-  dns:
-    build: ./services/dns
-    ports:
-      - "53:53/udp"
-      - "53:53/tcp"
-    environment:
-      - GRPC_PORT=50052
-      - UPSTREAM_DNS=8.8.8.8
-      - CACHE_SERVER_IP=host.docker.internal
-      - LOG_LEVEL=debug
-
-  tls:
-    build: ./services/tls
-    volumes:
-      - certs:/certs
-    environment:
-      - GRPC_PORT=50054
-      - CA_SUBJECT=Smart Home CDN CA
-      - LOG_LEVEL=debug
-
-  admin-server:
-    build: ./services/admin-server
-    ports:
-      - "4001:4001"
-    volumes:
-      - ./data/admin.db:/data/admin.db
-    environment:
-      - PORT=4001
-      - STORAGE_GRPC=storage:50051
-      - DNS_GRPC=dns:50052
-      - OPTIMIZER_GRPC=optimizer:50053
-      - TLS_GRPC=tls:50054
-      - PROXY_GRPC=proxy:50055
-      - DB_PATH=/data/admin.db
-      - LOG_LEVEL=debug
-    depends_on: [storage, dns, tls, proxy]
-
-  # 개발 시에는 admin-web은 Vite dev server로 로컬 실행
-  # pnpm --filter admin-web dev
-
-volumes:
-  cache-data:
-  certs:
+```bash
+pnpm dev    # turbo가 services/* 의 dev 스크립트를 병렬 실행
 ```
 
-### 10-2. docker-compose.prod.yml (프로덕션용)
+각 서비스의 dev 포트 매핑은 §9 "포트 할당" 표(개발용 포트) 참고. gRPC 포트(50051~50055)는 `.env.local`로 오버라이드 가능하지만 기본값은 모든 환경에서 동일하다.
 
-```yaml
-services:
-  storage:
-    image: smart-home-cdn/storage:latest
-    restart: always
-    volumes:
-      - cache-data:/data
-      - admin-data:/data/db
-    environment:
-      - CACHE_MAX_SIZE=${CACHE_MAX_SIZE:-50g}
-      - LOG_LEVEL=info
+> 통합 테스트로 컨테이너 환경을 띄우려면 §10-2 `docker-compose.prod.yml`(로컬 통합 테스트용 빌드)을, 운영 환경 배포는 `deploy/docker-compose.yml`을 사용한다.
 
-  proxy:
-    image: smart-home-cdn/proxy:latest
-    restart: always
-    ports:
-      - "443:443"
-    depends_on: [storage, optimizer, tls]
+### 10-2. docker-compose.prod.yml (로컬 통합 테스트 / 이미지 빌드용)
 
-  optimizer:
-    image: smart-home-cdn/optimizer:latest
-    restart: always
+루트의 [`docker-compose.prod.yml`](../docker-compose.prod.yml) 파일이 정본이다(LAN 상의 iPad·폰에서 표준 포트로 직접 접근 가능). 구성 요약:
 
-  dns:
-    image: smart-home-cdn/dns:latest
-    restart: always
-    ports:
-      - "53:53/udp"
-      - "53:53/tcp"
-    environment:
-      - UPSTREAM_DNS=${UPSTREAM_DNS:-8.8.8.8}
-      - CACHE_SERVER_IP=${CACHE_SERVER_IP}
+| 서비스 | 빌드 컨텍스트 | gRPC | HTTP health | 비고 |
+|---|---|---|---|---|
+| `storage-service` | `services/storage-service/Dockerfile` | 50051 | 8080 | 캐시 데이터 볼륨 |
+| `tls-service` | `services/tls-service/Dockerfile` | 50052 | 8081 | 인증서 볼륨 |
+| `dns-service` | `services/dns-service/Dockerfile` | 50053 | 8082 | 53/udp 노출, `CDN_IP` 필수 |
+| `optimizer-service` | `services/optimizer-service/Dockerfile` | 50054 | 8083 | Phase 7 |
+| `proxy` | `services/proxy/Dockerfile` | — | 8081(admin) | 80/443 노출 |
+| `admin-server` | `services/admin-server/Dockerfile` | — | 4001 | SQLite |
+| `admin-web` | `services/admin-web/Dockerfile` | — | 7778 | nginx 리버스 프록시 |
 
-  tls:
-    image: smart-home-cdn/tls:latest
-    restart: always
-    volumes:
-      - certs:/certs
-
-  admin:
-    image: smart-home-cdn/admin:latest
-    restart: always
-    ports:
-      - "3000:3000"
-    volumes:
-      - admin-data:/data
-    depends_on: [storage, dns, tls, proxy]
-    # 프로덕션: admin-web 빌드 결과물을 함께 서빙
-
-volumes:
-  cache-data:
-  certs:
-  admin-data:
-```
+운영(스마트홈 학교 내부망) 배포는 [`deploy/docker-compose.yml`](../deploy/docker-compose.yml) — 이미지 레지스트리 pull 기반.
 
 ### 10-3. 루트 스크립트 (package.json)
 
