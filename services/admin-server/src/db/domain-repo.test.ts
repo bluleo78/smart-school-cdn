@@ -37,6 +37,47 @@ describe('DomainRepository', () => {
     expect(repo.findByHost('nope.invalid')).toBeUndefined();
   });
 
+  // #375 — 부팅 시드 회귀 방지: 이미 존재하는 행은 절대 덮어쓰지 않아야 한다
+  describe('seedIfMissing (#375)', () => {
+    it('호스트가 없으면 새로 삽입한다', () => {
+      repo.seedIfMissing('seed.test', 'https://seed.test');
+
+      const found = repo.findByHost('seed.test');
+      expect(found?.origin).toBe('https://seed.test');
+      expect(found?.description).toBe('');
+    });
+
+    it('호스트가 이미 있으면 origin/description/updated_at 을 덮어쓰지 않는다', () => {
+      // 사용자가 origin·description 을 편집한 상태를 시뮬레이션
+      repo.upsert('httpbin.org', 'https://my-mock.local', '테스트 origin');
+      const before = repo.findByHost('httpbin.org')!;
+
+      // updated_at strftime('%s','now') 은 초 단위 — 동일 초 내 호출이면 변화 없음을 보장하기 어려우므로
+      // 여기서는 시드 호출이 origin/description 을 보존하는지(=덮어쓰지 않는지)에 집중한다.
+      repo.seedIfMissing('httpbin.org', 'https://httpbin.org');
+
+      const after = repo.findByHost('httpbin.org')!;
+      expect(after.origin).toBe('https://my-mock.local');
+      expect(after.description).toBe('테스트 origin');
+      expect(after.created_at).toBe(before.created_at);
+      // updated_at 도 시드 호출에 의해 갱신되지 않아야 한다
+      expect(after.updated_at).toBe(before.updated_at);
+    });
+
+    it('연속 호출해도 멱등하게 동작한다 — 행이 이미 있으면 no-op', () => {
+      repo.seedIfMissing('idem.test', 'https://idem.test');
+      const first = repo.findByHost('idem.test')!;
+
+      repo.seedIfMissing('idem.test', 'https://other.example');
+      repo.seedIfMissing('idem.test', 'https://yet-another.example');
+
+      const last = repo.findByHost('idem.test')!;
+      expect(last.origin).toBe('https://idem.test');
+      expect(last.created_at).toBe(first.created_at);
+      expect(last.updated_at).toBe(first.updated_at);
+    });
+  });
+
   it('delete는 삭제된 행 수를 반환하고 실제로 삭제된다', () => {
     repo.upsert('a.test', 'https://a.test');
     expect(repo.delete('a.test')).toBe(1);

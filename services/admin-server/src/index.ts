@@ -262,8 +262,10 @@ const domainRepo = new DomainRepository(db);
 const dnsMetricsRepo = new DnsMetricsRepository(db);
 const userRepo = new UserRepository(db);
 
-// Rust 프록시 기본 도메인 시드 — 없으면 삽입, 있으면 무시
-domainRepo.upsert('httpbin.org', 'https://httpbin.org');
+// Rust 프록시 기본 도메인 시드 — 없으면 삽입, 있으면 무시 (#375)
+// upsert 는 ON CONFLICT DO UPDATE 라 매 부팅마다 사용자 편집 origin/description/updated_at 을
+// 덮어쓰던 회귀가 있었다. seedIfMissing 은 ON CONFLICT DO NOTHING 으로 기존 행을 보존한다.
+domainRepo.seedIfMissing('httpbin.org', 'https://httpbin.org');
 
 const app = Fastify({ logger: true });
 

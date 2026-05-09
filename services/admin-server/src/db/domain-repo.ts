@@ -90,6 +90,24 @@ export class DomainRepository {
       .run(host, origin, description ?? '');
   }
 
+  /**
+   * 부팅 시드 전용 등록 (#375)
+   * - 무엇을: 동일 host가 없을 때만 INSERT 하고, 이미 존재하면 아무것도 하지 않는다.
+   * - 왜: admin-server 부팅 시 기본 도메인 시드가 매 재시작마다 사용자가 편집한
+   *   origin/description/updated_at 을 덮어쓰는 데이터 손실 버그를 막기 위함.
+   *   기존 `upsert()` 는 ON CONFLICT DO UPDATE 정책이라 신규 등록과 강제 갱신 의도가 섞여 있어
+   *   "없으면 추가" 시멘틱을 표현하지 못한다.
+   * - 동작: `INSERT ... ON CONFLICT(host) DO NOTHING` — bulkInsert 와 동일한 보존 정책.
+   */
+  seedIfMissing(host: string, origin: string, description?: string): void {
+    this.db
+      .prepare(
+        `INSERT INTO domains (host, origin, description) VALUES (?, ?, ?)
+         ON CONFLICT(host) DO NOTHING`,
+      )
+      .run(host, origin, description ?? '');
+  }
+
   /** 호스트로 단건 조회 — 없으면 undefined */
   findByHost(host: string): Domain | undefined {
     return this.db
