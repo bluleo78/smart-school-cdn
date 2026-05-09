@@ -57,3 +57,9 @@ docs/specs/
 
 # Rust proxy 캐시 데이터 (테스트/런타임 생성)
 cache/
+
+# ai-driven-explorer/solver 검증 산출물 (전수 캡처)
+before*.png
+verified*.png
+**/before*.png
+**/verified*.png
