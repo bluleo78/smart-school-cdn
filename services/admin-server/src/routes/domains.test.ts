@@ -381,9 +381,10 @@ describe('POST /api/domains', () => {
     );
   });
 
-  it('syncToProxy 실패 시 502와 저장된 도메인을 반환한다 (에러 전파)', async () => {
-    // Proxy 동기화 실패는 502로 클라이언트에 전파한다 (e011b87: POST 에러 전파).
-    // 단, DB에는 이미 upsert되었으므로 응답 본문에 저장된 도메인 정보를 포함한다.
+  it('syncToProxy 실패 시 502를 반환하고 신규 host 행을 ROLLBACK 으로 제거한다 (#363)', async () => {
+    // (#363) bulk-delete(#312) / PUT(#151) / toggle(#151,#192) 와 동일한 일관성 정책.
+    // 사용자에게 502 가 안내되는데 DB 에 새 행이 남으면 운영자 신뢰가 깨지고 라우팅 의도가 손상된다.
+    // BEGIN IMMEDIATE 트랜잭션 + ROLLBACK 으로 INSERT 자체가 사라져야 한다.
     const axiosMod = await import('axios');
     vi.mocked(axiosMod.default.post).mockRejectedValueOnce(new Error('Network error'));
 
@@ -396,10 +397,29 @@ describe('POST /api/domains', () => {
     });
     expect(res.statusCode).toBe(502);
     const body = JSON.parse(res.body);
+    expect(body.error).toBe('proxy_sync_failed');
     expect(body.message).toContain('Proxy 동기화 실패');
-    expect(body.domain?.host).toBe('textbook.com');
-    // DB에는 이미 저장되어 있다 — HealthMonitor가 proxy online 전환 시 재동기화한다
-    expect(repo.findByHost('textbook.com')?.origin).toBe('https://textbook.com');
+    // 핵심 회귀 가드: 신규 host 행은 ROLLBACK 으로 사라져야 한다 (잔류 금지).
+    expect(repo.findByHost('textbook.com')).toBeUndefined();
+  });
+
+  it('기존 host 재등록 중 syncToProxy 실패 시 origin 덮어쓰기가 ROLLBACK 으로 복원된다 (#363)', async () => {
+    // 기존 host 에 대해 새 origin 으로 upsert 했다가 sync 실패 — 사용자에겐 502 안내가 가는데
+    // DB 에 새 origin 이 박혀 있으면 라우팅 의도가 어긋난다. 트랜잭션 ROLLBACK 으로 원본 origin 복원.
+    const axiosMod = await import('axios');
+    vi.mocked(axiosMod.default.post).mockRejectedValueOnce(new Error('Network error'));
+
+    const repo = makeRepo();
+    repo.upsert('textbook.com', 'https://old.example.com');
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/domains',
+      payload: { host: 'textbook.com', origin: 'https://new.example.com' },
+    });
+    expect(res.statusCode).toBe(502);
+    // 핵심 회귀 가드: 기존 origin 으로 복원되어야 한다 (덮어쓰기 잔류 금지).
+    expect(repo.findByHost('textbook.com')?.origin).toBe('https://old.example.com');
   });
 
   it('도메인 추가 시 tls-service와 dns-service에 syncDomains가 호출된다', async () => {

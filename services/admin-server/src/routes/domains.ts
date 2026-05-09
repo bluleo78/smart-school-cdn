@@ -578,14 +578,23 @@ export async function domainRoutes(
       }
       // origin 정규화 — `URL.origin` 으로 trailing slash/host casing 표준화 (#191)
       const normalizedOrigin = normalizeOrigin(origin);
-      domainRepo.upsert(host, normalizedOrigin);
-      const synced = await syncToProxy(domainRepo);
-      if (!synced) {
-        // 표준 envelope (#329) — `domain`은 부분 진행 정보로 함께 전달
+      // (#363) bulk-delete(#312) / PUT(#151) / toggle(#151,#192) 와 동일하게 단건 POST 도
+      // sync 실패 시 DB 상태를 롤백한다. 트랜잭션을 사용하지 않으면 사용자에게는 502 가 안내되는데도
+      // (a) 신규 host 의 새 행, (b) 기존 host 의 origin 덮어쓰기가 그대로 영구 잔류해
+      // 운영자 신뢰가 깨지고 라우팅 의도가 손상된다.
+      // BEGIN IMMEDIATE 트랜잭션 안에서 upsert → await syncToProxy → 결과에 따라 COMMIT/ROLLBACK
+      // 으로 감싸면 신규/기존 host 모두 원형 복원된다 (기존 행은 ROLLBACK 으로 origin/updated_at 복원,
+      // 신규 행은 ROLLBACK 으로 INSERT 자체가 사라짐).
+      const txResult = await domainRepo.runInTransactionAsync<{ synced: boolean }>(async () => {
+        domainRepo.upsert(host, normalizedOrigin);
+        const synced = await syncToProxy(domainRepo);
+        return { commit: synced, value: { synced } };
+      });
+      if (!txResult.synced) {
+        // 표준 envelope (#329) — 롤백 후이므로 `domain` 부분 진행 정보는 더 이상 의미가 없어 미포함.
         return reply.status(502).send({
           error: 'proxy_sync_failed',
           message: 'Proxy 동기화 실패',
-          domain: domainRepo.findByHost(host),
         });
       }
       await fanOutGrpc(app, domainRepo);
