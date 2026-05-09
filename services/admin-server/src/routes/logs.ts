@@ -2,6 +2,7 @@
 /// Docker socket(/var/run/docker.sock)에서 HTTP over Unix socket으로 로그를 읽는다.
 import type { FastifyInstance } from 'fastify';
 import http from 'http';
+import { z } from 'zod';
 
 /** 허용된 서비스명 → Docker 컨테이너명 매핑 */
 const COMPOSE_PROJECT = process.env.COMPOSE_PROJECT_NAME ?? 'smart-school-cdn-prod';
@@ -118,6 +119,13 @@ export interface LogLine {
   service: string;
 }
 
+// querystring 스키마 — tail은 zod coerce 정수 [1,500] (default 100). follow는 기존 호환성을
+// 위해 'false' 문자열일 때만 false, 그 외(미지정/'true'/임의값)는 true로 해석한다.
+const logsQuerySchema = z.object({
+  tail: z.coerce.number().int().min(1).max(500).default(100),
+  follow: z.string().optional().transform((v) => v !== 'false'),
+});
+
 export async function logRoutes(app: FastifyInstance) {
   app.get<{
     Params: { service: string };
@@ -134,9 +142,13 @@ export async function logRoutes(app: FastifyInstance) {
       });
     }
 
-    const tailRaw = parseInt(request.query.tail ?? '100', 10);
-    const tail = Math.min(isNaN(tailRaw) ? 100 : Math.max(1, tailRaw), 500);
-    const follow = request.query.follow !== 'false';
+    // tail 검증: 음수/비숫자/과대값을 silent 폴백시키지 않고 400으로 거부 (#326, #362).
+    // /api/cache/popular(limit) · /api/dns/queries(limit) 와 동일한 zod coerce 패턴 — 정책 일관성 확보.
+    const parsed = logsQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      return reply.status(400).send({ error: 'invalid_input', issues: parsed.error.issues });
+    }
+    const { tail, follow } = parsed.data;
     const dockerSocket = process.env.DOCKER_SOCKET ?? '/var/run/docker.sock';
 
     const path =

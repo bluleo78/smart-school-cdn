@@ -157,4 +157,35 @@ describe('dnsRoutes', () => {
     const res = await app.inject({ method: 'GET', url: '/api/dns/metrics?range=7d' });
     expect(res.statusCode).toBe(400);
   });
+
+  // limit 검증 회귀 테스트 (#362) — /api/cache/popular 와 동일한 정책으로 silent 폴백을 차단.
+  it('GET /api/dns/queries?limit=-100 — 음수는 400 invalid_input', async () => {
+    const { app } = mkApp();
+    const res = await app.inject({ method: 'GET', url: '/api/dns/queries?limit=-100' });
+    expect(res.statusCode).toBe(400);
+    const body = res.json();
+    expect(body.error).toBe('invalid_input');
+    expect(Array.isArray(body.issues)).toBe(true);
+  });
+
+  it('GET /api/dns/queries?limit=abc — 비숫자는 400 invalid_input', async () => {
+    const { app } = mkApp();
+    const res = await app.inject({ method: 'GET', url: '/api/dns/queries?limit=abc' });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('invalid_input');
+  });
+
+  it('GET /api/dns/queries?limit=0 — 0은 400 invalid_input (min=1)', async () => {
+    const { app } = mkApp();
+    const res = await app.inject({ method: 'GET', url: '/api/dns/queries?limit=0' });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('invalid_input');
+  });
+
+  it('GET /api/dns/queries?limit=1000 — max=512 초과는 400', async () => {
+    const { app } = mkApp();
+    const res = await app.inject({ method: 'GET', url: '/api/dns/queries?limit=1000' });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('invalid_input');
+  });
 });

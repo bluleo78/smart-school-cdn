@@ -34,6 +34,46 @@ describe('GET /api/logs/:service', () => {
     });
   });
 
+  // tail 검증 회귀 테스트 (#362) — /api/cache/popular(limit) · /api/dns/queries(limit) 와 동일한
+  // zod coerce 정책. 음수/비숫자/0/과대값을 silent 폴백시키지 않고 400으로 거부.
+  it('tail=-1 — 음수는 400 invalid_input', async () => {
+    const app = await createApp();
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/logs/admin?tail=-1&follow=false',
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('invalid_input');
+  });
+
+  it('tail=abc — 비숫자는 400 invalid_input', async () => {
+    const app = await createApp();
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/logs/admin?tail=abc&follow=false',
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('invalid_input');
+  });
+
+  it('tail=0 — 0은 400 invalid_input (min=1)', async () => {
+    const app = await createApp();
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/logs/admin?tail=0&follow=false',
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('tail=1000 — max=500 초과는 400', async () => {
+    const app = await createApp();
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/logs/admin?tail=1000&follow=false',
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
   it('허용된 서비스명 6개를 모두 수락한다', async () => {
     const services = ['proxy', 'storage', 'tls', 'dns', 'optimizer', 'admin'];
     const app = await createApp();

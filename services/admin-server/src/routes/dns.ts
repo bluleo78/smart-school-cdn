@@ -1,5 +1,6 @@
 // DNS 관리 — 읽기 전용 API. dns-service 실시간 3종 + SQLite 시계열 1종.
 import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
 import type { DnsClient } from '../grpc/dns_client.js';
 import type { DnsMetricsRepository } from '../db/dns-metrics-repo.js';
 
@@ -50,9 +51,19 @@ export async function dnsRoutes(app: FastifyInstance) {
     }
   });
 
-  /** 최근 쿼리 로그 — 인메모리 링버퍼 스냅샷. ts_unix_ms(int64)도 Number로 변환. */
+  /** 최근 쿼리 로그 — 인메모리 링버퍼 스냅샷. ts_unix_ms(int64)도 Number로 변환.
+   *  limit 검증: 음수/비숫자/과대값을 silent 폴백시키지 않고 400으로 거부 (#326, #362).
+   *  같은 admin-server의 /api/cache/popular 와 동일한 zod coerce 패턴 적용 — 운영자가
+   *  라우트별로 limit 정책을 외울 필요가 없도록 정책 일관성 확보. */
+  const queriesQuerySchema = z.object({
+    limit: z.coerce.number().int().min(1).max(512).default(100),
+  });
   app.get<{ Querystring: { limit?: string } }>('/api/dns/queries', async (req, reply) => {
-    const limit = Math.min(Math.max(parseInt(req.query.limit ?? '100', 10) || 100, 1), 512);
+    const parsed = queriesQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      return reply.status(400).send({ error: 'invalid_input', issues: parsed.error.issues });
+    }
+    const { limit } = parsed.data;
     try {
       const r = await app.dnsClient.getRecentQueries(limit);
       return reply.send({
