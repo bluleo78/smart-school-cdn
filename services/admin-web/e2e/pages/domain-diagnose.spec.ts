@@ -249,6 +249,74 @@ test.describe('도메인 상세 — 진단 탭 (#387)', () => {
     await expect(page.getByTestId('diagnose-error')).toHaveCount(0);
   });
 
+  test('부분 실패(null) vs 정상-부재 구분 — null 일 때 명시적 "조회 실패" 표시 (#400)', async ({ page }) => {
+    await setupBaseMocks(page);
+
+    // 1단계: 부분 실패 (cache_copy=null, response_headers=null, cdn=null) — 모두 null 응답.
+    // origin 만 정상값을 채워 "응답 자체가 200이지만 일부 RPC 실패" 시나리오를 재현.
+    const partialFailure = {
+      cdn: null,
+      origin: { status: 'ok', avg_rtt_ms: 200, error_5xx: 0, timeout_count: 0, sample_count: 5 },
+      cache_copy: null,
+      response_headers: null,
+      range: { single_count: 0, multi_count: 0, none_count: 0 },
+      hit_ratio_pct: null,
+      sample_count: 5,
+    };
+    await page.route(`**/api/domains/${HOST}/diagnose*`, (route) =>
+      route.fulfill({ json: partialFailure }),
+    );
+
+    await page.goto(`/domains/${HOST}?tab=diagnose`);
+    await page.getByTestId('diagnose-path-input').fill('/v.mp4');
+
+    // SummaryLine — 캐시 사본 부분이 "조회 실패" 로 표시되어야 한다 (정상-부재 "캐시 사본 없음" 과 구분)
+    const summary = page.getByTestId('diagnose-summary');
+    await expect(summary).toBeVisible();
+    await expect(summary).toContainText('캐시 사본 조회 실패');
+    await expect(summary).not.toContainText('캐시 사본 없음');
+
+    // CacheCopyPanel — null 일 때 별도 안내 메시지 노출
+    await expect(page.getByTestId('diagnose-cache-copy-error')).toBeVisible();
+
+    // HeadersCard — null 일 때 별도 안내 메시지 노출 (빈 배열의 "—" 와 구분)
+    await expect(page.getByTestId('diagnose-headers-error')).toBeVisible();
+
+    // CdnPanel — cdn=null 일 때 별도 안내 메시지 노출
+    await expect(page.getByTestId('diagnose-cdn-error')).toBeVisible();
+  });
+
+  test('정상-부재 — exists:false / 빈 배열은 "—" 또는 "캐시 사본 없음" 표시 (#400 회귀 방지)', async ({ page }) => {
+    await setupBaseMocks(page);
+
+    // cache_copy.exists=false, response_headers=[] — RPC 는 성공했으나 데이터 없음
+    const normalAbsent = {
+      cdn: { current_state: 'MISS', layer: 'L1', l1_hit: false, l2_hit: false, bypass_count_recent: 0 },
+      origin: { status: 'ok', avg_rtt_ms: 200, error_5xx: 0, timeout_count: 0, sample_count: 5 },
+      cache_copy: { exists: false, size_bytes: 0, stored_at: null, expires_at: null },
+      response_headers: [],
+      range: { single_count: 0, multi_count: 0, none_count: 0 },
+      hit_ratio_pct: 0,
+      sample_count: 5,
+    };
+    await page.route(`**/api/domains/${HOST}/diagnose*`, (route) =>
+      route.fulfill({ json: normalAbsent }),
+    );
+
+    await page.goto(`/domains/${HOST}?tab=diagnose`);
+    await page.getByTestId('diagnose-path-input').fill('/v.mp4');
+
+    // 정상-부재 케이스는 기존 표시("캐시 사본 없음" / "—") 를 유지 — 조회 실패와 다르게 표시되어야 한다
+    const summary = page.getByTestId('diagnose-summary');
+    await expect(summary).toContainText('캐시 사본 없음');
+    await expect(summary).not.toContainText('조회 실패');
+
+    // 조회 실패 testid 들은 나타나지 않아야 한다 (정상-부재이므로)
+    await expect(page.getByTestId('diagnose-cache-copy-error')).toHaveCount(0);
+    await expect(page.getByTestId('diagnose-headers-error')).toHaveCount(0);
+    await expect(page.getByTestId('diagnose-cdn-error')).toHaveCount(0);
+  });
+
   test('URL searchParams 동기화 — ?path 와 ?dgRange 가 URL 에 반영된다', async ({ page }) => {
     await setupBaseMocks(page);
     await page.route(`**/api/domains/${HOST}/diagnose*`, (route) =>

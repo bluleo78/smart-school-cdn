@@ -292,6 +292,12 @@ export function DomainDiagnoseTab({ host }: Props) {
 // ── 하위 컴포넌트 ─────────────────────────────────────────────
 
 /** 진단 결과 요약 — CDN 상태 · origin 상태 · 캐시 사본 유무를 한 줄로 표시 */
+/** 진단 결과 요약 — CDN 상태 · origin 상태 · 캐시 사본 유무를 한 줄로 표시.
+ *
+ *  부분 실패(null) vs 정상-부재 구분 (#400):
+ *  서버는 storage RPC 등 부분 실패 시 cache_copy/response_headers 를 `null` 로 두고 200을 유지.
+ *  과거에는 null 과 `exists:false` 를 같은 "캐시 사본 없음" 으로 합쳐 사용자가 구분 불가했음.
+ *  → null 인 경우 명시적으로 "캐시 사본 조회 실패" 로 분기 표시. */
 function SummaryLine({ data }: { data: DomainDiagnoseResponse }) {
   const cdn = data.cdn
     ? `CDN ${data.cdn.current_state}${data.cdn.layer !== 'none' ? `(${data.cdn.layer})` : ''}`
@@ -300,9 +306,15 @@ function SummaryLine({ data }: { data: DomainDiagnoseResponse }) {
     data.origin.status === null
       ? 'origin 데이터 없음'
       : `origin ${data.origin.status === 'ok' ? '정상' : data.origin.status}`;
-  const cache = data.cache_copy?.exists
-    ? `캐시 사본 보유 (만료 ${data.cache_copy.expires_at ? new Date(data.cache_copy.expires_at * 1000).toLocaleString() : '없음'})`
-    : '캐시 사본 없음';
+  // cache_copy === null (부분 실패) vs exists:false (정상 부재) 명시적 구분 (#400)
+  let cache: string;
+  if (data.cache_copy === null) {
+    cache = '캐시 사본 조회 실패';
+  } else if (data.cache_copy.exists) {
+    cache = `캐시 사본 보유 (만료 ${data.cache_copy.expires_at ? new Date(data.cache_copy.expires_at * 1000).toLocaleString() : '없음'})`;
+  } else {
+    cache = '캐시 사본 없음';
+  }
   return (
     <div className="text-sm" data-testid="diagnose-summary">
       {cdn} · {origin} · {cache}
@@ -311,6 +323,11 @@ function SummaryLine({ data }: { data: DomainDiagnoseResponse }) {
 }
 
 /** CDN 패널 — 현재 상태(HIT/MISS/BYPASS), 레이어, 기간 내 hit ratio */
+/** CDN 패널 — 현재 상태(HIT/MISS/BYPASS), 레이어, 기간 내 hit ratio.
+ *
+ *  cdn === null (proxy /diagnose 응답 실패) 시 별도 안내 (#400):
+ *  서버는 proxy 가 응답하지 않을 때 cdn 을 null 로 두고 200을 유지. UI 가 "데이터 없음" 으로
+ *  같이 표시하면 사용자가 부분 실패와 정상 부재를 구분 못함. */
 function CdnPanel({ cdn, hitRatio }: { cdn: DiagnoseCdn | null; hitRatio: number | null }) {
   return (
     <Card>
@@ -318,6 +335,12 @@ function CdnPanel({ cdn, hitRatio }: { cdn: DiagnoseCdn | null; hitRatio: number
         <CardTitle className="text-sm">CDN</CardTitle>
       </CardHeader>
       <CardContent className="text-sm space-y-1">
+        {cdn === null && (
+          // proxy 에서 진단 응답을 받지 못함 — 부분 실패 명시 (#400)
+          <div className="text-muted-foreground" data-testid="diagnose-cdn-error">
+            proxy 진단 응답을 받지 못했습니다
+          </div>
+        )}
         <div>
           현재 상태: <strong>{cdn?.current_state ?? '—'}</strong>
         </div>
@@ -352,7 +375,13 @@ function OriginPanel({ origin }: { origin: DiagnoseOrigin | null }) {
 }
 
 /** 캐시 사본 패널 — 파일 크기, 저장 시각, 만료 시각 */
+/** 캐시 사본 패널 — 파일 크기, 저장 시각, 만료 시각.
+ *
+ *  null (부분 실패) vs `exists:false` (정상 부재) 구분 (#400):
+ *  null 인 경우 storage RPC 실패 등 "조회 자체가 실패" 했음을 사용자에게 명시. */
 function CacheCopyPanel({ copy }: { copy: DiagnoseCacheCopy | null }) {
+  // null/false 를 동일 처리하지 않도록 분기 — 정상 부재는 "—", 조회 실패는 안내 메시지 (#400)
+  const showError = copy === null;
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -369,6 +398,10 @@ function CacheCopyPanel({ copy }: { copy: DiagnoseCacheCopy | null }) {
               {copy.expires_at ? new Date(copy.expires_at * 1000).toLocaleString() : '없음'}
             </div>
           </>
+        ) : showError ? (
+          <div className="text-muted-foreground" data-testid="diagnose-cache-copy-error">
+            조회 실패 (storage 응답 없음)
+          </div>
         ) : (
           <div>—</div>
         )}
@@ -378,6 +411,10 @@ function CacheCopyPanel({ copy }: { copy: DiagnoseCacheCopy | null }) {
 }
 
 /** 응답 헤더 카드 — name/value 쌍을 dl 그리드로 표시 */
+/** 응답 헤더 카드 — name/value 쌍을 dl 그리드로 표시.
+ *
+ *  null (부분 실패) vs [] (정상 부재) 구분 (#400):
+ *  null 은 storage RPC 실패 등 "조회 실패" 상태이므로 빈 배열과 달리 명시적 안내를 표시. */
 function HeadersCard({
   headers,
 }: {
@@ -389,7 +426,12 @@ function HeadersCard({
         <CardTitle className="text-sm">응답 헤더</CardTitle>
       </CardHeader>
       <CardContent>
-        {!headers || headers.length === 0 ? (
+        {headers === null ? (
+          // 부분 실패 — 빈 배열과 구분되는 명시적 메시지 (#400)
+          <div className="text-sm text-muted-foreground" data-testid="diagnose-headers-error">
+            조회 실패 (storage 응답 없음)
+          </div>
+        ) : headers.length === 0 ? (
           <div className="text-sm text-muted-foreground">—</div>
         ) : (
           <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm">
