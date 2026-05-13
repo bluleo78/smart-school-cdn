@@ -245,7 +245,9 @@ function CdnPanel({ cdn, hitRatio }: { cdn: DiagnoseCdn | null; hitRatio: number
         <div>
           현재 상태: <strong>{cdn?.current_state ?? '—'}</strong>
         </div>
-        <div>레이어: {cdn?.layer ?? '—'}</div>
+        {/* layer='none' 은 BYPASS 등 "레이어 개념이 의미 없는 상태"를 의미.
+            SummaryLine 과 표시를 통일해 'none' 일 때는 '—' 로 표기 (#397). */}
+        <div>레이어: {!cdn || cdn.layer === 'none' ? '—' : cdn.layer}</div>
         <div>기간 내 hit ratio: {hitRatio == null ? '—' : `${hitRatio}%`}</div>
       </CardContent>
     </Card>

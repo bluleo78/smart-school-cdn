@@ -50,6 +50,20 @@ function diagnoseEmpty() {
   };
 }
 
+/** 진단 결과 — BYPASS 시나리오 (layer='none' 케이스, #397 회귀 방지)
+ *  SummaryLine 과 CdnPanel 이 'none' 을 동일하게 처리하는지 검증하기 위한 fixture. */
+function diagnoseBypassNone() {
+  return {
+    cdn: { current_state: 'BYPASS', layer: 'none', l1_hit: false, l2_hit: false, bypass_count_recent: 3 },
+    origin: { status: 'ok', avg_rtt_ms: 220, error_5xx: 0, timeout_count: 0, sample_count: 12 },
+    cache_copy: { exists: false, size_bytes: 0, stored_at: null, expires_at: null },
+    response_headers: [{ name: 'content-type', value: 'text/html' }],
+    range: { single_count: 0, multi_count: 0, none_count: 12 },
+    hit_ratio_pct: 0,
+    sample_count: 12,
+  };
+}
+
 /** 진단 결과 — HIT 시나리오 (캐시 사본 보유) */
 function diagnoseHit() {
   return {
@@ -137,6 +151,30 @@ test.describe('도메인 상세 — 진단 탭 (#387)', () => {
     // 입력 보정 (앞에 / 붙임) → 에러 메시지 사라짐
     await page.getByTestId('diagnose-path-input').fill('/test.mp4');
     await expect(page.getByTestId('diagnose-path-error')).toHaveCount(0);
+  });
+
+  test("BYPASS 시 layer='none' 표시 통일 — SummaryLine 과 CdnPanel 모두 숨김/대시 (#397)", async ({
+    page,
+  }) => {
+    await setupBaseMocks(page);
+    await page.route(`**/api/domains/${HOST}/diagnose*`, (route) =>
+      route.fulfill({ json: diagnoseBypassNone() }),
+    );
+
+    await page.goto(`/domains/${HOST}?tab=diagnose`);
+    await page.getByTestId('diagnose-path-input').fill('/index.html');
+
+    // SummaryLine: BYPASS 상태에서 '(none)' 같은 레이어 표기가 노출되지 않아야 한다
+    const summary = page.getByTestId('diagnose-summary');
+    await expect(summary).toContainText('CDN BYPASS');
+    await expect(summary).not.toContainText('none');
+    await expect(summary).not.toContainText('(none)');
+
+    // CdnPanel: SummaryLine 과 동일한 정책으로 'none' 을 '—' 로 표기
+    // CardContent 텍스트 전체에 '레이어: —' 가 포함되는지 검증한다
+    const cdnCard = page.getByRole('heading', { name: 'CDN', exact: true }).locator('..').locator('..');
+    await expect(cdnCard).toContainText('레이어: —');
+    await expect(cdnCard).not.toContainText('레이어: none');
   });
 
   test('URL searchParams 동기화 — ?path 와 ?dgRange 가 URL 에 반영된다', async ({ page }) => {
