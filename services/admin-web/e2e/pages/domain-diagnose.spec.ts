@@ -213,6 +213,42 @@ test.describe('도메인 상세 — 진단 탭 (#387)', () => {
     await expect.poll(() => capturedTarget).toBe(`https://${HOST}/original`);
   });
 
+  test('API 500 에러 — 에러 메시지·다시 시도 버튼·toast 노출 (#399)', async ({ page }) => {
+    await setupBaseMocks(page);
+    // 진단 API 가 500을 반환하는 시나리오 — 무피드백 회귀 방지.
+    // QueryClient 가 5xx 에서 1회 자동 재시도(main.tsx 정책)하므로 자동 재시도 분까지 실패시키고,
+    // 사용자가 '다시 시도' 버튼을 누른 시점부터는 성공 응답으로 회복 흐름까지 검증한다.
+    let userRetried = false;
+    await page.route(`**/api/domains/${HOST}/diagnose*`, async (route) => {
+      if (userRetried) {
+        await route.fulfill({ json: diagnoseHit() });
+      } else {
+        await route.fulfill({ status: 500, json: { error: 'server error' } });
+      }
+    });
+
+    await page.goto(`/domains/${HOST}?tab=diagnose`);
+    await page.getByTestId('diagnose-path-input').fill('/probe');
+
+    // 에러 메시지와 다시 시도 버튼이 표시된다 — 사용자에게 명시적 피드백 (#399)
+    const errBox = page.getByTestId('diagnose-error');
+    await expect(errBox).toBeVisible();
+    await expect(errBox).toContainText('진단 조회 실패');
+    await expect(page.getByTestId('diagnose-error-retry-btn')).toBeVisible();
+
+    // sonner toast 도 함께 노출된다 (자동 dismiss 전 timing 내에서 확인)
+    await expect(page.locator('[data-sonner-toast]').first()).toBeVisible();
+
+    // 에러 상태에서는 SummaryLine 이 노출되지 않아야 한다
+    await expect(page.getByTestId('diagnose-summary')).toHaveCount(0);
+
+    // 다시 시도 클릭 → 두 번째 호출은 성공 → 정상 결과 렌더 + 에러 박스 사라짐
+    userRetried = true;
+    await page.getByTestId('diagnose-error-retry-btn').click();
+    await expect(page.getByTestId('diagnose-summary')).toBeVisible();
+    await expect(page.getByTestId('diagnose-error')).toHaveCount(0);
+  });
+
   test('URL searchParams 동기화 — ?path 와 ?dgRange 가 URL 에 반영된다', async ({ page }) => {
     await setupBaseMocks(page);
     await page.route(`**/api/domains/${HOST}/diagnose*`, (route) =>

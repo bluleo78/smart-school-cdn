@@ -64,6 +64,15 @@ export function DomainDiagnoseTab({ host }: Props) {
   const diagnoseQuery = useDomainDiagnose({ host, path: pathOnly, query: queryOnly, range });
   const purgeMutation = usePurgeCache();
 
+  // 진단 API 에러(500/네트워크 등) 시 toast로 1회 알림 — 무피드백 문제 해소 (#399).
+  // 401은 글로벌 axios 인터셉터(src/lib/api.ts)가 /login 리다이렉트 처리하므로 별도 처리 불필요.
+  // diagnoseQuery.error 가 새 에러 인스턴스로 바뀔 때마다 한 번만 알림.
+  useEffect(() => {
+    if (diagnoseQuery.isError) {
+      toast.error('진단 조회에 실패했습니다. 잠시 후 다시 시도해 주세요.');
+    }
+  }, [diagnoseQuery.isError, diagnoseQuery.error]);
+
   // URL state 동기화 — path/dgRange 변경 시 ?path=&dgRange= 반영 (replace로 히스토리 누적 방지)
   useEffect(() => {
     const next = new URLSearchParams(searchParams);
@@ -162,8 +171,38 @@ export function DomainDiagnoseTab({ host }: Props) {
         </CardContent>
       </Card>
 
-      {/* 요약 한 줄 */}
-      {data && <SummaryLine data={data} />}
+      {/* 요약 한 줄 / 로딩 / 에러 상태 — SummaryLine 자리에서 query 상태를 사용자에게 노출 (#399).
+          - 로딩 중: '진단 중...'
+          - 실패: 에러 메시지 + 다시 시도 버튼 (refetch)
+          - 성공: 기존 SummaryLine */}
+      {diagnoseQuery.isError ? (
+        <div
+          className="flex items-center gap-2 text-sm text-destructive"
+          data-testid="diagnose-error"
+          role="alert"
+        >
+          <span>진단 조회 실패 — 잠시 후 다시 시도해 주세요.</span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => diagnoseQuery.refetch()}
+            disabled={diagnoseQuery.isFetching}
+            data-testid="diagnose-error-retry-btn"
+          >
+            다시 시도
+          </Button>
+        </div>
+      ) : diagnoseQuery.isFetching && !data ? (
+        <div
+          className="text-sm text-muted-foreground"
+          data-testid="diagnose-loading"
+          aria-live="polite"
+        >
+          진단 중...
+        </div>
+      ) : (
+        data && <SummaryLine data={data} />
+      )}
 
       {/* 3분할 패널 */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
