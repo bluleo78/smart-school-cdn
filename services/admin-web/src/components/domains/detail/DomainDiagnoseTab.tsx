@@ -1,0 +1,325 @@
+/// 도메인 상세 — URL 진단 탭 (#387)
+/// host context + path(+선택적 ?query) 입력 + 기간 selector 로 단일 URL 진단을 조회.
+/// 결과: 상단 요약 한 줄 + 3분할(CDN/Origin/캐시 사본) + 응답 헤더 + Range 분포 + Refresh.
+/// URL searchParams 와 양방향 동기화 (?path, ?dgRange).
+import { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router';
+import { toast } from 'sonner';
+import { useDomainDiagnose } from '../../../hooks/useDomainDiagnose';
+import { usePurgeCache } from '../../../hooks/usePurgeCache';
+import type {
+  DiagnoseRange,
+  DomainDiagnoseResponse,
+  DiagnoseCdn,
+  DiagnoseOrigin,
+  DiagnoseCacheCopy,
+  DiagnoseRangeDist,
+} from '../../../api/diagnose';
+import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
+import { Button } from '../../ui/button';
+import { Input } from '../../ui/input';
+import { Label } from '../../ui/label';
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogTitle,
+} from '../../ui/alert-dialog';
+
+const RANGES: DiagnoseRange[] = ['1h', '24h', '7d'];
+
+interface Props {
+  host: string;
+}
+
+/** path 입력에 `?query` 가 포함되어 있으면 분리한다 — admin-server 가 별도 파라미터를 요구 */
+function splitPathAndQuery(input: string): { path: string; query: string } {
+  const i = input.indexOf('?');
+  if (i < 0) return { path: input, query: '' };
+  return { path: input.slice(0, i), query: input.slice(i + 1) };
+}
+
+export function DomainDiagnoseTab({ host }: Props) {
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // URL searchParams 와 양방향 동기화 — 진단 path/기간을 북마크·공유 링크로 복원
+  const [pathInput, setPathInput] = useState(searchParams.get('path') ?? '');
+  const initialRange = searchParams.get('dgRange');
+  const [range, setRange] = useState<DiagnoseRange>(
+    RANGES.includes(initialRange as DiagnoseRange) ? (initialRange as DiagnoseRange) : '1h',
+  );
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  const { path: pathOnly, query: queryOnly } = splitPathAndQuery(pathInput.trim());
+
+  const diagnoseQuery = useDomainDiagnose({ host, path: pathOnly, query: queryOnly, range });
+  const purgeMutation = usePurgeCache();
+
+  // URL state 동기화 — path/dgRange 변경 시 ?path=&dgRange= 반영 (replace로 히스토리 누적 방지)
+  useEffect(() => {
+    const next = new URLSearchParams(searchParams);
+    next.set('tab', 'diagnose');
+    if (pathInput.trim()) next.set('path', pathInput.trim()); else next.delete('path');
+    next.set('dgRange', range);
+    setSearchParams(next, { replace: true });
+    // pathInput, range 변경 시에만 — searchParams/setSearchParams 자체는 의존성에서 제외 (lint 무시)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathInput, range]);
+
+  const data = diagnoseQuery.data;
+  const refreshDisabled =
+    !pathOnly.startsWith('/') || data?.cache_copy?.exists !== true || purgeMutation.isPending;
+
+  /** Refresh 확인 → PURGE URL 호출 → 진단 데이터 자동 refetch */
+  const onConfirmRefresh = useCallback(async () => {
+    setConfirmOpen(false);
+    const fullUrl = `https://${host}${pathOnly}${queryOnly ? `?${queryOnly}` : ''}`;
+    try {
+      await purgeMutation.mutateAsync({ type: 'url', target: fullUrl });
+      toast.success('캐시 사본을 비웠습니다. 다음 요청 시 origin에서 다시 가져옵니다.');
+      await diagnoseQuery.refetch();
+    } catch {
+      toast.error('캐시 퍼지에 실패했습니다.');
+    }
+  }, [host, pathOnly, queryOnly, purgeMutation, diagnoseQuery]);
+
+  return (
+    <div className="space-y-4">
+      {/* 입력 영역 */}
+      <Card data-testid="domain-diagnose-input">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm">진단할 URL</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col gap-3 md:flex-row md:items-end">
+            <div className="md:w-40">
+              <Label className="text-xs text-muted-foreground">host</Label>
+              <div className="font-mono text-sm h-9 flex items-center">{host}</div>
+            </div>
+            <div className="flex-1">
+              <Label className="text-xs text-muted-foreground">
+                path (?query 포함 가능, `/` 시작)
+              </Label>
+              <Input
+                value={pathInput}
+                onChange={(e) => setPathInput(e.target.value)}
+                placeholder="/ch2/n-unit/video.mp4"
+                className="h-9 text-sm"
+                data-testid="diagnose-path-input"
+              />
+            </div>
+            <div className="flex gap-1">
+              {RANGES.map((r) => (
+                <Button
+                  key={r}
+                  variant={r === range ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setRange(r)}
+                  data-testid={`diagnose-range-${r}`}
+                >
+                  {r}
+                </Button>
+              ))}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* 요약 한 줄 */}
+      {data && <SummaryLine data={data} />}
+
+      {/* 3분할 패널 */}
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <CdnPanel cdn={data?.cdn ?? null} hitRatio={data?.hit_ratio_pct ?? null} />
+        <OriginPanel origin={data?.origin ?? null} />
+        <CacheCopyPanel copy={data?.cache_copy ?? null} />
+      </div>
+
+      {/* 응답 헤더 + Range 카드 */}
+      <HeadersCard headers={data?.response_headers ?? null} />
+      <RangeCard range={data?.range ?? null} />
+
+      <div className="flex justify-end">
+        <Button
+          variant="outline"
+          disabled={refreshDisabled}
+          onClick={() => setConfirmOpen(true)}
+          data-testid="diagnose-refresh-btn"
+        >
+          Refresh from origin
+        </Button>
+      </div>
+
+      <p className="text-xs text-muted-foreground">
+        iPad·교실 Wi-Fi·DHCP 측은 본 진단 범위 밖. CDN·origin 모두 정상이면 클라이언트 측 점검을
+        권장합니다.
+      </p>
+
+      {/* Refresh 확인 다이얼로그 — pending 중 ESC/백드롭 닫기 차단 */}
+      <AlertDialog
+        open={confirmOpen}
+        onClose={() => {
+          if (!purgeMutation.isPending) setConfirmOpen(false);
+        }}
+      >
+        <AlertDialogContent
+          className="max-w-sm"
+          disableClose={purgeMutation.isPending}
+          data-testid="diagnose-refresh-dialog"
+        >
+          <AlertDialogTitle>이 URL의 캐시를 비웁니다</AlertDialogTitle>
+          <p className="text-sm text-muted-foreground">
+            다음 요청 시 origin 에서 다시 가져옵니다. 계속할까요?
+          </p>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setConfirmOpen(false)}
+              disabled={purgeMutation.isPending}
+            >
+              취소
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={onConfirmRefresh}
+              disabled={purgeMutation.isPending}
+              data-testid="diagnose-refresh-confirm-btn"
+            >
+              비우기
+            </Button>
+          </div>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+// ── 하위 컴포넌트 ─────────────────────────────────────────────
+
+/** 진단 결과 요약 — CDN 상태 · origin 상태 · 캐시 사본 유무를 한 줄로 표시 */
+function SummaryLine({ data }: { data: DomainDiagnoseResponse }) {
+  const cdn = data.cdn
+    ? `CDN ${data.cdn.current_state}${data.cdn.layer !== 'none' ? `(${data.cdn.layer})` : ''}`
+    : 'CDN 알 수 없음';
+  const origin =
+    data.origin.status === null
+      ? 'origin 데이터 없음'
+      : `origin ${data.origin.status === 'ok' ? '정상' : data.origin.status}`;
+  const cache = data.cache_copy?.exists
+    ? `캐시 사본 보유 (만료 ${data.cache_copy.expires_at ? new Date(data.cache_copy.expires_at * 1000).toLocaleString() : '없음'})`
+    : '캐시 사본 없음';
+  return (
+    <div className="text-sm" data-testid="diagnose-summary">
+      {cdn} · {origin} · {cache}
+    </div>
+  );
+}
+
+/** CDN 패널 — 현재 상태(HIT/MISS/BYPASS), 레이어, 기간 내 hit ratio */
+function CdnPanel({ cdn, hitRatio }: { cdn: DiagnoseCdn | null; hitRatio: number | null }) {
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm">CDN</CardTitle>
+      </CardHeader>
+      <CardContent className="text-sm space-y-1">
+        <div>
+          현재 상태: <strong>{cdn?.current_state ?? '—'}</strong>
+        </div>
+        <div>레이어: {cdn?.layer ?? '—'}</div>
+        <div>기간 내 hit ratio: {hitRatio == null ? '—' : `${hitRatio}%`}</div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Origin 패널 — 상태, 평균 RTT, 5xx/timeout 카운트, 샘플 수 */
+function OriginPanel({ origin }: { origin: DiagnoseOrigin | null }) {
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm">Origin</CardTitle>
+      </CardHeader>
+      <CardContent className="text-sm space-y-1">
+        <div>
+          상태: <strong>{origin?.status ?? '—'}</strong>
+        </div>
+        <div>평균 RTT: {origin?.avg_rtt_ms == null ? '—' : `${origin.avg_rtt_ms} ms`}</div>
+        <div>
+          5xx: {origin?.error_5xx ?? '—'} · timeout: {origin?.timeout_count ?? '—'}
+        </div>
+        <div>샘플: {origin?.sample_count ?? '—'}</div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/** 캐시 사본 패널 — 파일 크기, 저장 시각, 만료 시각 */
+function CacheCopyPanel({ copy }: { copy: DiagnoseCacheCopy | null }) {
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm">캐시 사본</CardTitle>
+      </CardHeader>
+      <CardContent className="text-sm space-y-1">
+        {copy?.exists ? (
+          <>
+            <div>{(copy.size_bytes / 1024 / 1024).toFixed(2)} MiB</div>
+            <div>저장: {new Date(copy.stored_at * 1000).toLocaleString()}</div>
+            <div>
+              만료:{' '}
+              {copy.expires_at ? new Date(copy.expires_at * 1000).toLocaleString() : '없음'}
+            </div>
+          </>
+        ) : (
+          <div>—</div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** 응답 헤더 카드 — name/value 쌍을 dl 그리드로 표시 */
+function HeadersCard({
+  headers,
+}: {
+  headers: Array<{ name: string; value: string }> | null;
+}) {
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm">응답 헤더</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {!headers || headers.length === 0 ? (
+          <div className="text-sm text-muted-foreground">—</div>
+        ) : (
+          <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 text-sm">
+            {headers.map((h, idx) => (
+              <div key={`${h.name}-${idx}`} className="contents">
+                <dt className="font-mono text-muted-foreground">{h.name}</dt>
+                <dd className="font-mono break-all">{h.value}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Range 응답 분포 카드 — single / multi / none 카운트 */
+function RangeCard({ range }: { range: DiagnoseRangeDist | null }) {
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm">Range 응답 분포</CardTitle>
+      </CardHeader>
+      <CardContent className="text-sm">
+        single-range: {range?.single_count ?? '—'} · multi: {range?.multi_count ?? '—'} · none:{' '}
+        {range?.none_count ?? '—'}
+      </CardContent>
+    </Card>
+  );
+}
