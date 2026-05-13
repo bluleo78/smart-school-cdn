@@ -177,6 +177,42 @@ test.describe('도메인 상세 — 진단 탭 (#387)', () => {
     await expect(cdnCard).not.toContainText('레이어: none');
   });
 
+  test('Refresh 다이얼로그 — 오픈 시점 URL을 snapshot하여 path 변경에도 영향받지 않는다 (#398)', async ({
+    page,
+  }) => {
+    await setupBaseMocks(page);
+    await page.route(`**/api/domains/${HOST}/diagnose*`, (route) =>
+      route.fulfill({ json: diagnoseHit() }),
+    );
+
+    // PURGE 호출 본문(target URL)을 캡처해 검증
+    let capturedTarget: string | null = null;
+    await page.route('**/api/cache/purge', async (route) => {
+      const body = route.request().postDataJSON() as { type: string; target: string };
+      capturedTarget = body.target;
+      await route.fulfill({ json: { ok: true } });
+    });
+
+    await page.goto(`/domains/${HOST}?tab=diagnose`);
+    // 1) 사용자가 /original 을 본 상태에서 다이얼로그를 연다
+    await page.getByTestId('diagnose-path-input').fill('/original');
+    await expect(page.getByTestId('diagnose-refresh-btn')).toBeEnabled();
+    await page.getByTestId('diagnose-refresh-btn').click();
+
+    // 다이얼로그 본문에 대상 URL(snapshot)이 명시 표시된다
+    const targetLabel = page.getByTestId('diagnose-refresh-target-url');
+    await expect(targetLabel).toBeVisible();
+    await expect(targetLabel).toHaveText(`https://${HOST}/original`);
+
+    // 2) 다이얼로그가 열린 동안 path 입력을 변경 — snapshot 은 영향받지 않아야 한다
+    await page.getByTestId('diagnose-path-input').fill('/changed');
+    await expect(targetLabel).toHaveText(`https://${HOST}/original`);
+
+    // 3) 비우기 클릭 → 처음 본 /original 이 그대로 퍼지되어야 한다
+    await page.getByTestId('diagnose-refresh-confirm-btn').click();
+    await expect.poll(() => capturedTarget).toBe(`https://${HOST}/original`);
+  });
+
   test('URL searchParams 동기화 — ?path 와 ?dgRange 가 URL 에 반영된다', async ({ page }) => {
     await setupBaseMocks(page);
     await page.route(`**/api/domains/${HOST}/diagnose*`, (route) =>

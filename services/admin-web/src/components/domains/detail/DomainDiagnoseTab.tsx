@@ -49,6 +49,10 @@ export function DomainDiagnoseTab({ host }: Props) {
     RANGES.includes(initialRange as DiagnoseRange) ? (initialRange as DiagnoseRange) : '1h',
   );
   const [confirmOpen, setConfirmOpen] = useState(false);
+  // Refresh 다이얼로그가 열릴 때 대상 URL을 snapshot으로 고정 (#398)
+  // — 다이얼로그가 열려있는 동안 path 입력이 바뀌어도 confirm 시 처음 본 URL만 퍼지하기 위함.
+  // null이면 다이얼로그 비활성 상태.
+  const [pendingPurgeUrl, setPendingPurgeUrl] = useState<string | null>(null);
 
   const { path: pathOnly, query: queryOnly } = splitPathAndQuery(pathInput.trim());
 
@@ -75,18 +79,34 @@ export function DomainDiagnoseTab({ host }: Props) {
   const refreshDisabled =
     !pathOnly.startsWith('/') || data?.cache_copy?.exists !== true || purgeMutation.isPending;
 
-  /** Refresh 확인 → PURGE URL 호출 → 진단 데이터 자동 refetch */
+  /** 대상 full URL 빌더 — host + path + (선택적) ?query */
+  const buildFullUrl = useCallback(
+    (p: string, q: string) => `https://${host}${p}${q ? `?${q}` : ''}`,
+    [host],
+  );
+
+  /** Refresh 버튼 클릭 → 현재 입력을 snapshot으로 고정한 뒤 다이얼로그 오픈 (#398) */
+  const onOpenRefresh = useCallback(() => {
+    setPendingPurgeUrl(buildFullUrl(pathOnly, queryOnly));
+    setConfirmOpen(true);
+  }, [buildFullUrl, pathOnly, queryOnly]);
+
+  /** Refresh 확인 → snapshot URL 로 PURGE 호출 → 진단 데이터 자동 refetch
+   *  다이얼로그 오픈 이후 path 입력이 바뀌어도 처음 사용자가 본 URL만 퍼지한다 (#398) */
   const onConfirmRefresh = useCallback(async () => {
+    const target = pendingPurgeUrl;
     setConfirmOpen(false);
-    const fullUrl = `https://${host}${pathOnly}${queryOnly ? `?${queryOnly}` : ''}`;
+    if (!target) return;
     try {
-      await purgeMutation.mutateAsync({ type: 'url', target: fullUrl });
+      await purgeMutation.mutateAsync({ type: 'url', target });
       toast.success('캐시 사본을 비웠습니다. 다음 요청 시 origin에서 다시 가져옵니다.');
       await diagnoseQuery.refetch();
     } catch {
       toast.error('캐시 퍼지에 실패했습니다.');
+    } finally {
+      setPendingPurgeUrl(null);
     }
-  }, [host, pathOnly, queryOnly, purgeMutation, diagnoseQuery]);
+  }, [pendingPurgeUrl, purgeMutation, diagnoseQuery]);
 
   return (
     <div className="space-y-4">
@@ -160,7 +180,7 @@ export function DomainDiagnoseTab({ host }: Props) {
         <Button
           variant="outline"
           disabled={refreshDisabled}
-          onClick={() => setConfirmOpen(true)}
+          onClick={onOpenRefresh}
           data-testid="diagnose-refresh-btn"
         >
           Refresh from origin
@@ -172,11 +192,15 @@ export function DomainDiagnoseTab({ host }: Props) {
         권장합니다.
       </p>
 
-      {/* Refresh 확인 다이얼로그 — pending 중 ESC/백드롭 닫기 차단 */}
+      {/* Refresh 확인 다이얼로그 — pending 중 ESC/백드롭 닫기 차단
+          대상 URL은 다이얼로그 오픈 시점 snapshot(pendingPurgeUrl)을 명시 표시한다 (#398) */}
       <AlertDialog
         open={confirmOpen}
         onClose={() => {
-          if (!purgeMutation.isPending) setConfirmOpen(false);
+          if (!purgeMutation.isPending) {
+            setConfirmOpen(false);
+            setPendingPurgeUrl(null);
+          }
         }}
       >
         <AlertDialogContent
@@ -185,6 +209,16 @@ export function DomainDiagnoseTab({ host }: Props) {
           data-testid="diagnose-refresh-dialog"
         >
           <AlertDialogTitle>이 URL의 캐시를 비웁니다</AlertDialogTitle>
+          {/* 사용자가 어떤 URL이 퍼지되는지 명확히 인지하도록 snapshot URL을 본문에 노출 (#398).
+              다이얼로그 열린 동안 path 입력이 바뀌어도 이 값은 변하지 않는다. */}
+          {pendingPurgeUrl && (
+            <p
+              className="font-mono text-xs break-all rounded bg-muted px-2 py-1"
+              data-testid="diagnose-refresh-target-url"
+            >
+              {pendingPurgeUrl}
+            </p>
+          )}
           <p className="text-sm text-muted-foreground">
             다음 요청 시 origin 에서 다시 가져옵니다. 계속할까요?
           </p>
@@ -192,7 +226,10 @@ export function DomainDiagnoseTab({ host }: Props) {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setConfirmOpen(false)}
+              onClick={() => {
+                setConfirmOpen(false);
+                setPendingPurgeUrl(null);
+              }}
               disabled={purgeMutation.isPending}
             >
               취소
