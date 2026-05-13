@@ -111,6 +111,33 @@ test.describe('도메인 상세 — 진단 탭 (#387)', () => {
     await expect(page.getByTestId('diagnose-refresh-btn')).toBeEnabled();
   });
 
+  test('path 미검증 — `/` 누락 입력 시 인라인 검증 메시지 노출 (#394)', async ({ page }) => {
+    await setupBaseMocks(page);
+    // path 가 `/` 로 시작하지 않으면 hook enabled=false 라 API 미호출이지만 안전하게 mock 등록
+    await page.route(`**/api/domains/${HOST}/diagnose*`, (route) =>
+      route.fulfill({ json: diagnoseEmpty() }),
+    );
+
+    await page.goto(`/domains/${HOST}?tab=diagnose`);
+
+    // 정상 입력 시 에러 메시지가 없어야 한다
+    await expect(page.getByTestId('diagnose-path-error')).toHaveCount(0);
+
+    // 잘못된 입력 (앞에 / 없음) → 인라인 검증 메시지 노출
+    await page.getByTestId('diagnose-path-input').fill('test.mp4');
+    const err = page.getByTestId('diagnose-path-error');
+    await expect(err).toBeVisible();
+    await expect(err).toContainText('`/` 로 시작');
+    // 접근성: Input 에 aria-invalid 마킹
+    await expect(page.getByTestId('diagnose-path-input')).toHaveAttribute('aria-invalid', 'true');
+    // 잘못된 입력 동안 Refresh 버튼은 disabled 유지 (불필요한 PURGE 호출 방지)
+    await expect(page.getByTestId('diagnose-refresh-btn')).toBeDisabled();
+
+    // 입력 보정 (앞에 / 붙임) → 에러 메시지 사라짐
+    await page.getByTestId('diagnose-path-input').fill('/test.mp4');
+    await expect(page.getByTestId('diagnose-path-error')).toHaveCount(0);
+  });
+
   test('URL searchParams 동기화 — ?path 와 ?dgRange 가 URL 에 반영된다', async ({ page }) => {
     await setupBaseMocks(page);
     await page.route(`**/api/domains/${HOST}/diagnose*`, (route) =>

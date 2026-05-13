@@ -51,6 +51,11 @@ export function DomainDiagnoseTab({ host }: Props) {
 
   const { path: pathOnly, query: queryOnly } = splitPathAndQuery(pathInput.trim());
 
+  // path 형식 오류 감지 — 사용자가 무언가를 입력했지만 `/` 로 시작하지 않을 때 (#394)
+  // useDomainDiagnose 는 이 조건에서 enabled=false 라 조용히 비활성되므로,
+  // UI 단에서 사용자에게 명시적인 검증 메시지를 노출해 무피드백 상태를 제거한다.
+  const pathInvalid = pathInput.trim().length > 0 && !pathOnly.startsWith('/');
+
   const diagnoseQuery = useDomainDiagnose({ host, path: pathOnly, query: queryOnly, range });
   const purgeMutation = usePurgeCache();
 
@@ -105,7 +110,19 @@ export function DomainDiagnoseTab({ host }: Props) {
                 placeholder="/ch2/n-unit/video.mp4"
                 className="h-9 text-sm"
                 data-testid="diagnose-path-input"
+                aria-invalid={pathInvalid || undefined}
+                aria-describedby={pathInvalid ? 'diagnose-path-error' : undefined}
               />
+              {/* path 검증 메시지 — `/` 누락 시 조용히 비활성되는 무피드백 문제 해소 (#394) */}
+              {pathInvalid && (
+                <p
+                  id="diagnose-path-error"
+                  className="mt-1 text-xs text-destructive"
+                  data-testid="diagnose-path-error"
+                >
+                  path는 `/` 로 시작해야 합니다. 예: /ch2/n-unit/video.mp4
+                </p>
+              )}
             </div>
             <div className="flex gap-1">
               {RANGES.map((r) => (
