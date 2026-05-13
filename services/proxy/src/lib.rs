@@ -318,6 +318,7 @@ pub fn build_admin_router(
         .route("/domains", axum::routing::post(update_domains_handler))
         .route("/domains/{host}/purge", axum::routing::post(domain_purge_handler))
         .route("/stats", get(stats_handler))
+        .route("/diagnose", get(diagnose_handler))
         .with_state(admin_state)
 }
 
@@ -1718,6 +1719,45 @@ async fn domain_purge_handler(
     })).into_response()
 }
 
+/// (#387) URL 진단 쿼리 파라미터 — cache_key 를 admin-server 로부터 수신
+#[derive(serde::Deserialize)]
+struct DiagnoseQuery {
+    /// 진단 대상 캐시 키 (SHA-256 hex)
+    key: String,
+}
+
+/// (#387) GET /diagnose — cache_key 로 L1(메모리)/L2(디스크) 보유 상태를 반환.
+/// bypass_count_recent 는 admin-server SQLite 집계로 처리하므로 항상 0 반환.
+async fn diagnose_handler(
+    State(admin): State<AdminState>,
+    axum::extract::Query(q): axum::extract::Query<DiagnoseQuery>,
+) -> Response {
+    // L1 메모리 캐시 히트 여부
+    let l1_hit = admin.memory_cache.get(&q.key).await.is_some();
+
+    // L2 디스크 캐시 히트 여부 — body 없이 메타만 조회
+    let l2_hit = {
+        let mut storage = admin.storage.lock().await;
+        storage.get_metadata(&q.key).await
+            .map(|m| m.exists)
+            .unwrap_or(false)
+    };
+
+    let (state, layer) = match (l1_hit, l2_hit) {
+        (true,  _    ) => ("HIT",  "L1"),
+        (false, true ) => ("HIT",  "L2"),
+        (false, false) => ("MISS", "none"),
+    };
+
+    Json(serde_json::json!({
+        "current_state":        state,
+        "layer":                layer,
+        "l1_hit":               l1_hit,
+        "l2_hit":               l2_hit,
+        "bypass_count_recent":  0,
+    })).into_response()
+}
+
 /// 요청 1건당 정확히 하나의 캐시 결과 분류.
 /// 우선순위: method → L1 → L2 → NoCache → Size → Miss → Other.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2519,6 +2559,67 @@ mod tests {
         assert_eq!(json["disk_hit_count"], 1);
         assert_eq!(json["memory_cache_entry_count"], 2);
         assert!(json.get("memory_cache_max_bytes").is_some());
+    }
+
+    // ─── /diagnose 핸들러 테스트 ───────────────────────────────────────
+
+    /// (#387) /diagnose — 메모리 캐시에 키가 있으면 L1 HIT 반환
+    #[tokio::test]
+    async fn diagnose_handler_메모리_캐시_히트_시_l1_hit를_반환한다() {
+        let (shared, storage, tls, domain_map, cert_cache) = make_test_admin_state().await;
+        let memory_cache: moka::future::Cache<String, Arc<MemoryCacheEntry>> =
+            moka::future::Cache::builder().max_capacity(100).build();
+        let key = compute_cache_key("GET", "x.test", "/p", "");
+        memory_cache.insert(key.clone(), Arc::new(MemoryCacheEntry {
+            body: Bytes::from("data"),
+            content_type: None,
+            body_br: None,
+            cached_headers: vec![],
+        })).await;
+        memory_cache.run_pending_tasks().await;
+
+        let router = build_admin_router(
+            shared, storage, tls, domain_map, cert_cache, memory_cache,
+            Arc::new(std::sync::RwLock::new(HashMap::new())),
+        );
+
+        let resp = router.oneshot(
+            Request::builder()
+                .uri(format!("/diagnose?key={}", key))
+                .body(axum::body::Body::empty()).unwrap()
+        ).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let bytes = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["current_state"], "HIT");
+        assert_eq!(body["layer"], "L1");
+        assert_eq!(body["l1_hit"], true);
+    }
+
+    /// (#387) /diagnose — 메모리에도 storage 에도 없으면 MISS 반환
+    #[tokio::test]
+    async fn diagnose_handler_미존재_키는_miss를_반환한다() {
+        let (shared, storage, tls, domain_map, cert_cache) = make_test_admin_state().await;
+        let memory_cache: moka::future::Cache<String, Arc<MemoryCacheEntry>> =
+            moka::future::Cache::builder().max_capacity(100).build();
+
+        let router = build_admin_router(
+            shared, storage, tls, domain_map, cert_cache, memory_cache,
+            Arc::new(std::sync::RwLock::new(HashMap::new())),
+        );
+
+        let resp = router.oneshot(
+            Request::builder()
+                .uri("/diagnose?key=deadbeef")
+                .body(axum::body::Body::empty()).unwrap()
+        ).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let bytes = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["current_state"], "MISS");
+        assert_eq!(body["layer"], "none");
     }
 
     // ─── pem_to_uuid 테스트 ─────────────────────────────────────────────

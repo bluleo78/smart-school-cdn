@@ -8,6 +8,7 @@ use cdn_proto::storage::{
     GetRequest, PutRequest, PurgeRequest, PurgeAll,
     purge_request::Target,
     StatsResponse, PopularResponse,
+    GetMetadataRequest, GetMetadataResponse,
 };
 
 #[derive(Clone)]
@@ -102,6 +103,15 @@ impl StorageClient {
     /// 전체 퍼지
     pub async fn purge_all(&mut self) -> (u64, u64) {
         self.purge(Target::All(PurgeAll {})).await
+    }
+
+    /// 캐시 사본 메타 조회 — body 없이 exists/size/만료/헤더만 반환. (#387)
+    pub async fn get_metadata(&mut self, key: &str) -> Option<GetMetadataResponse> {
+        self.inner
+            .get_metadata(GetMetadataRequest { key: key.to_string() })
+            .await
+            .ok()
+            .map(|r| r.into_inner())
     }
 
     async fn purge(&mut self, target: Target) -> (u64, u64) {
