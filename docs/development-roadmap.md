@@ -730,3 +730,22 @@
 ### 19-4. 관찰·롤백
 - 영속화 전후 proxy 응답 지연(p99) 비교 — 배치 push가 응답 경로에 영향 주지 않아야 함(기존 events.rs 패턴 유지)
 - 쓰기 부하로 SQLite가 락이 길어지는지 7일 후 재검토
+
+---
+
+## URL 진단 탭 (#387) — 완료 (2026-05-13)
+
+> 목표: "이 URL이 안 열려요/느려요" 항의에 5분 안에 답하기 위해 단일 URL의 CDN 상태·origin 통계·캐시 사본 메타·응답 헤더·Range 분포를 도메인 상세 한 화면에 모은다. Phase 번호 없이 #387 단일 이슈로 진행.
+
+### 범위와 성과
+- 도메인 상세에 5번째 탭 **진단** 추가 (개요·최적화·트래픽·**진단**·설정)
+- 신규 RPC: storage `GetMetadata` — body 없이 size/만료/헤더만 반환
+- 신규 proxy admin 라우트: `GET /diagnose?key=<sha256>` — L1/L2 보유 여부
+- 신규 admin-server 라우트: `GET /api/domains/:host/diagnose` — proxy + storage + `optimization_events` fan-in
+- Lazy Refresh: 기존 `DELETE /api/cache/purge` 재사용 — 즉시 origin 재취득 없음
+- 부분 실패 허용: proxy/storage 호출이 실패해도 200을 유지하고 해당 필드만 null
+
+### 비범위 (후속 이슈 후보)
+- 가설 검증 도구 (Range 강제 시도, 캐시 무시 옵션)
+- 도메인 트래픽 탭 행에서 진단 탭으로 deep link
+- bypass 도메인의 origin HEAD probe

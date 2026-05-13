@@ -68,6 +68,7 @@
   - 캐시 퍼지 (URL별, 도메인별, 패턴별, 전체)
   - 메타데이터 관리 (URL, 크기, TTL, 히트 수, 최종 접근 시간)
   - 스토리지 통계 API (사용량, 히트율, 도메인별 용량)
+  - 단일 키 메타 조회 `GetMetadata` (#387 URL 진단 — body 없이 size/만료/헤더만 반환)
 
 ### 3-3. Optimizer Service (Rust)
 
@@ -112,6 +113,7 @@
   - **REST API**:
     - 도메인 관리: 캐싱 대상 도메인 CRUD → DNS/TLS 서비스에 전파
     - 캐시 퍼지: URL/패턴/도메인별 퍼지 요청 → Storage 서비스에 전달
+    - **URL 진단** `/api/domains/:host/diagnose` (#387): proxy `/diagnose` + storage `GetMetadata` + `optimization_events` 집계 fan-in
     - 통계 조회: 캐시 히트율, 대역폭 절감, 도메인별 사용량, 인기 콘텐츠
     - 최적화 설정: Optimizer 프로파일 관리
     - 시스템 상태: 각 서비스 헬스체크, 디스크 사용량
