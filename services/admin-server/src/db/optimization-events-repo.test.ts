@@ -367,6 +367,64 @@ describe('OptimizationEventsRepository', () => {
     });
   });
 
+  describe('diagnoseAggregate (#387)', () => {
+    it('hit_ratio, origin RTT, range 분포를 집계한다', () => {
+      const url = 'https://x.test/v.mp4';
+      const events: OptimizationEventInput[] = [];
+      for (let i = 0; i < 9; i++) {
+        events.push(sample({ host: 'x.test', url, decision: 'served_200',
+                             range_header: 'bytes=0-99', elapsed_ms: 30 }));
+      }
+      events.push(sample({ host: 'x.test', url, decision: 'stored_new',
+                           range_header: null, elapsed_ms: 200 }));
+      repo.insertBatch(events);
+
+      const agg = repo.diagnoseAggregate({ host: 'x.test', url, periodSec: 3600 });
+      expect(agg.sample_count).toBe(10);
+      expect(agg.hit_ratio_pct).toBe(90);
+      expect(agg.origin_sample_count).toBe(1);
+      expect(agg.avg_origin_rtt_ms).toBe(200);
+      expect(agg.range_single_count).toBe(9);
+      expect(agg.range_none_count).toBe(1);
+      expect(agg.range_multi_count).toBe(0);
+      expect(agg.bypass_count).toBe(0);
+      expect(agg.error_5xx).toBe(0);
+      expect(agg.timeout_count).toBe(0);
+    });
+
+    it('period 밖 이벤트는 집계되지 않는다', () => {
+      const ancient = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
+      repo.insert(sample({ ts: ancient, host: 'x.test', url: 'https://x.test/u',
+                           decision: 'served_200', range_header: 'bytes=0-1', elapsed_ms: 10 }));
+      const agg = repo.diagnoseAggregate({ host: 'x.test', url: 'https://x.test/u', periodSec: 3600 });
+      expect(agg.sample_count).toBe(0);
+      expect(agg.hit_ratio_pct).toBeNull();
+    });
+
+    it('5xx · timeout · bypass decision을 분리 집계한다', () => {
+      const url = 'https://x.test/e';
+      repo.insertBatch([
+        sample({ host: 'x.test', url, decision: 'origin_error_5xx', elapsed_ms: 0, range_header: null }),
+        sample({ host: 'x.test', url, decision: 'origin_timeout',   elapsed_ms: 0, range_header: null }),
+        sample({ host: 'x.test', url, decision: 'bypass_method',    elapsed_ms: 0, range_header: null }),
+      ]);
+      const agg = repo.diagnoseAggregate({ host: 'x.test', url, periodSec: 3600 });
+      expect(agg.error_5xx).toBe(1);
+      expect(agg.timeout_count).toBe(1);
+      expect(agg.bypass_count).toBe(1);
+    });
+
+    it('다른 host 의 동일 url 은 섞이지 않는다', () => {
+      const url = 'https://x.test/v';
+      repo.insertBatch([
+        sample({ host: 'x.test', url, decision: 'served_200', range_header: null, elapsed_ms: 10 }),
+        sample({ host: 'y.test', url, decision: 'served_200', range_header: null, elapsed_ms: 10 }),
+      ]);
+      const agg = repo.diagnoseAggregate({ host: 'x.test', url, periodSec: 3600 });
+      expect(agg.sample_count).toBe(1);
+    });
+  });
+
   // ─── 인덱스 회귀: (event_type, ts) — #378 ──────────────────────────────
   describe('schema 인덱스 (#378)', () => {
     /**

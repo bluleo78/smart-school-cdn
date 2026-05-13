@@ -74,6 +74,20 @@ export interface OptimizationEventRow {
   elapsed_ms: number;
 }
 
+/** diagnoseAggregate 반환 row (#387) */
+export interface DiagnoseAggregateRow {
+  sample_count: number;
+  hit_ratio_pct: number | null;
+  bypass_count: number;
+  error_5xx: number;
+  timeout_count: number;
+  origin_sample_count: number;
+  avg_origin_rtt_ms: number | null;
+  range_single_count: number;
+  range_multi_count: number;
+  range_none_count: number;
+}
+
 /** statsByDecision 반환 row */
 export interface DecisionStatsRow {
   decision: string;
@@ -282,6 +296,63 @@ export class OptimizationEventsRepository {
     return this.db
       .prepare(`DELETE FROM optimization_events WHERE host IN (${placeholders})`)
       .run(...hosts).changes;
+  }
+
+  /**
+   * (#387) URL 진단용 단일 URL 집계 — host + url + 최근 N초 윈도우.
+   * url_hash = sha256(url).slice(0,16) 로 변환해 인덱스 활용. ts >= now-periodSec.
+   *
+   * 분류 기준 (decision 화이트리스트):
+   *  - HIT    : served_200, served_206, l1_hit, l2_hit
+   *  - MISS   : stored_new + origin_*  (origin 거친 케이스)
+   *  - BYPASS : bypass_*  (origin 안 거침)
+   *  - origin 오류: origin_error_5xx, origin_timeout (정확 매칭)
+   *
+   * Range 분포는 range_header 패턴:
+   *  - NULL → none
+   *  - 단일 byte-range (예: 'bytes=0-1023')  → single
+   *  - 콤마 포함 (멀티-range)                 → multi
+   */
+  diagnoseAggregate(q: { host: string; url: string; periodSec: number }): DiagnoseAggregateRow {
+    const sinceIso = new Date(Date.now() - q.periodSec * 1000).toISOString();
+    const urlHash = hashUrl(q.url);
+
+    const row = this.db.prepare(`
+      SELECT
+        SUM(CASE WHEN decision IN ('served_200','served_206','l1_hit','l2_hit')        THEN 1 ELSE 0 END) AS hit_count,
+        SUM(CASE WHEN decision = 'stored_new' OR decision LIKE 'origin_%'              THEN 1 ELSE 0 END) AS miss_count,
+        SUM(CASE WHEN decision LIKE 'bypass_%'                                         THEN 1 ELSE 0 END) AS bypass_count,
+        SUM(CASE WHEN decision = 'origin_error_5xx'                                    THEN 1 ELSE 0 END) AS error_5xx,
+        SUM(CASE WHEN decision = 'origin_timeout'                                      THEN 1 ELSE 0 END) AS timeout_count,
+        SUM(CASE WHEN decision = 'stored_new' OR decision LIKE 'origin_%'              THEN 1 ELSE 0 END) AS origin_sample_count,
+        AVG(CASE WHEN decision = 'stored_new' OR decision LIKE 'origin_%'              THEN elapsed_ms END) AS avg_origin_rtt_ms,
+        SUM(CASE WHEN range_header IS NULL                                             THEN 1 ELSE 0 END) AS range_none_count,
+        SUM(CASE WHEN range_header GLOB 'bytes=*[0-9]-*[0-9]' AND range_header NOT LIKE '%,%' THEN 1 ELSE 0 END) AS range_single_count,
+        SUM(CASE WHEN range_header LIKE '%,%'                                          THEN 1 ELSE 0 END) AS range_multi_count
+      FROM optimization_events
+      WHERE host = @host AND url_hash = @urlHash AND ts >= @sinceIso
+    `).get({ host: q.host, urlHash, sinceIso }) as {
+      hit_count: number | null; miss_count: number | null; bypass_count: number | null;
+      error_5xx: number | null; timeout_count: number | null;
+      origin_sample_count: number | null; avg_origin_rtt_ms: number | null;
+      range_single_count: number | null; range_multi_count: number | null; range_none_count: number | null;
+    };
+
+    const hit = row.hit_count ?? 0;
+    const miss = row.miss_count ?? 0;
+    const sample = hit + miss;
+    return {
+      sample_count:        sample,
+      hit_ratio_pct:       sample === 0 ? null : Math.round((hit / sample) * 100),
+      bypass_count:        row.bypass_count ?? 0,
+      error_5xx:           row.error_5xx ?? 0,
+      timeout_count:       row.timeout_count ?? 0,
+      origin_sample_count: row.origin_sample_count ?? 0,
+      avg_origin_rtt_ms:   row.avg_origin_rtt_ms == null ? null : Math.round(row.avg_origin_rtt_ms),
+      range_single_count:  row.range_single_count ?? 0,
+      range_multi_count:   row.range_multi_count ?? 0,
+      range_none_count:    row.range_none_count ?? 0,
+    };
   }
 
   /** Phase 16-3: URL별 최적화 집계.
