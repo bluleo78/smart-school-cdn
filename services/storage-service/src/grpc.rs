@@ -441,4 +441,40 @@ mod tests {
         assert_eq!(res.cached_headers[1].name, "etag");
         assert_eq!(res.cached_headers[1].value, "\"v7\"");
     }
+
+    #[tokio::test]
+    async fn get_metadata_put_후_exists_true_와_메타를_반환한다() {
+        let (svc, _tmp) = new_grpc().await;
+        svc.put(Request::new(PutRequest {
+            key:          "k1".to_string(),
+            url:          "https://x/y".to_string(),
+            domain:       "x.test".to_string(),
+            content_type: "text/plain".to_string(),
+            body:         b"hello".to_vec(),
+            ttl_secs:     3600,
+            body_br:      vec![],
+            cached_headers: vec![HeaderEntry {
+                name:  "content-type".to_string(),
+                value: "text/plain".to_string(),
+            }],
+        })).await.unwrap();
+
+        let resp = svc.get_metadata(Request::new(GetMetadataRequest { key: "k1".to_string() }))
+            .await.unwrap().into_inner();
+        assert!(resp.exists);
+        assert_eq!(resp.size_bytes, 5);
+        assert!(resp.expires_at > 0);
+        assert_eq!(resp.content_type, "text/plain");
+        assert_eq!(resp.cached_headers.len(), 1);
+        assert_eq!(resp.cached_headers[0].name, "content-type");
+    }
+
+    #[tokio::test]
+    async fn get_metadata_미존재_키는_exists_false() {
+        let (svc, _tmp) = new_grpc().await;
+        let resp = svc.get_metadata(Request::new(GetMetadataRequest { key: "none".to_string() }))
+            .await.unwrap().into_inner();
+        assert!(!resp.exists);
+        assert_eq!(resp.size_bytes, 0);
+    }
 }
