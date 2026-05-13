@@ -15,6 +15,7 @@ import type {
   DiagnoseCacheCopy,
   DiagnoseRangeDist,
 } from '../../../api/diagnose';
+import { formatBytes } from '../../../lib/format';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
@@ -282,7 +283,8 @@ function CacheCopyPanel({ copy }: { copy: DiagnoseCacheCopy | null }) {
       <CardContent className="text-sm space-y-1">
         {copy?.exists ? (
           <>
-            <div>{(copy.size_bytes / 1024 / 1024).toFixed(2)} MiB</div>
+            {/* size_bytes 자동 스케일링(B/KB/MB/GB) — 다른 패널과 단위 정책 통일 (#395) */}
+            <div>{formatBytes(copy.size_bytes)}</div>
             <div>저장: {new Date(copy.stored_at * 1000).toLocaleString()}</div>
             <div>
               만료:{' '}

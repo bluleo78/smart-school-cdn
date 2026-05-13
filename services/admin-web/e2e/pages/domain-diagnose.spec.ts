@@ -105,8 +105,9 @@ test.describe('도메인 상세 — 진단 탭 (#387)', () => {
 
     // 요약 라인에 CDN 상태(HIT + 레이어) 표시
     await expect(page.getByTestId('diagnose-summary')).toContainText('CDN HIT(L2)');
-    // 캐시 사본 패널에 파일 크기(MiB 단위) 표시
-    await expect(page.getByText(/MiB/)).toBeVisible();
+    // 캐시 사본 패널 — formatBytes 자동 스케일링(B/KB/MB/GB) 단위 정책 통일 (#395)
+    // size_bytes=9846272 ≈ 9.4 MB (1024-기반). 과거 MiB 고정 표기 회귀 방지.
+    await expect(page.getByText('9.4 MB')).toBeVisible();
     // cache_copy.exists = true 이므로 Refresh 버튼 활성화
     await expect(page.getByTestId('diagnose-refresh-btn')).toBeEnabled();
   });
