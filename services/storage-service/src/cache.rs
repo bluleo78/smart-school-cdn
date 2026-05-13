@@ -539,6 +539,37 @@ impl CacheLayer {
     pub async fn entry_count(&self) -> u64 {
         self.index.lock().await.len() as u64
     }
+
+    /// 캐시 키에 해당하는 항목의 메타만 반환 — 만료 항목은 None.
+    /// body는 읽지 않으므로 디스크 I/O 없이 인덱스만 조회한다. (#387)
+    pub async fn peek_metadata(&self, key: &str) -> Option<CachedEntryMeta> {
+        let index = self.index.lock().await;
+        let entry = index.get(key)?;
+        if entry.is_expired() {
+            return None;
+        }
+        Some(CachedEntryMeta {
+            size_bytes:     entry.size_bytes,
+            created_at:     entry.created_at,
+            expires_at:     entry.expires_at,
+            content_type:   entry.content_type.clone(),
+            cached_headers: entry.cached_headers.clone(),
+        })
+    }
+}
+
+/// 진단용 메타 조회 결과 — body 없이 캐시 항목 메타만 노출. (#387)
+pub struct CachedEntryMeta {
+    /// 캐시된 콘텐츠 크기 (바이트)
+    pub size_bytes:     u64,
+    /// 캐시 저장 시각
+    pub created_at:     DateTime<Utc>,
+    /// 만료 시각 — None이면 만료 없음
+    pub expires_at:     Option<DateTime<Utc>>,
+    /// Content-Type
+    pub content_type:   Option<String>,
+    /// origin 응답 헤더 화이트리스트 저장분
+    pub cached_headers: Vec<(String, String)>,
 }
 
 // ─── 단위 테스트 ─────────────────────────────────────────────────
@@ -923,5 +954,38 @@ mod tests {
 
         cache.purge_by_key("k-purge").await;
         assert!(!sidecar.exists(), "퍼지 후 사이드카 파일이 삭제되어야 함");
+    }
+
+    // ── peek_metadata (#387) ─────────────────────────────────────
+
+    #[tokio::test]
+    async fn peek_metadata_returns_entry_for_existing_key() {
+        let dir = TempDir::new().unwrap();
+        let cache = CacheLayer::new(dir.path().to_path_buf(), 64 * 1024 * 1024);
+        cache
+            .put(
+                "abc123",
+                "https://x/y",
+                "x.test",
+                Some("text/plain".to_string()),
+                bytes::Bytes::from_static(b"hello"),
+                Some(std::time::Duration::from_secs(3600)),
+                None,
+                vec![("content-type".to_string(), "text/plain".to_string())],
+            )
+            .await;
+
+        let meta = cache.peek_metadata("abc123").await.expect("hit");
+        assert_eq!(meta.size_bytes, 5);
+        assert_eq!(meta.content_type.as_deref(), Some("text/plain"));
+        assert!(meta.expires_at.is_some());
+        assert_eq!(meta.cached_headers.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn peek_metadata_returns_none_for_missing_key() {
+        let dir = TempDir::new().unwrap();
+        let cache = CacheLayer::new(dir.path().to_path_buf(), 64 * 1024 * 1024);
+        assert!(cache.peek_metadata("does-not-exist").await.is_none());
     }
 }

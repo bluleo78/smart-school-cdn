@@ -14,6 +14,7 @@ use cdn_proto::storage::{
     PopularRequest, PopularResponse, PopularEntry,
     HealthRequest, HealthResponse,
     HeaderEntry,
+    GetMetadataRequest, GetMetadataResponse,
 };
 
 use crate::cache::CacheLayer;
@@ -150,6 +151,32 @@ impl StorageService for StorageGrpc {
             online: true,
             latency_ms: 0,
         }))
+    }
+
+    /// 캐시 키 메타 조회 — body 없이 인덱스만 반환. Task 3에서 완전 구현 예정. (#387)
+    async fn get_metadata(&self, req: Request<GetMetadataRequest>) -> Result<Response<GetMetadataResponse>, Status> {
+        let key = req.into_inner().key;
+        match self.cache.peek_metadata(&key).await {
+            None => Ok(Response::new(GetMetadataResponse {
+                exists:     false,
+                size_bytes: 0,
+                stored_at:  0,
+                expires_at: 0,
+                content_type: String::new(),
+                cached_headers: vec![],
+            })),
+            Some(meta) => Ok(Response::new(GetMetadataResponse {
+                exists:       true,
+                size_bytes:   meta.size_bytes,
+                stored_at:    meta.created_at.timestamp(),
+                expires_at:   meta.expires_at.map(|t| t.timestamp()).unwrap_or(0),
+                content_type: meta.content_type.unwrap_or_default(),
+                cached_headers: meta.cached_headers
+                    .into_iter()
+                    .map(|(name, value)| HeaderEntry { name, value })
+                    .collect(),
+            })),
+        }
     }
 }
 
