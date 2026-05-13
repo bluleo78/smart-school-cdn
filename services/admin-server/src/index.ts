@@ -26,6 +26,7 @@ import { optimizerRoutes } from './routes/optimizer.js';
 import { dnsRoutes } from './routes/dns.js';
 import { logRoutes } from './routes/logs.js';
 import { optimizationEventsRoutes } from './routes/optimization-events.js';
+import { diagnoseRoutes } from './routes/diagnose.js';
 import { authRoutes } from './routes/auth.js';
 import { usersRoutes } from './routes/users.js';
 import { internalRoutes } from './routes/internal.js';
@@ -332,6 +333,7 @@ app.decorate('tlsClient', tlsClient);
 app.decorate('dnsClient', dnsClient);
 app.decorate('optimizerClient', optimizerClient);
 app.decorate('dnsMetricsRepo', dnsMetricsRepo);
+app.decorate('optimizationEventsRepo', new OptimizationEventsRepository(db));
 app.decorate('proxyAdminUrl', proxyAdminUrl);
 app.decorate('healthMonitor', new HealthMonitor({
   proxyAdminUrl,
@@ -374,6 +376,9 @@ await app.register(logRoutes);
 
 /** 최적화 이벤트 관찰 API 라우트 등록 (Phase 13/14/15 공용) */
 await app.register(optimizationEventsRoutes);
+
+/** URL 진단 fan-in API 라우트 등록 (#387) */
+await app.register(diagnoseRoutes);
 
 /** 인증 라우트 (state/setup/login/logout) — requireAuth 가 /api/auth/* 스킵 */
 await app.register(authRoutes, { userRepo });

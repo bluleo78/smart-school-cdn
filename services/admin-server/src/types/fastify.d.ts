@@ -5,15 +5,19 @@ import type { TlsClient } from '../grpc/tls_client.js';
 import type { DnsClient } from '../grpc/dns_client.js';
 import type { OptimizerClient } from '../grpc/optimizer_client.js';
 import type { HealthMonitor } from '../health-monitor.js';
+import type { DnsMetricsRepository } from '../db/dns-metrics-repo.js';
+import type { OptimizationEventsRepository } from '../db/optimization-events-repo.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
-    db:              Database.Database;
-    storageClient:   StorageClient;
-    tlsClient:       TlsClient;
-    dnsClient:       DnsClient;
-    optimizerClient: OptimizerClient;
-    proxyAdminUrl:   string;
-    healthMonitor:   HealthMonitor;
+    db:                      Database.Database;
+    storageClient:           StorageClient;
+    tlsClient:               TlsClient;
+    dnsClient:               DnsClient;
+    optimizerClient:         OptimizerClient;
+    proxyAdminUrl:           string;
+    healthMonitor:           HealthMonitor;
+    dnsMetricsRepo:          DnsMetricsRepository;
+    optimizationEventsRepo:  OptimizationEventsRepository;
   }
 }
