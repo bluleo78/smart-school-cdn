@@ -7,13 +7,14 @@ import type { Domain } from '../../../api/domain-types';
 import { DomainOverviewTab } from './DomainOverviewTab';
 import { DomainStatsTab } from './DomainStatsTab';
 import { DomainLogsTab } from './DomainLogsTab';
+import { DomainDiagnoseTab } from './DomainDiagnoseTab';
 import { DomainSettingsTab } from './DomainSettingsTab';
 import type { Period, PeriodValue } from './PeriodSelector';
 import type { RefreshIntervalMs } from './RefreshIntervalSelect';
 
 /** 허용된 탭 값 목록 — 잘못된 파라미터가 들어올 경우 overview로 폴백한다.
  *  value 식별자가 UI 레이블과 일치하도록 stats→optimizer, logs→traffic 으로 변경 (#64) */
-const VALID_TABS = ['overview', 'optimizer', 'traffic', 'settings'] as const;
+const VALID_TABS = ['overview', 'optimizer', 'traffic', 'diagnose', 'settings'] as const;
 type TabValue = (typeof VALID_TABS)[number];
 
 /** PeriodSelector가 허용하는 period 키 화이트리스트 — 잘못된 URL 파라미터를 방어 */
@@ -195,6 +196,7 @@ export function DomainDetailTabs({ domain }: Props) {
         <TabsTrigger value="overview">개요</TabsTrigger>
         <TabsTrigger value="optimizer">최적화</TabsTrigger>
         <TabsTrigger value="traffic">트래픽</TabsTrigger>
+        <TabsTrigger value="diagnose">진단</TabsTrigger>
         <TabsTrigger value="settings">설정</TabsTrigger>
       </TabsList>
       <TabsContent value="overview" className="mt-4">
@@ -217,6 +219,9 @@ export function DomainDetailTabs({ domain }: Props) {
           refresh={trafficRefresh}
           onRefreshChange={handleTrafficRefreshChange}
         />
+      </TabsContent>
+      <TabsContent value="diagnose" className="mt-4">
+        <DomainDiagnoseTab host={domain.host} />
       </TabsContent>
       <TabsContent value="settings" className="mt-4">
         <DomainSettingsTab domain={domain} />
