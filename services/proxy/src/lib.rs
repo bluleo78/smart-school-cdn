@@ -1810,6 +1810,7 @@ mod tests {
         PopularRequest, PopularResponse,
         HealthRequest as StorageHealthRequest, HealthResponse as StorageHealthResponse,
         DomainStat, PopularEntry,
+        GetMetadataRequest, GetMetadataResponse,
     };
     use cdn_proto::tls::{
         tls_service_server::{TlsService, TlsServiceServer},
@@ -1919,6 +1920,23 @@ mod tests {
             Ok(tonic::Response::new(StorageHealthResponse {
                 online: true,
                 latency_ms: 0,
+            }))
+        }
+
+        /// (#387) 진단용 메타 조회 — 테스트 mock은 캐시 본문 존재 여부만 반영하고 메타 필드는 0/빈값으로 채운다.
+        async fn get_metadata(
+            &self,
+            req: tonic::Request<GetMetadataRequest>,
+        ) -> Result<tonic::Response<GetMetadataResponse>, tonic::Status> {
+            let key = req.into_inner().key;
+            let exists = self.data.lock().unwrap().contains_key(&key);
+            Ok(tonic::Response::new(GetMetadataResponse {
+                exists,
+                size_bytes: 0,
+                stored_at: 0,
+                expires_at: 0,
+                content_type: String::new(),
+                cached_headers: vec![],
             }))
         }
     }
