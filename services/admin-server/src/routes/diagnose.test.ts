@@ -91,6 +91,39 @@ describe('GET /api/domains/:host/diagnose (#387)', () => {
     expect(getMetadataMock).toHaveBeenCalled();
   });
 
+  // #396 — path/query 입력 hygiene: 제어문자·fragment·길이 상한 검증
+  it('path 에 제어문자(CRLF) 포함 시 400 (#396)', async () => {
+    const app = buildApp({ domains: ['x.test'] });
+    // %0A 는 라우터에서 디코딩되어 zod regex 에 LF 그대로 도달
+    const r = await app.inject({ method: 'GET', url: '/api/domains/x.test/diagnose?path=/x%0AHost:evil' });
+    expect(r.statusCode).toBe(400);
+  });
+
+  it('path 에 fragment(#) 포함 시 400 (#396)', async () => {
+    const app = buildApp({ domains: ['x.test'] });
+    const r = await app.inject({ method: 'GET', url: '/api/domains/x.test/diagnose?path=/video.mp4%23frag' });
+    expect(r.statusCode).toBe(400);
+  });
+
+  it('path 길이 상한(2048 bytes) 초과 시 400 (#396)', async () => {
+    const app = buildApp({ domains: ['x.test'] });
+    const longPath = '/' + 'a'.repeat(2048); // 2049 bytes
+    const r = await app.inject({ method: 'GET', url: `/api/domains/x.test/diagnose?path=${longPath}` });
+    expect(r.statusCode).toBe(400);
+  });
+
+  it('query 에 제어문자 포함 시 400 (#396)', async () => {
+    const app = buildApp({ domains: ['x.test'] });
+    const r = await app.inject({ method: 'GET', url: '/api/domains/x.test/diagnose?path=/p&query=a%0Ab' });
+    expect(r.statusCode).toBe(400);
+  });
+
+  it('query 에 fragment(#) 포함 시 400 (#396)', async () => {
+    const app = buildApp({ domains: ['x.test'] });
+    const r = await app.inject({ method: 'GET', url: '/api/domains/x.test/diagnose?path=/p&query=a%23b' });
+    expect(r.statusCode).toBe(400);
+  });
+
   it('proxy 호출 실패 시 cdn 필드는 null 이고 200 을 유지한다', async () => {
     vi.mocked(axios.get).mockRejectedValueOnce(new Error('offline'));
     const app = buildApp({ domains: ['x.test'] });

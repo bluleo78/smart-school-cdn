@@ -8,10 +8,28 @@ import axios from 'axios';
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
 
-/** querystring 검증 스키마 */
+/**
+ * querystring 검증 스키마
+ *
+ * path/query 입력 hygiene — #396 보강:
+ * - 제어문자(`\x00-\x1f`, `\x7f`) / 공백 차단: log injection·CRLF 헤더 분리 방지.
+ * - fragment(`#`) 차단: 브라우저는 origin 에 fragment 를 보내지 않으므로 캐시 키가 절대 매치되지 않는다 (silent wrong result).
+ * - 길이 상한: path 2048 bytes, query 4096 bytes — 캐시 키 폭발·로그 비대화 방지.
+ */
+// 제어문자 차단을 위해 의도적으로 control char 범위 사용 — eslint no-control-regex 예외 처리.
+// eslint-disable-next-line no-control-regex
+const PATH_SAFE_RE  = /^\/[^\s#\x00-\x1f\x7f]*$/u;
+// eslint-disable-next-line no-control-regex
+const QUERY_SAFE_RE = /^[^\s#\x00-\x1f\x7f]*$/u;
 const querySchema = z.object({
-  path:  z.string().startsWith('/', { message: 'path must start with /' }),
-  query: z.string().optional().default(''),
+  path:  z.string()
+    .startsWith('/', { message: 'path must start with /' })
+    .max(2048, { message: 'path too long (max 2048)' })
+    .regex(PATH_SAFE_RE, { message: 'path must not contain whitespace, control chars or #' }),
+  query: z.string()
+    .max(4096, { message: 'query too long (max 4096)' })
+    .regex(QUERY_SAFE_RE, { message: 'query must not contain whitespace, control chars or #' })
+    .optional().default(''),
   range: z.enum(['1h', '24h', '7d']).optional().default('1h'),
 });
 
