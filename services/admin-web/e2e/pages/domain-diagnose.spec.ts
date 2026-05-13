@@ -334,4 +334,42 @@ test.describe('도메인 상세 — 진단 탭 (#387)', () => {
     await page.getByTestId('diagnose-range-24h').click();
     await expect(page).toHaveURL(/dgRange=24h/);
   });
+
+  // 비정상 숫자값(음수 size / epoch 0 / 무제한 소수 ratio / sample=0+5xx>0) 방어 회귀 (#401):
+  // diagnose 응답이 비정상이거나 경계값일 때 UI가 그대로 노출하지 않고 sanity 처리하는지 검증.
+  test('비정상 숫자값 방어 — 음수 size·epoch 0·소수 ratio·sample=0 모순 (#401)', async ({ page }) => {
+    await setupBaseMocks(page);
+    const abnormal = {
+      cdn: { current_state: 'HIT', layer: 'l1', l1_hit: true, l2_hit: false, bypass_count_recent: 0 },
+      // 표본 0건이지만 5xx/timeout 카운트가 양수 — 서버 모순 데이터
+      origin: { status: null, avg_rtt_ms: null, error_5xx: 42, timeout_count: 3, sample_count: 0 },
+      // size_bytes 음수, stored_at epoch 0(=값 없음), expires_at 정상
+      cache_copy: { exists: true, size_bytes: -1024, stored_at: 0, expires_at: 1778731400 },
+      response_headers: [],
+      range: { single_count: 0, multi_count: 0, none_count: 0 },
+      // 클램핑 + 소수 1자리로 정규화되어야 함 (100.4567 → 100.0%)
+      hit_ratio_pct: 100.4567,
+      sample_count: 0,
+    };
+    await page.route(`**/api/domains/${HOST}/diagnose*`, (route) =>
+      route.fulfill({ json: abnormal }),
+    );
+
+    await page.goto(`/domains/${HOST}?tab=diagnose`);
+    await page.getByTestId('diagnose-path-input').fill('/v.mp4');
+
+    // formatBytes: 음수 → "—" (과거엔 "-1024 B")
+    await expect(page.getByText('-1024 B')).toHaveCount(0);
+    // 저장 시각: epoch 0 → "—" (과거엔 "1970. 1. 1. ...")
+    await expect(page.getByText(/저장:\s*—/)).toBeVisible();
+    await expect(page.getByText(/1970/)).toHaveCount(0);
+    // hit ratio: 클램핑 + toFixed(1) → "100.0%"
+    await expect(page.getByText('100.0%')).toBeVisible();
+    await expect(page.getByText('100.4567%')).toHaveCount(0);
+    // sample_count=0 일 때 5xx/timeout/RTT 카운트는 노출하지 않고 "샘플 없음" 메시지로 합침
+    await expect(page.getByTestId('diagnose-origin-no-samples')).toBeVisible();
+    const originPanel = page.getByTestId('diagnose-origin-panel');
+    await expect(originPanel).not.toContainText('5xx: 42');
+    await expect(originPanel).not.toContainText('timeout: 3');
+  });
 });

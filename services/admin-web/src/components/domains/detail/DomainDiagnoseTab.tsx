@@ -289,6 +289,27 @@ export function DomainDiagnoseTab({ host }: Props) {
   );
 }
 
+// ── 표시값 정규화 헬퍼 ────────────────────────────────────────
+
+/** epoch seconds 를 사람이 읽는 시각 문자열로 변환한다 (#401).
+ *  - 0/음수/NaN/Infinity 는 "미상" 또는 호출부가 지정한 fallback 으로 처리한다
+ *  - 기존엔 stored_at=0 → "1970. 1. 1. 오전 9:00:00" 로 표시되어 사용자가
+ *    "1970년에 캐싱됨" 으로 오해할 수 있었음 (실제로는 "값 없음" 의 의미). */
+function formatEpochSeconds(seconds: number | null | undefined, fallback = '—'): string {
+  if (seconds == null || !Number.isFinite(seconds) || seconds <= 0) return fallback;
+  return new Date(seconds * 1000).toLocaleString();
+}
+
+/** hit ratio(%) 표시 정규화 (#401).
+ *  - 비정상값(NaN/Infinity/null) 은 "—"
+ *  - 0~100 범위로 클램핑해 101% 같은 모순값 차단 (서버 버그/race 방어)
+ *  - 소수 1자리 고정 — 100.4567% 처럼 무제한 소수 표시 방지. */
+function formatHitRatio(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return '—';
+  const clamped = Math.min(100, Math.max(0, value));
+  return `${clamped.toFixed(1)}%`;
+}
+
 // ── 하위 컴포넌트 ─────────────────────────────────────────────
 
 /** 진단 결과 요약 — CDN 상태 · origin 상태 · 캐시 사본 유무를 한 줄로 표시 */
@@ -311,7 +332,8 @@ function SummaryLine({ data }: { data: DomainDiagnoseResponse }) {
   if (data.cache_copy === null) {
     cache = '캐시 사본 조회 실패';
   } else if (data.cache_copy.exists) {
-    cache = `캐시 사본 보유 (만료 ${data.cache_copy.expires_at ? new Date(data.cache_copy.expires_at * 1000).toLocaleString() : '없음'})`;
+    // expires_at 정규화 — 0/음수/NaN/Infinity 는 "없음" (#401)
+    cache = `캐시 사본 보유 (만료 ${formatEpochSeconds(data.cache_copy.expires_at, '없음')})`;
   } else {
     cache = '캐시 사본 없음';
   }
@@ -347,28 +369,44 @@ function CdnPanel({ cdn, hitRatio }: { cdn: DiagnoseCdn | null; hitRatio: number
         {/* layer='none' 은 BYPASS 등 "레이어 개념이 의미 없는 상태"를 의미.
             SummaryLine 과 표시를 통일해 'none' 일 때는 '—' 로 표기 (#397). */}
         <div>레이어: {!cdn || cdn.layer === 'none' ? '—' : cdn.layer}</div>
-        <div>기간 내 hit ratio: {hitRatio == null ? '—' : `${hitRatio}%`}</div>
+        <div>기간 내 hit ratio: {formatHitRatio(hitRatio)}</div>
       </CardContent>
     </Card>
   );
 }
 
-/** Origin 패널 — 상태, 평균 RTT, 5xx/timeout 카운트, 샘플 수 */
+/** Origin 패널 — 상태, 평균 RTT, 5xx/timeout 카운트, 샘플 수.
+ *
+ *  sample_count === 0 일 때의 sanity 가드 (#401):
+ *  표본이 0건이면 5xx/timeout/avg_rtt 카운트는 통계적으로 무의미하다.
+ *  서버가 모순된 값(sample=0 + 5xx=42)을 보내더라도 UI 단에서 "샘플 없음" 한 줄로
+ *  합치고 카운트들은 "—" 로 표시해 사용자 오해를 차단한다. */
 function OriginPanel({ origin }: { origin: DiagnoseOrigin | null }) {
+  // 표본이 0/null 인 경우 — 카운트 패널은 의미 없는 데이터로 간주
+  const noSamples = !origin || !origin.sample_count || origin.sample_count <= 0;
   return (
     <Card>
       <CardHeader className="pb-2">
         <CardTitle className="text-sm">Origin</CardTitle>
       </CardHeader>
-      <CardContent className="text-sm space-y-1">
+      <CardContent className="text-sm space-y-1" data-testid="diagnose-origin-panel">
         <div>
           상태: <strong>{origin?.status ?? '—'}</strong>
         </div>
-        <div>평균 RTT: {origin?.avg_rtt_ms == null ? '—' : `${origin.avg_rtt_ms} ms`}</div>
-        <div>
-          5xx: {origin?.error_5xx ?? '—'} · timeout: {origin?.timeout_count ?? '—'}
-        </div>
-        <div>샘플: {origin?.sample_count ?? '—'}</div>
+        {noSamples ? (
+          // sample_count=0 일 때는 모순된 카운트(5xx/timeout) 노출 차단 (#401)
+          <div className="text-muted-foreground" data-testid="diagnose-origin-no-samples">
+            샘플 없음 — 카운트 표시 불가
+          </div>
+        ) : (
+          <>
+            <div>평균 RTT: {origin.avg_rtt_ms == null ? '—' : `${origin.avg_rtt_ms} ms`}</div>
+            <div>
+              5xx: {origin.error_5xx ?? '—'} · timeout: {origin.timeout_count ?? '—'}
+            </div>
+            <div>샘플: {origin.sample_count}</div>
+          </>
+        )}
       </CardContent>
     </Card>
   );
@@ -391,12 +429,13 @@ function CacheCopyPanel({ copy }: { copy: DiagnoseCacheCopy | null }) {
         {copy?.exists ? (
           <>
             {/* size_bytes 자동 스케일링(B/KB/MB/GB) — 다른 패널과 단위 정책 통일 (#395) */}
+            {/* size_bytes 자동 스케일링(B/KB/MB/GB) — 다른 패널과 단위 정책 통일 (#395).
+                formatBytes 가 음수/NaN/Infinity 를 "—" 로 가드함 (#401). */}
             <div>{formatBytes(copy.size_bytes)}</div>
-            <div>저장: {new Date(copy.stored_at * 1000).toLocaleString()}</div>
-            <div>
-              만료:{' '}
-              {copy.expires_at ? new Date(copy.expires_at * 1000).toLocaleString() : '없음'}
-            </div>
+            {/* stored_at 도 expires_at 과 동일한 정책 적용 — epoch 0/음수/NaN 은 "—" (#401).
+                기존엔 stored_at=0 일 때 "1970-01-01 09:00" 가 표시되어 사용자 오해 유발. */}
+            <div>저장: {formatEpochSeconds(copy.stored_at)}</div>
+            <div>만료: {formatEpochSeconds(copy.expires_at, '없음')}</div>
           </>
         ) : showError ? (
           <div className="text-muted-foreground" data-testid="diagnose-cache-copy-error">

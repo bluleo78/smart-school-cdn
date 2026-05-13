@@ -8,8 +8,12 @@ export function formatNumber(value: number): string {
   return value.toLocaleString('ko-KR');
 }
 
-/// 바이트를 사람이 읽기 좋은 단위로 변환한다
+/// 바이트를 사람이 읽기 좋은 단위로 변환한다.
+/// - NaN/Infinity/음수 같은 비정상 입력은 placeholder("—") 반환 (#401):
+///   diagnose 응답에 negative size_bytes 가 흘러들어왔을 때 "-1024 B" 같은
+///   오해 소지 표시를 막기 위함. formatUptime 과 동일한 방어 정책.
 export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return '—';
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
