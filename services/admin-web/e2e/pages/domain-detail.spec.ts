@@ -2329,7 +2329,9 @@ test.describe('도메인 상세 — 설정 탭', () => {
     await setupDetailMocks(page);
 
     // 가장 최근 PUT 요청 본문을 보관 — trim 검증용
-    let lastPutBody: { origin?: string; description?: string } | null = null;
+    type PutBody = { origin?: string; description?: string };
+    let lastPutBody: PutBody | null = null;
+    const readBody = (): PutBody | null => lastPutBody;
     await page.route('**/api/domains/textbook.com', (route) => {
       if (route.request().method() === 'PUT') {
         try {
@@ -2370,8 +2372,8 @@ test.describe('도메인 상세 — 설정 탭', () => {
       page.getByText('오리진 URL은 http:// 또는 https://로 시작해야 합니다.'),
     ).toBeHidden();
     // PUT body의 origin/description이 trim 되어 전송되었는지 검증
-    expect(lastPutBody?.origin).toBe('https://textbook.com');
-    expect(lastPutBody?.description).toBe('설명입니다');
+    expect(readBody()?.origin).toBe('https://textbook.com');
+    expect(readBody()?.description).toBe('설명입니다');
 
     // (2) trailing 공백 — 수정 전이면 서버 거부로 일반 실패 토스트만.
     //     수정 후엔 trim 되어 정상 전송되어야 한다.
@@ -2381,7 +2383,7 @@ test.describe('도메인 상세 — 설정 탭', () => {
     await page.getByTestId('save-domain-btn').click();
 
     await expect(page.getByTestId('edit-domain-btn')).toBeVisible();
-    expect(lastPutBody?.origin).toBe('https://textbook2.com');
+    expect(readBody()?.origin).toBe('https://textbook2.com');
   });
 
   test('Origin 편집이 동작한다', async ({ page }) => {
