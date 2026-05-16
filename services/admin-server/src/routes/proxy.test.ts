@@ -270,6 +270,41 @@ describe('프록시 라우트', () => {
     expect(mockAxiosGet).not.toHaveBeenCalled();
   });
 
+  // 회귀 테스트 (#359) — 빈/null 바디는 destructure가 TypeError를 throw하여
+  // 5xx envelope로 내부 변수명("Cannot destructure property 'domain' of 'request.body' as it is undefined")이
+  // 노출되었다. `request.body ?? {}` 가드로 누락 필드 경로(400 invalid_input)로 합류해야 한다.
+  it('빈 바디로 POST 시 500이 아닌 400 invalid_input을 반환한다 (#359)', async () => {
+    const app = await createApp({ domainRepo: makeMockDomainRepo() });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/proxy/test',
+      // payload 미지정 — Fastify가 request.body를 undefined로 처리
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('invalid_input');
+    expect(res.json().message).toContain('domain과 path는 필수');
+    // 내부 destructure 메시지가 새어나가지 않아야 함
+    expect(res.json().message).not.toContain('destructure');
+    expect(mockAxiosGet).not.toHaveBeenCalled();
+  });
+
+  it('null 바디로 POST 시 500이 아닌 400 invalid_input을 반환한다 (#359)', async () => {
+    const app = await createApp({ domainRepo: makeMockDomainRepo() });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/proxy/test',
+      headers: { 'content-type': 'application/json' },
+      payload: 'null',
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('invalid_input');
+    expect(res.json().message).toContain('domain과 path는 필수');
+    expect(res.json().message).not.toContain('destructure');
+    expect(mockAxiosGet).not.toHaveBeenCalled();
+  });
+
   // 회귀 테스트 (#360) — 잘못된 percent-encoding(%ZZ 등)은 decodeURIComponent가 URIError를 throw하는데,
   // try/catch 없으면 Fastify 기본 500 envelope ({statusCode, error: 'Internal Server Error', message: 'URI malformed'})로
   // raw 노출된다. 사용자 입력 오류이므로 400 invalid_path 표준 envelope로 변환되어야 한다.

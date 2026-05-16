@@ -61,7 +61,12 @@ export async function proxyRoutes(app: FastifyInstance, opts: ProxyRouteOptions 
   app.post<{
     Body: { domain: string; path: string; protocol?: 'http' | 'https' };
   }>('/api/proxy/test', async (request, reply) => {
-    const { domain: rawDomain, path, protocol = 'http' } = request.body;
+    // 빈/누락/null 바디 가드 — request.body가 undefined·null이면 destructure가 TypeError를 throw하고
+    // setErrorHandler가 5xx 셰이프({error:'internal_error', message})로 노출되어 내부 변수명(`domain` 등)이
+    // 클라이언트에 새어나간다(#359 정보 노출). 다른 라우트(domains.ts)와 동일하게 `?? {}`로 가드하여
+    // 누락 시 표준 400 invalid_input envelope으로 정규화한다.
+    const body = (request.body ?? {}) as { domain?: string; path?: string; protocol?: 'http' | 'https' };
+    const { domain: rawDomain, path, protocol = 'http' } = body;
 
     if (!rawDomain || !path) {
       // 표준 envelope (#327)
