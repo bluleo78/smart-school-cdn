@@ -34,6 +34,12 @@ describe('registerErrorHandlers', () => {
       err.code = 'forbidden';
       throw err;
     });
+    // (#347) 핸들러 내부에서 decodeURIComponent 가 URIError 를 던지는 케이스
+    // — `%25`(literal `%`) 같은 입력이 라우터 단계는 통과하지만 디코드에서 폭발한다.
+    app.get<{ Params: { host: string } }>('/decode/:host', async (req) => {
+      // 잘못된 percent-encoding 입력에서 URIError 발생
+      return { host: decodeURIComponent(req.params.host) };
+    });
     registerErrorHandlers(app);
     await app.ready();
   });
@@ -75,5 +81,19 @@ describe('registerErrorHandlers', () => {
     const body = res.json();
     expect(body.error).toBe('forbidden');
     expect(body.message).toBe('access denied');
+  });
+
+  // 회귀 테스트 (#347) — 잘못된 percent-encoding 으로 핸들러 내부 decodeURIComponent 가
+  // URIError 를 throw 하면 500 internal_error 가 아닌 400 invalid_input 으로 표준화돼야 한다.
+  // Fastify 가 `%FF`/`%ZZ` 류는 라우터 단계에서 400(FST_ERR_BAD_URL) 으로 거부하지만
+  // `%25` 같은 값은 통과하므로 핸들러 단계에서 폭발한다.
+  it('핸들러 내부 URIError(잘못된 percent-encoding) — 400 + { error:"invalid_input" }', async () => {
+    const res = await app.inject({ method: 'GET', url: '/decode/%25' });
+    expect(res.statusCode).toBe(400);
+    const body = res.json();
+    expect(body.error).toBe('invalid_input');
+    expect(typeof body.message).toBe('string');
+    // 표준 envelope 외 필드(`statusCode` 등 Fastify 기본 셰이프) 가 새지 않아야 함 (#327)
+    expect(body).not.toHaveProperty('statusCode');
   });
 });

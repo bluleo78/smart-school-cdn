@@ -40,6 +40,20 @@ export function registerErrorHandlers(app: FastifyInstance): void {
       } satisfies ApiError);
     }
 
+    // (#347) 잘못된 percent-encoding(`%`, `%2`, `%25` 등) 으로 라우트 핸들러 내부
+    // decodeURIComponent 가 던진 URIError 는 클라이언트 입력 오류이므로 500이 아닌 400으로 표준화한다.
+    // Fastify 는 `%FF`/`%ZZ` 류 일부는 라우터 단계에서 FST_ERR_BAD_URL(400) 로 거부하지만,
+    // `%25`(literal `%`) 같은 값은 통과시킨 뒤 핸들러 내부 decodeURIComponent 에서
+    // URIError 가 발생한다. 모든 라우트의 decodeURIComponent 호출 지점에 try/catch 를
+    // 두는 대신 전역 핸들러에서 한 번에 표준 envelope(400 invalid_input) 로 변환한다.
+    // `err.name === 'URIError'` 도 같이 체크 — Fastify 가 에러를 래핑해도 name 은 보존된다.
+    if (err instanceof URIError || err.name === 'URIError') {
+      return reply.code(400).send({
+        error: 'invalid_input',
+        message: '요청 경로의 인코딩이 올바르지 않습니다.',
+      } satisfies ApiError);
+    }
+
     // rate-limit 등 fastify 플러그인은 err.statusCode 를 명시한다.
     const status = err.statusCode ?? 500;
 
