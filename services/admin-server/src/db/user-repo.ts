@@ -50,8 +50,14 @@ const USER_ORDER_WHITELIST = new Set(['asc', 'desc']);
 export class UserRepository {
   constructor(private db: Database.Database) {}
 
+  /**
+   * 사용자 수 — 이슈 #376. `__dup_` prefix 행(중복 마이그레이션 보존 archive)은 제외.
+   * list() 결과 길이와 일관성을 유지하여 admin UI 카운트 표기가 정확해진다.
+   */
   count(): number {
-    return (this.db.prepare('SELECT COUNT(*) as c FROM users').get() as { c: number }).c;
+    return (this.db
+      .prepare("SELECT COUNT(*) as c FROM users WHERE username NOT LIKE '\\_\\_dup\\_%' ESCAPE '\\'")
+      .get() as { c: number }).c;
   }
 
   create(username: string, passwordHash: string): UserRow {
@@ -66,8 +72,18 @@ export class UserRepository {
     return (this.db.prepare('SELECT * FROM users WHERE id = ?').get(id) as UserRow | undefined) ?? null;
   }
 
+  /**
+   * username 으로 단건 조회 — 이슈 #376.
+   * `__dup_` prefix 행은 case-insensitive 중복 마이그레이션(#190/#340)이 보존을 위해
+   * 남긴 archive 성격의 행이므로 로그인/생성 조회 경로에서도 보이지 않아야 한다.
+   * 만약 정상 사용자가 우연히 `__dup_` 로 시작하는 username 을 입력해도 그 행은
+   * 무시되어 신규 가입이 막히지 않고, 이미 정리된 계정으로의 로그인 시도도 차단된다.
+   * LIKE 의 `_` 와이드카드를 문자 그대로 매칭하기 위해 ESCAPE 절을 사용한다.
+   */
   findByUsername(username: string): UserRow | null {
-    return (this.db.prepare('SELECT * FROM users WHERE username = ?').get(username) as UserRow | undefined) ?? null;
+    return (this.db
+      .prepare("SELECT * FROM users WHERE username = ? AND username NOT LIKE '\\_\\_dup\\_%' ESCAPE '\\'")
+      .get(username) as UserRow | undefined) ?? null;
   }
 
   /**
@@ -90,7 +106,12 @@ export class UserRepository {
       ? (sortDir === 'DESC' ? `${sortCol} IS NULL, ` : '')
       : '';
     const orderBy = `ORDER BY ${nullsClause}${sortCol} ${sortDir}, id ASC`;
-    return this.db.prepare(`SELECT * FROM users ${orderBy}`).all() as UserRow[];
+    // 이슈 #376 — 중복 마이그레이션(#190/#340)이 보존을 위해 남긴 `__dup_<id>__` prefix 행은
+    // archive 성격이므로 사용자 목록 응답에서 제외한다. 운영 데이터 무결성/UX 혼동 방지.
+    // LIKE 의 `_` 와이드카드를 리터럴로 매칭하기 위해 ESCAPE 절 사용.
+    return this.db
+      .prepare(`SELECT * FROM users WHERE username NOT LIKE '\\_\\_dup\\_%' ESCAPE '\\' ${orderBy}`)
+      .all() as UserRow[];
   }
 
   updatePassword(id: number, passwordHash: string): void {

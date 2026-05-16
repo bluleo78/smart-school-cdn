@@ -139,6 +139,40 @@ describe('UserRepository', () => {
     expect(all[0].username).toBe('second@b.c');
   });
 
+  // 이슈 #376 회귀 방지 — 중복 마이그레이션(#190/#340)이 보존을 위해 남긴
+  // `__dup_<id>__` prefix 행은 list()/findByUsername()/count() 모두에서 제외되어야 한다.
+  describe('__dup_ prefix archive 행 가시성 차단 (#376)', () => {
+    beforeEach(() => {
+      // 마이그레이션이 prefix 를 직접 INSERT 한 상황을 모사 — repo.create 는 정규화된
+      // username 만 받으므로 prefix 행은 raw SQL 로 주입한다.
+      const now = new Date().toISOString();
+      db.prepare('INSERT INTO users (username, password_hash, created_at, updated_at, disabled_at) VALUES (?, ?, ?, ?, ?)')
+        .run('__dup_3__bluleo78@gmail.com', 'h', now, now, now);
+      db.prepare('INSERT INTO users (username, password_hash, created_at, updated_at, disabled_at) VALUES (?, ?, ?, ?, ?)')
+        .run('__dup_9__bluleo78@gmail.com', 'h', now, now, now);
+      // 정상 사용자도 한 명 — 결과에는 이 한 명만 보여야 한다.
+      repo.create('active@example.com', 'h');
+    });
+
+    it('list() 응답에 __dup_ 행이 포함되지 않는다', () => {
+      const rows = repo.list();
+      expect(rows.map(r => r.username)).toEqual(['active@example.com']);
+      expect(rows.some(r => r.username.startsWith('__dup_'))).toBe(false);
+    });
+
+    it('findByUsername() 으로 __dup_ 행을 조회할 수 없다', () => {
+      expect(repo.findByUsername('__dup_3__bluleo78@gmail.com')).toBeNull();
+      expect(repo.findByUsername('__dup_9__bluleo78@gmail.com')).toBeNull();
+      // 정상 사용자는 그대로 조회됨
+      expect(repo.findByUsername('active@example.com')?.username).toBe('active@example.com');
+    });
+
+    it('count() 가 __dup_ 행을 제외한 활성 schema 사용자만 센다', () => {
+      // 정상 1명만 카운트 — prefix 2명 제외
+      expect(repo.count()).toBe(1);
+    });
+  });
+
   it('findById 가 일치하는 row 반환', () => {
     const u = repo.create('a@b.c', 'h');
     expect(repo.findById(u.id)?.username).toBe('a@b.c');
