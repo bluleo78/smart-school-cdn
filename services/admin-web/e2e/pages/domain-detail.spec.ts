@@ -1068,6 +1068,57 @@ test.describe('도메인 상세 — 통계 탭', () => {
     await expect(page.getByTestId('domain-optimization-stats')).toBeVisible();
   });
 
+  test('절감률 — optimized > original 시 0% 클램프 + "+X% 증가" 보조 라인 (회귀: #244)', async ({ page }) => {
+    // 버그: optimized_bytes > original_bytes 인 경우(이미 압축된 자산을 재변환해 더 커진 케이스)
+    // "절감률" 카드가 "-15%"처럼 음수 백분율을 그대로 노출 → 라벨 의미와 모순.
+    // 수정 후: 카드 본문은 Math.max(0, raw)로 "0%"만 표시하고,
+    //         비정상 케이스는 "+15% 증가" 보조 라인(text-destructive)을 함께 노출.
+    await setupDetailMocks(page);
+    // optimized > original 시나리오를 textbook.com 도메인 한정으로 주입
+    await page.route('**/api/stats/optimization*', (route) =>
+      route.fulfill({
+        json: {
+          stats: [
+            { domain: 'textbook.com', original_bytes: 100, optimized_bytes: 115, count: 1 },
+          ],
+        },
+      }),
+    );
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '최적화' }).click();
+
+    // 본문은 0% (음수 노출 금지)
+    const savedPct = page.getByTestId('domain-optimization-saved-pct');
+    await expect(savedPct).toBeVisible();
+    await expect(savedPct).toHaveText('0%');
+    await expect(savedPct).not.toContainText('-');
+
+    // 보조 라인: "+15% 증가" + destructive 색상
+    const note = page.getByTestId('domain-optimization-increase-note');
+    await expect(note).toBeVisible();
+    await expect(note).toHaveText('+15% 증가');
+    await expect(note).toHaveClass(/text-destructive/);
+  });
+
+  test('절감률 — 정상 케이스에서는 "+X% 증가" 보조 라인이 표시되지 않는다 (회귀: #244)', async ({ page }) => {
+    // 정상 케이스(optimized < original)에서는 보조 라인이 등장하면 안 된다.
+    await setupDetailMocks(page);
+    await page.route('**/api/stats/optimization*', (route) =>
+      route.fulfill({
+        json: {
+          stats: [
+            { domain: 'textbook.com', original_bytes: 1000, optimized_bytes: 700, count: 10 },
+          ],
+        },
+      }),
+    );
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '최적화' }).click();
+
+    await expect(page.getByTestId('domain-optimization-saved-pct')).toHaveText('30%');
+    await expect(page.getByTestId('domain-optimization-increase-note')).toHaveCount(0);
+  });
+
   test('Stats 탭에 캐시/최적화 2섹션이 모두 렌더링된다 (Phase 16: 트래픽은 트래픽 탭으로 이동)', async ({ page }) => {
     await setupDetailMocks(page);
     await page.goto('/domains/textbook.com');

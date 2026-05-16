@@ -44,11 +44,19 @@ export function DomainOptimizationStats({ host }: Props) {
 
   const originalBytes = stat?.original_bytes ?? 0;
   const optimizedBytes = stat?.optimized_bytes ?? 0;
-  /** 절감률 계산 — 원본 0이면 0% */
-  const savedPct =
+  /**
+   * 절감률 계산 — 원본 0이면 0%.
+   * optimized > original (이미 압축된 자산을 재변환해 더 커진 경우)이면 raw 값은 음수가 되는데,
+   * "절감률" 라벨 의미상 음수는 모순이므로 카드 본문은 0%로 클램프하고,
+   * 비정상 케이스는 별도 "+X% 증가" 보조 라인으로 명시한다 (#244).
+   */
+  const rawSavedPct =
     originalBytes > 0
       ? Math.round(((originalBytes - optimizedBytes) / originalBytes) * 100)
       : 0;
+  const savedPct = Math.max(0, rawSavedPct);
+  /** 용량이 오히려 증가한 비정상 케이스 — 보조 라인 표시 여부 및 증가율(양수) */
+  const increasedPct = rawSavedPct < 0 ? -rawSavedPct : 0;
 
   return (
     <div
@@ -81,7 +89,18 @@ export function DomainOptimizationStats({ host }: Props) {
           <CardTitle className="text-xs text-muted-foreground">절감률</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-lg font-semibold">{savedPct}%</p>
+          <p className="text-lg font-semibold" data-testid="domain-optimization-saved-pct">
+            {savedPct}%
+          </p>
+          {/* 용량 증가 보조 라인 — destructive 색상으로 비정상 케이스 명시 (#244) */}
+          {increasedPct > 0 && (
+            <p
+              className="mt-1 text-xs text-destructive"
+              data-testid="domain-optimization-increase-note"
+            >
+              +{increasedPct}% 증가
+            </p>
+          )}
         </CardContent>
       </Card>
     </div>
