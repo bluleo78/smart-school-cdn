@@ -269,4 +269,25 @@ describe('프록시 라우트', () => {
     expect(res.json().message).toContain('유효하지 않은 경로');
     expect(mockAxiosGet).not.toHaveBeenCalled();
   });
+
+  // 회귀 테스트 (#360) — 잘못된 percent-encoding(%ZZ 등)은 decodeURIComponent가 URIError를 throw하는데,
+  // try/catch 없으면 Fastify 기본 500 envelope ({statusCode, error: 'Internal Server Error', message: 'URI malformed'})로
+  // raw 노출된다. 사용자 입력 오류이므로 400 invalid_path 표준 envelope로 변환되어야 한다.
+  it('path에 잘못된 percent-encoding이 포함되면 500이 아닌 400 invalid_path를 반환한다 (#360)', async () => {
+    const app = await createApp({ domainRepo: makeMockDomainRepo() });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/proxy/test',
+      headers: { 'content-type': 'application/json' },
+      payload: { domain: 'httpbin.org', path: '/test%ZZ' },
+    });
+
+    expect(res.statusCode).toBe(400);
+    // 표준 envelope (#327) — URI malformed가 raw로 새어나가지 않는지 보증
+    expect(res.json().error).toBe('invalid_path');
+    expect(res.json().message).toContain('유효하지 않은 경로');
+    // 다른 잘못된 시퀀스도 동일하게 처리되는지 — Fastify 기본 envelope 키는 없어야 함
+    expect(res.json().statusCode).toBeUndefined();
+    expect(mockAxiosGet).not.toHaveBeenCalled();
+  });
 });

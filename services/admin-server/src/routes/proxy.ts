@@ -89,7 +89,18 @@ export async function proxyRoutes(app: FastifyInstance, opts: ProxyRouteOptions 
     }
 
     // URL 조작 방지 — 인코딩 해제 후 상대 경로(..), 프로토콜 상대 URL(//), @ 포함 시 거부
-    const decodedPath = decodeURIComponent(path);
+    // 잘못된 percent-encoding(`%ZZ`, `%FF` 등)이면 decodeURIComponent가 URIError를 throw하므로
+    // try/catch로 감싸 400 invalid_path로 표준화한다 (#347 도메인 라우트와 동일 패턴, #360).
+    let decodedPath: string;
+    try {
+      decodedPath = decodeURIComponent(path);
+    } catch {
+      // 표준 envelope (#327) — 잘못된 인코딩은 사용자 입력 오류이므로 400
+      return reply.status(400).send({
+        error: 'invalid_path',
+        message: '유효하지 않은 경로입니다.',
+      });
+    }
     if (decodedPath.includes('..') || path.startsWith('//') || path.includes('@')) {
       // 표준 envelope (#327)
       return reply.status(400).send({
