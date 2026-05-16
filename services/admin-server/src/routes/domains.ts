@@ -901,13 +901,36 @@ export async function domainRoutes(
       return reply.status(404).send({ error: 'domain_not_found', message: '도메인을 찾을 수 없습니다.' });
     }
 
-    // 음수 limit/offset은 SQLite에서 예기치 않은 동작을 유발할 수 있으므로 클램프
-    // limit: 1~1000 범위 강제 (0 이하 → 기본값 100, 1000 초과 → 1000)
-    // offset: 0 이하 → 0으로 클램프
-    const rawLimit = Number(request.query.limit);
-    const limit = Math.min(rawLimit > 0 ? rawLimit : 100, 1000);
-    const rawOffset = Number(request.query.offset);
-    const offset = rawOffset > 0 ? rawOffset : 0;
+    // #418: limit/offset strict 검증 — 기존 silent clamp(#149) 는 잘못된 입력을 묵시적으로 보정해
+    //   운영자가 페이지네이션 실패를 인지하지 못하게 만들었다. #408/#413/#415 정책(알 수 없는 쿼리
+    //   값은 명시적 400 invalid_input)에 맞춰 동일 envelope 로 거부한다. SQLite 음수 OFFSET 회귀
+    //   가드(#149)는 zod 검증이 SQL 단계 이전에 차단하므로 그대로 보존된다.
+    const limitRaw = request.query.limit;
+    let limit = 100; // logs 기본값 유지
+    if (limitRaw !== undefined && limitRaw !== '') {
+      const parsed = z.coerce.number().int().min(1).max(1000).safeParse(limitRaw);
+      if (!parsed.success) {
+        return reply.status(400).send({
+          error: 'invalid_input',
+          message: `limit must be an integer between 1 and 1000 (received: "${limitRaw}")`,
+          issues: parsed.error.issues,
+        });
+      }
+      limit = parsed.data;
+    }
+    const offsetRaw = request.query.offset;
+    let offset = 0;
+    if (offsetRaw !== undefined && offsetRaw !== '') {
+      const parsed = z.coerce.number().int().min(0).safeParse(offsetRaw);
+      if (!parsed.success) {
+        return reply.status(400).send({
+          error: 'invalid_input',
+          message: `offset must be a non-negative integer (received: "${offsetRaw}")`,
+          issues: parsed.error.issues,
+        });
+      }
+      offset = parsed.data;
+    }
     const { status, cache, period, q } = request.query;
 
     // #408: 알 수 없는 period 값은 silent fallback(필터 무시) 대신 명시적 400으로 거부
