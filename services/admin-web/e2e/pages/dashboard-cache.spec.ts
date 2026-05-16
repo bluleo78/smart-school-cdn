@@ -99,6 +99,44 @@ test.describe('대시보드 — 전체 캐시 퍼지', () => {
     await page.getByRole('button', { name: '퍼지 실행' }).click();
     await expect(page.getByRole('button', { name: '퍼지 실행' })).not.toBeVisible();
   });
+
+  /**
+   * 이슈 #419 회귀 방지 — usePurgeCache(전체 퍼지) onSuccess에서 ['cache','series']·['domains','summary'] 미무효화
+   * 수정 전: ['cache','stats']·['cache','popular']만 invalidate → CacheHitRateChart(10s 폴링) stale
+   * 수정 후: ['cache','series']도 invalidate → 즉시 refetch
+   *
+   * 검증 전략: Dashboard에 활성 마운트된 ['cache','series'](/api/cache/series) 호출 수를 카운트한다.
+   * 퍼지 후 baseline보다 증가해야 한다. 수정 전(invalidate 누락)에는 폴링 외 추가 호출이 발생하지 않아 실패한다.
+   * (['domains','summary']는 Dashboard 외 /domains 페이지에서 마운트되므로 본 테스트 범위에서 제외 — usePurgeDomain #333 패턴과 정렬한 invalidate 코드 자체를 회귀 방지 근거로 삼음)
+   */
+  test('전체 퍼지 성공 시 ["cache","series"] 쿼리가 invalidate되어 refetch된다 (회귀: #419)', async ({ page }) => {
+    await setupDashboardMocks(page);
+    await mockApi(page, 'DELETE', '/cache/purge', { purged_count: 100, freed_bytes: 1048576 });
+
+    // cache series 호출 카운트 (setupDashboardMocks 위에 재정의해 우선순위 확보)
+    let cacheSeriesCalls = 0;
+    await page.route('**/api/cache/series*', async (route) => {
+      cacheSeriesCalls++;
+      await route.fulfill({ json: { buckets: createCacheSeriesBuckets() } });
+    });
+
+    await page.goto('/');
+    await page.getByTestId('purge-all-btn').waitFor();
+
+    // 초기 마운트 호출이 모두 끝나도록 잠시 대기 후 baseline 캡처
+    await page.waitForLoadState('networkidle');
+    const baselineSeries = cacheSeriesCalls;
+    expect(baselineSeries).toBeGreaterThan(0);
+
+    // 퍼지 트리거
+    await page.getByTestId('purge-all-btn').click();
+    await expect(page.getByTestId('purge-all-dialog')).toBeVisible();
+    await page.getByRole('button', { name: '퍼지 실행' }).click();
+    await expect(page.getByTestId('purge-all-dialog')).not.toBeVisible();
+
+    // invalidate → refetch로 series 호출이 baseline보다 증가해야 한다.
+    await expect.poll(() => cacheSeriesCalls, { timeout: 3000 }).toBeGreaterThan(baselineSeries);
+  });
 });
 
 // ─── 헤더 한국어 통일 (#49 회귀) ─────────────────────────────
