@@ -154,15 +154,36 @@ describe('GET /api/domains', () => {
       expect(JSON.parse(res.body)).toEqual([]);
     });
 
-    it('음수/NaN limit는 무시되어 전체 반환 — silent ignore 가 아니라 의도적 정상화', async () => {
+    // #415: 알 수 없는 limit/offset 값은 silent fallback(undefined → 페이지네이션 미적용) 대신
+    //   #408 정책에 맞춰 400 invalid_input 으로 명시 거부한다. 운영자가 페이지네이션을 기대했는데
+    //   silent 전체 반환되는 의미 어긋남을 차단.
+    it('?limit=-5 → 400 invalid_input (#415)', async () => {
       const repo = makeRepo();
       seedEightDomains(repo);
       const app = buildApp(repo);
-      const res = await app.inject({ method: 'GET', url: '/api/domains?limit=-5&offset=abc' });
+      const res = await app.inject({ method: 'GET', url: '/api/domains?limit=-5' });
+      expect(res.statusCode).toBe(400);
       const body = JSON.parse(res.body);
-      expect(res.statusCode).toBe(200);
-      // 음수 limit / 비정수 offset 모두 클램프되어 페이지네이션 미적용 (전체 반환)
-      expect(body).toHaveLength(8);
+      expect(body.error).toBe('invalid_input');
+      expect(body.message).toMatch(/limit/);
+    });
+
+    it('?limit=abc → 400 invalid_input (#415)', async () => {
+      const repo = makeRepo();
+      seedEightDomains(repo);
+      const app = buildApp(repo);
+      const res = await app.inject({ method: 'GET', url: '/api/domains?limit=abc' });
+      expect(res.statusCode).toBe(400);
+      expect(JSON.parse(res.body).error).toBe('invalid_input');
+    });
+
+    it('?offset=abc → 400 invalid_input (#415)', async () => {
+      const repo = makeRepo();
+      seedEightDomains(repo);
+      const app = buildApp(repo);
+      const res = await app.inject({ method: 'GET', url: '/api/domains?offset=abc' });
+      expect(res.statusCode).toBe(400);
+      expect(JSON.parse(res.body).error).toBe('invalid_input');
     });
   });
 
@@ -1852,13 +1873,55 @@ describe('GET /api/domains/:host/optimization/url-breakdown', () => {
     expect(body.items[0].savings_ratio).toBe(0);
   });
 
-  it('limit이 숫자가 아니면 무시한다', async () => {
+  // #415: limit/period/sort/decision silent fallback 제거 — #408 정책 확대 적용
+  it('?limit=abc → 400 invalid_input (#415)', async () => {
     const repo = makeRepo();
     repo.upsert('a.test', 'https://a');
     const app = buildApp(repo);
     const res = await app.inject({ method: 'GET',
       url: '/api/domains/a.test/optimization/url-breakdown?limit=abc' });
-    expect(res.statusCode).toBe(200); // NaN을 우아하게 무시
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('invalid_input');
+  });
+
+  it('?period=foo → 400 invalid_period (#415, #408 정책 확대)', async () => {
+    const repo = makeRepo();
+    repo.upsert('a.test', 'https://a');
+    const app = buildApp(repo);
+    const res = await app.inject({ method: 'GET',
+      url: '/api/domains/a.test/optimization/url-breakdown?period=foo' });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('invalid_period');
+    expect(res.json().message).toMatch(/period/);
+  });
+
+  it('?sort=garbage → 400 invalid_sort (#415)', async () => {
+    const repo = makeRepo();
+    repo.upsert('a.test', 'https://a');
+    const app = buildApp(repo);
+    const res = await app.inject({ method: 'GET',
+      url: '/api/domains/a.test/optimization/url-breakdown?sort=garbage' });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('invalid_sort');
+  });
+
+  it('?decision=garbage → 400 invalid_decision (#415, #318 정책 확대)', async () => {
+    const repo = makeRepo();
+    repo.upsert('a.test', 'https://a');
+    const app = buildApp(repo);
+    const res = await app.inject({ method: 'GET',
+      url: '/api/domains/a.test/optimization/url-breakdown?decision=garbage' });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('invalid_decision');
+  });
+
+  it('허용된 period/sort/decision 은 200 (#415 회귀 가드)', async () => {
+    const repo = makeRepo();
+    repo.upsert('a.test', 'https://a');
+    const app = buildApp(repo);
+    const res = await app.inject({ method: 'GET',
+      url: '/api/domains/a.test/optimization/url-breakdown?period=24h&sort=savings&decision=optimized' });
+    expect(res.statusCode).toBe(200);
   });
 });
 

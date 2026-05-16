@@ -364,6 +364,24 @@ describe('GET /api/optimization/events', () => {
     const res = await app.inject({ method: 'GET', url: '/api/optimization/events?limit=5' });
     expect(res.json().events).toHaveLength(5);
   });
+
+  // #415: limit silent fallback 제거 — #408 정책(invalid_<param> 400) 확대 적용.
+  //   기존엔 abc/-1/0/1.5/999999 가 각각 fallback 100건·min 1건·max 1000건으로 silent 변환됐다.
+  it('limit 가 비숫자/음수/0/범위 초과면 400 invalid_input (#415)', async () => {
+    const { app } = mkApp();
+    for (const v of ['abc', '-1', '0', '999999']) {
+      const res = await app.inject({ method: 'GET', url: `/api/optimization/events?limit=${v}` });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe('invalid_input');
+      expect(res.json().message).toMatch(/limit/);
+    }
+    // 빈 문자열은 필터 비활성 (200) — 다른 쿼리 파라미터 정책과 일치
+    const r2 = await app.inject({ method: 'GET', url: '/api/optimization/events?limit=' });
+    expect(r2.statusCode).toBe(200);
+    // 허용 범위 내는 200
+    const r3 = await app.inject({ method: 'GET', url: '/api/optimization/events?limit=10' });
+    expect(r3.statusCode).toBe(200);
+  });
 });
 
 // ─── GET /api/optimization/stats ───────────────────────────────────────────

@@ -1,11 +1,13 @@
 /// 도메인 관리 API 라우트
 /// Admin Server가 도메인의 소유자 — 변경 시 Proxy admin API(8081) + tls/dns gRPC 서비스에 전체 목록 push
 import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
 import axios from 'axios';
 import type { DomainRepository } from '../db/domain-repo.js';
 import { DomainStatsRepository } from '../db/domain-stats-repo.js';
 import type { StatsPeriod } from '../db/domain-stats-repo.js';
 import { OptimizationEventsRepository } from '../db/optimization-events-repo.js';
+import { ALLOWED_DECISIONS } from './optimization-events.js';
 
 const PROXY_ADMIN_URL = process.env.PROXY_ADMIN_URL || 'http://localhost:8081';
 
@@ -231,11 +233,34 @@ export async function domainRoutes(
           message: `q는 ${Q_MAX_LENGTH}자 이하여야 합니다 (받은 길이: ${q.length}).`,
         });
       }
-      // limit/offset: 문자열 → 숫자 변환. NaN/음수/0은 undefined로 처리해 페이지네이션을 적용하지 않는다.
-      const rawLimit  = request.query.limit  !== undefined ? Number(request.query.limit)  : NaN;
-      const rawOffset = request.query.offset !== undefined ? Number(request.query.offset) : NaN;
-      const limit  = Number.isFinite(rawLimit)  && rawLimit  > 0 ? rawLimit  : undefined;
-      const offset = Number.isFinite(rawOffset) && rawOffset > 0 ? rawOffset : undefined;
+      // limit/offset strict 검증 (#415) — 기존엔 NaN/음수/0 을 undefined 로 silent 변환해 페이지네이션이
+      // 의도와 다르게 미적용됐다. #408 정책(invalid_<param> 400)에 맞춰 빈 문자열 외 비정상 값은 400.
+      const limitRaw = request.query.limit;
+      let limit: number | undefined;
+      if (limitRaw !== undefined && limitRaw !== '') {
+        const parsed = z.coerce.number().int().min(1).safeParse(limitRaw);
+        if (!parsed.success) {
+          return reply.status(400).send({
+            error: 'invalid_input',
+            message: `limit must be a positive integer (received: "${limitRaw}")`,
+            issues: parsed.error.issues,
+          });
+        }
+        limit = parsed.data;
+      }
+      const offsetRaw = request.query.offset;
+      let offset: number | undefined;
+      if (offsetRaw !== undefined && offsetRaw !== '') {
+        const parsed = z.coerce.number().int().min(0).safeParse(offsetRaw);
+        if (!parsed.success) {
+          return reply.status(400).send({
+            error: 'invalid_input',
+            message: `offset must be a non-negative integer (received: "${offsetRaw}")`,
+            issues: parsed.error.issues,
+          });
+        }
+        offset = parsed.data;
+      }
       return domainRepo.findAll({
         q,
         enabled: enabledFilter,
@@ -1075,24 +1100,84 @@ export async function domainRoutes(
   app.get<{
     Params: { host: string };
     Querystring: { period?: string; sort?: string; decision?: string; q?: string; limit?: string; offset?: string };
-  }>('/api/domains/:host/optimization/url-breakdown', async (req) => {
+  }>('/api/domains/:host/optimization/url-breakdown', async (req, reply) => {
     // 와일드카드 호스트(`*.textbook.com`)는 URL 인코딩되어 `%2A.textbook.com`로 들어오므로 디코딩 필요
     const host = normalizeHost(decodeURIComponent(req.params.host));
     const periodMap: Record<string, number> = { '1h': 3600, '24h': 86400, '7d': 604800, '30d': 2592000 };
-    const periodSec = periodMap[req.query.period ?? '24h'] ?? 86400;
-    const sort = (['savings', 'orig_size', 'events'] as const).find((s) => s === req.query.sort) ?? 'savings';
-    // limit/offset 정수화·클램프는 repo의 clampInt/clampOffset에 위임한다 (#293/#294).
-    // 라우트에서 Number.isFinite만 검사하면 소수(예: 2.5)는 통과해 SQL `LIMIT 2.5`가
-    // SQLITE_MISMATCH를 일으키므로, 검증을 한 곳(repo)에 모아 회귀를 막는다.
+    // #415: period/sort/decision/limit/offset 모두 silent fallback 제거 — #408 정책(invalid_<param> 400) 확대.
+    //   기존엔 알 수 없는 값이 들어와도 각각 24h/'savings'/0건/clampInt fallback 으로 silent 변환됐다.
+    //   같은 도메인 라우트의 /stats·/logs 는 #408/#413 으로 이미 400 거부 — 본 라우트만 누락된 회귀 누수.
+    const periodRaw = req.query.period;
+    if (periodRaw !== undefined && periodRaw !== '' && periodMap[periodRaw] === undefined) {
+      // 표준 envelope (#327/#410) — /stats 의 invalid_period 와 동일 형식
+      return reply.code(400).send({
+        error: 'invalid_period',
+        message: `period must be one of: ${Object.keys(periodMap).join(', ')} (received: "${periodRaw}")`,
+      });
+    }
+    const periodSec = periodMap[periodRaw ?? '24h'] ?? 86400;
+
+    const sortRaw = req.query.sort;
+    const SORT_ALLOWED = ['savings', 'orig_size', 'events'] as const;
+    if (sortRaw !== undefined && sortRaw !== ''
+        && !(SORT_ALLOWED as readonly string[]).includes(sortRaw)) {
+      // 표준 envelope (#327/#410)
+      return reply.code(400).send({
+        error: 'invalid_sort',
+        message: `sort must be one of: ${SORT_ALLOWED.join(', ')} (received: "${sortRaw}")`,
+      });
+    }
+    const sort = (sortRaw && (SORT_ALLOWED as readonly string[]).includes(sortRaw))
+      ? sortRaw as typeof SORT_ALLOWED[number]
+      : 'savings';
+
+    // decision 화이트리스트 — /api/optimization/events 와 동일 정책 (#318). 빈 문자열·미지정은 필터 비활성.
+    const decisionRaw = req.query.decision;
+    if (decisionRaw !== undefined && decisionRaw !== '' && !ALLOWED_DECISIONS.has(decisionRaw)) {
+      // 표준 envelope (#327/#410)
+      return reply.code(400).send({
+        error: 'invalid_decision',
+        message: `invalid decision: ${decisionRaw}`,
+      });
+    }
+
+    // limit/offset zod 검증 — abc/-1/0/1.5 같은 비정상 값이 repo clampInt 로 silent 보정되던 경로를 차단.
+    const limitRaw = req.query.limit;
+    let limitNum: number | undefined;
+    if (limitRaw !== undefined && limitRaw !== '') {
+      const parsed = z.coerce.number().int().min(1).max(500).safeParse(limitRaw);
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: 'invalid_input',
+          message: `limit must be an integer in [1, 500] (received: "${limitRaw}")`,
+          issues: parsed.error.issues,
+        });
+      }
+      limitNum = parsed.data;
+    }
+    const offsetRaw = req.query.offset;
+    let offsetNum: number | undefined;
+    if (offsetRaw !== undefined && offsetRaw !== '') {
+      const parsed = z.coerce.number().int().min(0).safeParse(offsetRaw);
+      if (!parsed.success) {
+        return reply.code(400).send({
+          error: 'invalid_input',
+          message: `offset must be a non-negative integer (received: "${offsetRaw}")`,
+          issues: parsed.error.issues,
+        });
+      }
+      offsetNum = parsed.data;
+    }
+
     const repo = new OptimizationEventsRepository(domainRepo.database);
     return repo.urlBreakdown({
       host,
       period_sec: periodSec,
       sort,
-      decision:   req.query.decision,
+      decision:   decisionRaw !== '' ? decisionRaw : undefined,
       search:     req.query.q,
-      limit:      req.query.limit  !== undefined ? Number(req.query.limit)  : undefined,
-      offset:     req.query.offset !== undefined ? Number(req.query.offset) : undefined,
+      limit:      limitNum,
+      offset:     offsetNum,
     });
   });
 

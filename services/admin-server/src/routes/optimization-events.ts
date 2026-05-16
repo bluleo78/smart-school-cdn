@@ -26,7 +26,7 @@ const ALLOWED_EVENT_TYPES: ReadonlySet<OptimizationEventType> = new Set([
  *
  * 정의는 `db/optimization-events-repo.ts` 헤더 주석 + proxy/optimizer-service의 emit 경로와 일치한다.
  */
-const ALLOWED_DECISIONS: ReadonlySet<string> = new Set([
+export const ALLOWED_DECISIONS: ReadonlySet<string> = new Set([
   // media_cache
   'served_200', 'served_206', 'stored_new', 'invalid_range_416',
   // image_optimize (optimizer-service의 OptimizeDecision::as_str)
@@ -159,13 +159,30 @@ export async function optimizationEventsRoutes(app: FastifyInstance) {
         });
       }
     }
-    const limitNum = req.query.limit !== undefined ? Number(req.query.limit) : undefined;
+    // limit 검증 — #415: 빈 문자열·비숫자·음수·0·소수·범위 초과 모두 silent fallback 대신 400 invalid_input.
+    //   기존엔 Number.isFinite만 검사하고 repo clampInt에 위임해 '?limit=abc'/'?limit=-1'/'?limit=999999' 가
+    //   각각 fallback 100건·min 클램프 1건·max 클램프 1000건으로 silent 변환됐다 (#408 정책 위반).
+    //   /api/cache/popular·/api/dns/queries 와 동일하게 z.coerce.number().int().min(1).max(1000) 정책 통일.
+    const limitRaw = req.query.limit;
+    let limitNum: number | undefined;
+    if (limitRaw !== undefined && limitRaw !== '') {
+      const parsed = z.coerce.number().int().min(1).max(1000).safeParse(limitRaw);
+      if (!parsed.success) {
+        // 표준 envelope (#327/#410)
+        return reply.status(400).send({
+          error: 'invalid_input',
+          message: `limit must be an integer in [1, 1000] (received: "${limitRaw}")`,
+          issues: parsed.error.issues,
+        });
+      }
+      limitNum = parsed.data;
+    }
     const events = repo.query({
       event_type: typeRaw !== '' ? typeRaw : undefined,
       host:       normalizeHostQuery(req.query.host),
       decision:   decisionRaw !== '' ? decisionRaw : undefined,
       since:      sinceRaw,
-      limit:      Number.isFinite(limitNum) ? (limitNum as number) : undefined,
+      limit:      limitNum,
     });
     return { events };
   });
