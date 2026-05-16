@@ -94,11 +94,21 @@ export function CacheHitRateChart() {
                 tickFormatter={(v) => `${Math.round(v * 100)}%`}
                 tick={{ fontSize: 10 }}
               />
-              {/* stackOffset="expand" 사용 시 Recharts 내부값이 0~1 소수로 정규화됨.
-                  YAxis tickFormatter와 동일하게 백분율(%) 문자열로 변환해야 한다.
+              {/* Recharts Tooltip formatter는 stackOffset="expand"와 무관하게 dataKey의 "원본 카운트"를 받는다.
+                  YAxis tickFormatter만 0~1 정규화 값을 받으므로 같은 식(Math.round(v*100)%)을 그대로 쓰면
+                  원본 카운트 × 100%가 출력되어 169800% 같은 거짓값이 노출된다(#233, 동일 패턴 #236).
+                  해결: 같은 시점(payload)의 4시리즈 합 대비 비율로 직접 환산. 합이 0이면 0%로 안전 처리.
                   툴팁 헤더는 항상 'YYYY-MM-DD HH:mm' 풀 포맷으로 노출 — 어떤 범위에서든 시점 정확 식별 (#202). */}
               <ChartTooltip
-                formatter={(v: number) => `${Math.round(v * 100)}%`}
+                formatter={(v: number, _name, item) => {
+                  const p = item?.payload as
+                    | { l1_hits?: number; l2_hits?: number; miss?: number; bypass?: number }
+                    | undefined;
+                  const total =
+                    (p?.l1_hits ?? 0) + (p?.l2_hits ?? 0) + (p?.miss ?? 0) + (p?.bypass ?? 0);
+                  if (total === 0) return '0%';
+                  return `${((v / total) * 100).toFixed(1)}%`;
+                }}
                 labelFormatter={(label, payload) => {
                   const ts = (payload?.[0]?.payload as { ts?: number } | undefined)?.ts;
                   if (typeof ts !== 'number') return label as string;

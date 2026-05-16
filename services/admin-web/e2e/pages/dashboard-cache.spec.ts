@@ -211,6 +211,42 @@ test.describe('대시보드 — CacheHitRateChart Tooltip 포맷 (#86)', () => {
     const tooltipText = await tooltip.textContent();
     expect(tooltipText).not.toMatch(/\b0\.\d{2,}/);
   });
+
+  /**
+   * 이슈 #233 회귀 방지 — Recharts Tooltip formatter는 dataKey의 "원본 카운트"를 받는데
+   * `Math.round(v * 100)%` 식을 그대로 쓰면 1698 → 169800% 같은 거짓값이 노출되던 버그.
+   * 수정 후: 같은 시점 4시리즈 합 대비 비율(%)로 환산해야 한다. 각 값은 0~100 범위 안에 있어야 한다.
+   */
+  test('스택 차트 hover tooltip이 0~100% 범위의 정규화된 비율로 표시된다 (회귀: #233)', async ({ page }) => {
+    await setupDashboardMocks(page);
+    await page.goto('/');
+
+    const chart = page.getByTestId('cache-stacked-chart');
+    await expect(chart).toBeVisible();
+
+    const chartBox = await chart.boundingBox();
+    if (chartBox) {
+      await page.mouse.move(
+        chartBox.x + chartBox.width * 0.4,
+        chartBox.y + chartBox.height * 0.5,
+      );
+    }
+
+    const tooltip = page.locator('.recharts-tooltip-wrapper');
+    await expect(tooltip).toBeVisible({ timeout: 3000 });
+
+    const tooltipText = (await tooltip.textContent()) ?? '';
+
+    // 모든 % 수치(소수/정수)를 추출해 0~100 범위인지 검증.
+    // 버그 상태: 169800%, 58300% 처럼 100을 훨씬 초과하는 값이 노출됨.
+    const pctMatches = Array.from(tooltipText.matchAll(/(\d+(?:\.\d+)?)\s*%/g));
+    expect(pctMatches.length).toBeGreaterThan(0);
+    for (const m of pctMatches) {
+      const pct = Number(m[1]);
+      expect(pct).toBeGreaterThanOrEqual(0);
+      expect(pct).toBeLessThanOrEqual(100);
+    }
+  });
 });
 
 // ─── 24시간 범위 x축 라벨 날짜 포함 (#202 회귀) ────────────────
