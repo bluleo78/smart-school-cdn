@@ -895,6 +895,24 @@ export async function domainRoutes(
       });
     }
 
+    // #413: status/cache enum 쿼리도 동일한 화이트리스트 검증 적용
+    //   기존엔 화이트리스트 밖 값을 silent하게 무시(=필터 미적용)하고 200을 반환했으나,
+    //   #326/#408 정책에 따라 알 수 없는 값은 명시적 400 invalid_input envelope로 거부한다.
+    const validLogStatuses = ['5xx', '4xx', 'error'] as const;
+    if (status !== undefined && !(validLogStatuses as readonly string[]).includes(status)) {
+      return reply.code(400).send({
+        error: 'invalid_status',
+        message: `status must be one of: ${validLogStatuses.join(', ')}`,
+      });
+    }
+    const validLogCaches = ['hit', 'miss'] as const;
+    if (cache !== undefined && !(validLogCaches as readonly string[]).includes(cache)) {
+      return reply.code(400).send({
+        error: 'invalid_cache',
+        message: `cache must be one of: ${validLogCaches.join(', ')}`,
+      });
+    }
+
     // period → since/until 변환 (없으면 시간 필터 없음)
     let since: number | undefined;
     let until: number | undefined;

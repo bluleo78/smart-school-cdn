@@ -1649,6 +1649,65 @@ describe('GET /api/domains/:host/logs — period/from/to/q 필터', () => {
     expect(body.message).toContain('period must be one of');
   });
 
+  // #413: status enum 쿼리도 화이트리스트 밖 값은 silent fallback(필터 미적용) 대신 400 (invalid_status) 으로 거부
+  it('알 수 없는 status 값은 400 invalid_status (#413)', async () => {
+    const repo = makeRepo();
+    repo.upsert('a.test', 'https://a.test');
+    const app = buildApp(repo);
+    const res = await app.inject({ method: 'GET', url: '/api/domains/a.test/logs?status=garbage' });
+    expect(res.statusCode).toBe(400);
+    const body = JSON.parse(res.body);
+    expect(body.error).toBe('invalid_status');
+    expect(body.message).toContain('status must be one of');
+  });
+
+  // #413: cache enum 쿼리도 화이트리스트 밖 값은 silent fallback(필터 미적용) 대신 400 (invalid_cache) 으로 거부
+  it('알 수 없는 cache 값은 400 invalid_cache (#413)', async () => {
+    const repo = makeRepo();
+    repo.upsert('a.test', 'https://a.test');
+    const app = buildApp(repo);
+    const res = await app.inject({ method: 'GET', url: '/api/domains/a.test/logs?cache=garbage' });
+    expect(res.statusCode).toBe(400);
+    const body = JSON.parse(res.body);
+    expect(body.error).toBe('invalid_cache');
+    expect(body.message).toContain('cache must be one of');
+  });
+
+  // #413: 화이트리스트 안의 status/cache 값은 정상 동작 (회귀 가드)
+  it('유효한 status 값(5xx/4xx/error)은 200으로 필터링된다 (#413 회귀 가드)', async () => {
+    const repo = makeRepo();
+    repo.upsert('a.test', 'https://a.test');
+    const app = buildApp(repo);
+    const now = Math.floor(Date.now() / 1000);
+    repo.database.prepare(
+      `INSERT INTO access_logs (timestamp, host, method, path, status_code, cache_status, size)
+       VALUES (?, 'a.test', 'GET', '/ok', 200, 'HIT', 100),
+              (?, 'a.test', 'GET', '/err', 500, 'MISS', 100)`,
+    ).run(now - 20, now - 10);
+    const res = await app.inject({ method: 'GET', url: '/api/domains/a.test/logs?status=5xx' });
+    expect(res.statusCode).toBe(200);
+    const rows = JSON.parse(res.body);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status_code).toBe(500);
+  });
+
+  it('유효한 cache 값(hit/miss)은 200으로 필터링된다 (#413 회귀 가드)', async () => {
+    const repo = makeRepo();
+    repo.upsert('a.test', 'https://a.test');
+    const app = buildApp(repo);
+    const now = Math.floor(Date.now() / 1000);
+    repo.database.prepare(
+      `INSERT INTO access_logs (timestamp, host, method, path, status_code, cache_status, size)
+       VALUES (?, 'a.test', 'GET', '/h', 200, 'HIT', 100),
+              (?, 'a.test', 'GET', '/m', 200, 'MISS', 100)`,
+    ).run(now - 20, now - 10);
+    const res = await app.inject({ method: 'GET', url: '/api/domains/a.test/logs?cache=hit' });
+    expect(res.statusCode).toBe(200);
+    const rows = JSON.parse(res.body);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].cache_status).toBe('HIT');
+  });
+
   it('q= 검색어로 path 필터링', async () => {
     const repo = makeRepo();
     repo.upsert('a.test', 'https://a.test');
