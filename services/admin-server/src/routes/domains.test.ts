@@ -2011,3 +2011,76 @@ describe('POST /api/domains/:host/toggle 동시성 (#192)', () => {
     postSpy.mockResolvedValue({ status: 200 });
   });
 });
+
+/**
+ * #420 회귀 방지 — /api/domains/summary 응답의 hourlyCacheHitRate·hourlyBandwidth가
+ * 더 이상 zero-filled placeholder가 아닌 시드 데이터 기반 실제 시계열을 반환해야 한다.
+ * (도입 전: 24개 배열을 항상 0으로 하드코딩 → '캐시 히트율'·'오늘 대역폭' sparkline 영구 평탄)
+ */
+describe('GET /api/domains/summary — hourlyCacheHitRate/hourlyBandwidth 실데이터 (#420)', () => {
+  it('시간대별 cache_hits / bandwidth 가 hourlyRequests 와 동일 인덱스로 합산된다', async () => {
+    const repo = makeRepo();
+    repo.upsert('a.test', 'https://a.test');
+    repo.upsert('b.test', 'https://b.test');
+    const statsRepo = new DomainStatsRepository(repo.database);
+
+    // 동일한 1시간 버킷(현재 시각 자정)에 두 호스트가 각자 다른 통계를 적재
+    // — 합산 후 시간대별 비율(=hit_rate)·바이트(=bandwidth)가 정확히 계산되는지 확인.
+    const todayStart = Math.floor(Date.now() / 1000);
+    const todayStartBucket = (todayStart / 3600) * 3600;
+    statsRepo.insert({
+      host: 'a.test', timestamp: todayStartBucket,
+      requests: 100, cache_hits: 80, cache_misses: 20, bandwidth: 10_000,
+      avg_response_time: 50, l1_hits: 80, l2_hits: 0,
+      bypass_method: 0, bypass_nocache: 0, bypass_size: 0, bypass_other: 0,
+    });
+    statsRepo.insert({
+      host: 'b.test', timestamp: todayStartBucket,
+      requests: 100, cache_hits: 40, cache_misses: 60, bandwidth: 5_000,
+      avg_response_time: 80, l1_hits: 40, l2_hits: 0,
+      bypass_method: 0, bypass_nocache: 0, bypass_size: 0, bypass_other: 0,
+    });
+
+    const app = buildApp(repo);
+    const res = await app.inject({ method: 'GET', url: '/api/domains/summary' });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+
+    // 길이는 항상 24 (sparkline 가시화 정책)
+    expect(body.hourlyCacheHitRate).toHaveLength(24);
+    expect(body.hourlyBandwidth).toHaveLength(24);
+
+    // zero-filled placeholder가 아니어야 한다 — 최소 한 버킷 이상 값이 존재
+    expect(body.hourlyBandwidth.some((v: number) => v > 0)).toBe(true);
+    expect(body.hourlyCacheHitRate.some((v: number) => v > 0)).toBe(true);
+
+    // 적재한 버킷(현재 시간) — 합산: requests=200, cache_hits=120, bandwidth=15_000
+    // 마지막 인덱스가 가장 최근 버킷 (route 핸들러는 slice(-24) + 우측 정렬)
+    const lastIdx = 23;
+    expect(body.hourlyBandwidth[lastIdx]).toBe(15_000);
+    expect(body.hourlyCacheHitRate[lastIdx]).toBeCloseTo(120 / 200, 5);
+    expect(body.hourlyRequests[lastIdx]).toBe(200);
+  });
+
+  it('hourlyRequests=0 인 버킷에선 hourlyCacheHitRate=0 (divide-by-zero 가드)', async () => {
+    const repo = makeRepo();
+    // 도메인은 있으나 통계 데이터 미적재 — 모든 버킷 0
+    repo.upsert('empty.test', 'https://empty.test');
+
+    const app = buildApp(repo);
+    const res = await app.inject({ method: 'GET', url: '/api/domains/summary' });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+
+    expect(body.hourlyCacheHitRate).toHaveLength(24);
+    expect(body.hourlyBandwidth).toHaveLength(24);
+    // 모든 값이 0이고 NaN/Infinity 가 섞이지 않아야 한다
+    for (const v of body.hourlyCacheHitRate as number[]) {
+      expect(Number.isFinite(v)).toBe(true);
+      expect(v).toBe(0);
+    }
+    for (const v of body.hourlyBandwidth as number[]) {
+      expect(v).toBe(0);
+    }
+  });
+});

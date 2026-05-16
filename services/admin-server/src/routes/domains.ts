@@ -288,16 +288,29 @@ export async function domainRoutes(
     const todayBandwidth = perHost.reduce((s, r) => s + r.today_bandwidth, 0);
     const cacheHitRate = todayRequests > 0 ? todayCacheHits / todayRequests : 0;
 
-    // hourly: 전체 도메인의 시간별 요청 합산 (최대 24개 버킷)
+    // hourly: 전체 도메인의 시간별 요청·캐시 히트·대역폭 합산 (최대 24개 버킷)
+    // — sparkline 3종을 같은 인덱스(=같은 시간 버킷) 정렬로 합산해 KPI 카드 3종이 동일 시간축을 공유하도록 한다.
     const maxBuckets = 24;
     const hourlyRequests = Array<number>(maxBuckets).fill(0);
+    const hourlyCacheHits = Array<number>(maxBuckets).fill(0);
+    const hourlyBandwidth = Array<number>(maxBuckets).fill(0);
     for (const r of perHost) {
+      // host별 hourly 배열은 동일 길이·동일 인덱스가 동일 시간 버킷을 가리킨다 (domain-stats-repo의 push 순서 보존).
       const buckets = r.hourly.slice(-maxBuckets);
+      const cacheBuckets = r.hourly_cache_hits.slice(-maxBuckets);
+      const bwBuckets = r.hourly_bandwidth.slice(-maxBuckets);
       const offset = maxBuckets - buckets.length;
       for (let i = 0; i < buckets.length; i++) {
         hourlyRequests[offset + i] += buckets[i];
+        hourlyCacheHits[offset + i] += cacheBuckets[i] ?? 0;
+        hourlyBandwidth[offset + i] += bwBuckets[i] ?? 0;
       }
     }
+
+    // 시간대별 캐시 히트율 = cache_hits / requests (요청 0 버킷은 0으로 — divide-by-zero 가드)
+    const hourlyCacheHitRate = hourlyRequests.map((req, i) =>
+      req > 0 ? hourlyCacheHits[i] / req : 0,
+    );
 
     // perHost에서 delta 집계 — 전체 도메인의 평균 변화율
     const totalTodayRequestsDelta = perHost.length > 0
@@ -335,8 +348,8 @@ export async function domainRoutes(
       cacheHitRateDelta: Math.round(totalHitRateDelta * 10) / 10,
       todayBandwidth,
       hourlyRequests,
-      hourlyCacheHitRate: Array<number>(maxBuckets).fill(0),
-      hourlyBandwidth: Array<number>(maxBuckets).fill(0),
+      hourlyCacheHitRate,
+      hourlyBandwidth,
       alerts: tlsAlerts,
     };
   });

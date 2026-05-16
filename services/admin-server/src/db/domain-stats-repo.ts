@@ -81,6 +81,16 @@ export interface DomainSummary {
   hit_rate: number;
   /** 최근 24시간 시간별 요청 수 배열 (최대 24개) */
   hourly: number[];
+  /**
+   * 최근 24시간 시간별 캐시 히트 수 배열 (최대 24개, hourly와 동일 인덱스 정렬).
+   * 시간대별 캐시 히트율 sparkline 계산용 — route 핸들러에서 hourly_requests로 나눠 비율 산출.
+   */
+  hourly_cache_hits: number[];
+  /**
+   * 최근 24시간 시간별 대역폭(bytes) 배열 (최대 24개, hourly와 동일 인덱스 정렬).
+   * 시간대별 대역폭 sparkline 표시용 — host별 합산이 그대로 시계열 값이 된다.
+   */
+  hourly_bandwidth: number[];
   /** 전일 대비 요청 수 변화율(%) */
   today_requests_delta: number;
   /** 전일 대비 히트율 변화율(%) */
@@ -352,10 +362,13 @@ export class DomainStatsRepository {
     }
 
     // 최근 24시간 시간별 집계 (1시간 버킷)
+    // 시간대별 sparkline 3종(요청/캐시 히트/대역폭)을 한 쿼리에서 모두 집계 — N+1 회피.
     type HourlyRow = {
       host: string;
       bucket: number;
       requests: number;
+      cache_hits: number;
+      bandwidth: number;
     };
 
     const hourlyRows = this.db
@@ -363,7 +376,9 @@ export class DomainStatsRepository {
         `SELECT
            host,
            (timestamp / 3600) * 3600 AS bucket,
-           SUM(requests) AS requests
+           SUM(requests)   AS requests,
+           SUM(cache_hits) AS cache_hits,
+           SUM(bandwidth)  AS bandwidth
          FROM domain_stats
          WHERE timestamp >= ?
          GROUP BY host, bucket
@@ -371,11 +386,19 @@ export class DomainStatsRepository {
       )
       .all(since24h) as HourlyRow[];
 
-    // host별 hourly 맵 구성
+    // host별 hourly 3종 배열 맵 구성 — 동일 인덱스가 동일 시간 버킷을 가리키도록 push 순서 보존.
     const hourlyMap = new Map<string, number[]>();
+    const hourlyCacheHitsMap = new Map<string, number[]>();
+    const hourlyBandwidthMap = new Map<string, number[]>();
     for (const row of hourlyRows) {
-      if (!hourlyMap.has(row.host)) hourlyMap.set(row.host, []);
+      if (!hourlyMap.has(row.host)) {
+        hourlyMap.set(row.host, []);
+        hourlyCacheHitsMap.set(row.host, []);
+        hourlyBandwidthMap.set(row.host, []);
+      }
       hourlyMap.get(row.host)!.push(row.requests);
+      hourlyCacheHitsMap.get(row.host)!.push(row.cache_hits);
+      hourlyBandwidthMap.get(row.host)!.push(row.bandwidth);
     }
 
     return todayRows.map((r) => {
@@ -391,6 +414,8 @@ export class DomainStatsRepository {
         today_bandwidth: r.today_bandwidth,
         hit_rate: todayHitRate,
         hourly: hourlyMap.get(r.host) ?? [],
+        hourly_cache_hits: hourlyCacheHitsMap.get(r.host) ?? [],
+        hourly_bandwidth: hourlyBandwidthMap.get(r.host) ?? [],
         today_requests_delta: this.getDelta(todayReq, yesterdayRequests),
         hit_rate_delta: this.getDelta(todayHitRate, yesterdayHitRate),
         // Phase 12 신규 — divide-by-zero 가드 포함
@@ -459,13 +484,16 @@ export class DomainStatsRepository {
       )
       .get(host, yesterdayStart, todayStart) as YesterdayRow;
 
-    // 최근 24시간 시간별 (1시간 버킷) — host 필터 적용
-    type HourlyRow = { bucket: number; requests: number };
+    // 최근 24시간 시간별 (1시간 버킷) — host 필터 적용.
+    // sparkline 3종(requests/cache_hits/bandwidth)을 한 쿼리에서 함께 집계해 getSummaryAll과 계약 일치.
+    type HourlyRow = { bucket: number; requests: number; cache_hits: number; bandwidth: number };
     const hourlyRows = this.db
       .prepare(
         `SELECT
            (timestamp / 3600) * 3600 AS bucket,
-           SUM(requests)             AS requests
+           SUM(requests)             AS requests,
+           SUM(cache_hits)           AS cache_hits,
+           SUM(bandwidth)            AS bandwidth
          FROM domain_stats
          WHERE host = ? AND timestamp >= ?
          GROUP BY bucket
@@ -487,6 +515,8 @@ export class DomainStatsRepository {
       today_bandwidth: todayRow.today_bandwidth,
       hit_rate: todayHitRate,
       hourly: hourlyRows.map((r) => r.requests),
+      hourly_cache_hits: hourlyRows.map((r) => r.cache_hits),
+      hourly_bandwidth: hourlyRows.map((r) => r.bandwidth),
       today_requests_delta: this.getDelta(todayReq, yesterdayReq),
       hit_rate_delta: this.getDelta(todayHitRate, yesterdayHitRate),
       // Phase 12 신규 — divide-by-zero 가드
