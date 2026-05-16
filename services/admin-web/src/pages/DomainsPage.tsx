@@ -12,6 +12,7 @@ import { AlertDialog, AlertDialogContent, AlertDialogTitle } from '../components
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
+import { getApiError } from '../lib/api';
 import { useDomains } from '../hooks/useDomains';
 import { useAddDomain } from '../hooks/useAddDomain';
 import { useDeleteDomain } from '../hooks/useDeleteDomain';
@@ -37,6 +38,45 @@ import { DomainBulkDeleteDialog } from '../components/domains/DomainBulkDeleteDi
  * - 서버(`routes/domains.ts`)와 동일한 정규식 — 클라이언트는 UX용 사전 차단만 담당
  */
 const DOMAIN_RE = /^(\*\.)?[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/i;
+
+/**
+ * origin URL 최대 길이 — 서버 `routes/domains.ts` ORIGIN_MAX_LENGTH(2083)와 동일 (#423).
+ * RFC 7230 권장 한도이며 서버가 거부하기 전에 클라에서 사전 차단해 사용자에게 즉시 피드백한다.
+ */
+const ORIGIN_MAX_LENGTH = 2083;
+
+/**
+ * origin URL 클라이언트 검증 — 서버 `isValidOrigin`(routes/domains.ts:383)과 동일 규칙 (#423).
+ *
+ * 과거에는 `startsWith('http://'|'https://')` 만 검사해 path/query/fragment/공백/빈 host/
+ * 과도 길이가 모두 통과 → 서버 400 → catch 가 generic 메시지로 덮어써 사용자가 사유를 모르는
+ * UX 회귀가 발생했다. 서버 정책과 1:1 동기화하여 사전에 인라인 에러로 안내한다.
+ *
+ * 검증 항목 (서버와 일치):
+ * - 길이 1~ORIGIN_MAX_LENGTH(2083)
+ * - 공백/탭/개행 미포함 (`http://exa mple.com` 같은 host 중간 공백 차단)
+ * - `new URL()` 파싱 가능
+ * - protocol 이 `http:` 또는 `https:`
+ * - hostname 비어 있지 않음 (`http://`, `https:///` 같은 빈 host 거부)
+ * - path/query/fragment 없음 (origin URL 은 scheme+host[+port] 만 의미)
+ */
+function isValidOrigin(origin: string): boolean {
+  if (origin.length === 0 || origin.length > ORIGIN_MAX_LENGTH) return false;
+  if (/\s/.test(origin)) return false;
+  let url: URL;
+  try {
+    url = new URL(origin);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+  if (!url.hostname) return false;
+  // `new URL()` 은 path 가 없어도 pathname 을 '/' 로 자동 채우므로 '/' 만 허용
+  if (url.pathname !== '' && url.pathname !== '/') return false;
+  if (url.search !== '') return false;
+  if (url.hash !== '') return false;
+  return true;
+}
 
 /**
  * 도메인 추가 다이얼로그 (#421)
@@ -102,8 +142,14 @@ function AddDomainDialog({ open, onOpenChange }: { open: boolean; onOpenChange: 
     if (!o) {
       setOriginError('오리진 URL을 입력해주세요.');
       hasError = true;
-    } else if (!o.startsWith('http://') && !o.startsWith('https://')) {
-      setOriginError('오리진 URL은 http:// 또는 https://로 시작해야 합니다.');
+    } else if (!isValidOrigin(o)) {
+      // 서버 `isValidOrigin` 과 동일한 종합 검증 — protocol/host/path/query/fragment/공백/길이 (#423).
+      // 사용자에게 가장 흔한 실수(scheme 누락, path 포함)를 우선 안내한다.
+      if (!o.startsWith('http://') && !o.startsWith('https://')) {
+        setOriginError('오리진 URL은 http:// 또는 https://로 시작해야 합니다.');
+      } else {
+        setOriginError(`유효한 오리진 URL이 아닙니다. 경로/쿼리/공백 없이 scheme://host[:port] 형식이어야 합니다. (예: https://example.com, 최대 ${ORIGIN_MAX_LENGTH}자)`);
+      }
       hasError = true;
     }
     if (hasError) return;
@@ -115,8 +161,17 @@ function AddDomainDialog({ open, onOpenChange }: { open: boolean; onOpenChange: 
       setHost('');
       setOrigin('');
       onOpenChange(false);
-    } catch {
-      setSubmitError('도메인 추가에 실패했습니다.');
+    } catch (e) {
+      // 서버 표준 envelope (#410) 의 message 를 사용자에게 그대로 전달 — generic 메시지로 사유가 손실되던
+      // UX 회귀(#423) 방지. origin 관련 코드는 origin 필드 인라인 에러로, 그 외는 전역 submitError 로 표시.
+      const { code, message } = getApiError(e);
+      if (code === 'origin_invalid' && message) {
+        setOriginError(message);
+      } else if (code === 'domain_invalid_format' && message) {
+        setHostError(message);
+      } else {
+        setSubmitError(message ?? '도메인 추가에 실패했습니다.');
+      }
     }
   }
 

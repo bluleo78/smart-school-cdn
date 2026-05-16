@@ -618,6 +618,80 @@ test.describe('도메인 관리 — 도메인 추가', () => {
     await expect(page.getByTestId('add-domain-origin-error')).toBeVisible();
   });
 
+  /**
+   * 이슈 #423 회귀 방지 — 클라 검증을 서버 `isValidOrigin` 과 동기화.
+   * 과거에는 path/query/fragment/공백/빈 host/과도 길이가 모두 클라 통과 → 서버 400 → catch 가
+   * generic "도메인 추가에 실패했습니다." 로 덮어써 사용자가 사유를 모르는 회귀가 있었다.
+   *
+   * 각 케이스에서 (a) 인라인 origin 에러 표시 + (b) POST 요청이 발생하지 않음(클라 차단)을 검증.
+   */
+  for (const { name, origin } of [
+    { name: 'path 포함', origin: 'https://example.com/has/path' },
+    { name: 'query 포함', origin: 'https://example.com?x=1' },
+    { name: 'fragment 포함', origin: 'https://example.com#frag' },
+    { name: '빈 host', origin: 'https://' },
+    { name: 'host 중간 공백', origin: 'https:// example.com' },
+  ]) {
+    test(`오리진 URL — ${name} 입력 시 클라 검증이 차단한다 (#423)`, async ({ page }) => {
+      await setupBaseMocks(page);
+      await mockApi(page, 'GET', '/domains', []);
+
+      // POST 요청이 전송되지 않아야 한다(클라 검증 단계에서 차단)
+      let postCalled = false;
+      await page.route('**/api/domains', async (route) => {
+        if (route.request().method() === 'POST') {
+          postCalled = true;
+        }
+        return route.fallback();
+      });
+
+      await page.goto('/domains');
+      await page.getByTestId('toolbar-add-btn').click();
+      await page.getByTestId('add-domain-host').fill('test-mismatch.example');
+      await page.getByTestId('add-domain-origin').fill(origin);
+      await page.getByTestId('add-domain-submit').click();
+
+      // 인라인 origin 에러 표시 + 다이얼로그 유지 + 서버 호출 차단
+      await expect(page.getByTestId('add-domain-origin-error')).toBeVisible();
+      await expect(page.getByTestId('add-domain-dialog')).toBeVisible();
+      expect(postCalled).toBe(false);
+    });
+  }
+
+  /**
+   * 이슈 #423 회귀 방지 — 서버가 400 origin_invalid 를 돌려주면 envelope.message 를 사용자에게 그대로 노출.
+   * 클라 검증이 통과한 케이스(예: 정책 변경)에서도 사유가 사라지지 않도록 catch 의 generic 메시지를 제거.
+   *
+   * mock 사용 이유: 클라 검증이 같이 강화되어 path/공백 등은 서버까지 도달하지 않으므로,
+   * "서버만 거부하는" 시나리오를 재현하려면 POST 응답을 직접 400 origin_invalid 로 모킹해야 한다.
+   */
+  test('서버 400 origin_invalid 응답 시 서버 message 를 origin 인라인 에러로 표시 (#423)', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', []);
+    // 서버가 돌려주는 표준 envelope (#410) — 클라 검증을 우회한 입력이 도달했다고 가정
+    await mockApi(
+      page,
+      'POST',
+      '/domains',
+      { error: 'origin_invalid', message: '유효한 origin URL이 아닙니다. (예: https://example.com, 최대 2083자)' },
+      { status: 400 },
+    );
+
+    await page.goto('/domains');
+    await page.getByTestId('toolbar-add-btn').click();
+    // 클라 검증을 통과하는 정상 origin 으로 입력 (서버만 거부하는 분기 검증)
+    await page.getByTestId('add-domain-host').fill('test-passthrough.example');
+    await page.getByTestId('add-domain-origin').fill('https://example.com');
+    await page.getByTestId('add-domain-submit').click();
+
+    // 서버 message 가 origin 인라인 에러로 노출되어야 한다
+    const originError = page.getByTestId('add-domain-origin-error');
+    await expect(originError).toBeVisible();
+    await expect(originError).toHaveText(/유효한 origin URL이 아닙니다/);
+    // 다이얼로그는 유지(닫히지 않음)
+    await expect(page.getByTestId('add-domain-dialog')).toBeVisible();
+  });
+
   test('host 입력 없이는 제출 버튼이 비활성화된다 (#232)', async ({ page }) => {
     await setupBaseMocks(page);
     await mockApi(page, 'GET', '/domains', []);
