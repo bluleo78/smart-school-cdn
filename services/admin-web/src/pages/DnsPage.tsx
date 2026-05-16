@@ -1,7 +1,7 @@
 /** DNS 관리 페이지 — 디자인 시스템 일관성 리파인
  *  페이지 헤더 + 상태 스트립 + 3개 탭(레코드/통계/최근 쿼리).
  *  SystemPage / DashboardPage / DomainsPage 와 동일한 shadcn/ui · 시맨틱 토큰 패턴을 따른다. */
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { AlertTriangle, BarChart2 } from 'lucide-react';
 import {
@@ -89,6 +89,20 @@ function parseResultFilter(value: string | null): Set<DnsQueryResultLabel> {
   return new Set(valid);
 }
 
+/** ?result= 파라미터가 의미 있는 값인지 판정 — URL self-correction 진단용 (#414).
+ *  - null: 파라미터 자체가 없음 → 정상 (정정 대상 아님)
+ *  - '': 명시적 "모두 OFF" 상태 → 정상 (parseResultFilter가 빈 Set으로 처리)
+ *  - 'matched' 등 유효 라벨이 하나라도 포함 → 정상
+ *  - 'invalid,unknown' 처럼 유효 라벨이 0건인 가비지 → 비정상 (URL 정정 대상)
+ *  parseResultFilter의 가비지 분기(L88)를 호출자가 재현할 수 있도록 분리. */
+function isResultParamValid(value: string | null): boolean {
+  if (value === null) return true;
+  if (value === '') return true;
+  const parts = value.split(',').map(s => s.trim()).filter(Boolean);
+  const valid = parts.filter(s => (VALID_RESULTS as readonly string[]).includes(s));
+  return valid.length > 0;
+}
+
 /** DNS 관리 페이지 루트 — 헤더 + 오프라인 배너 + 상태 스트립 + 3탭 */
 export function DnsPage() {
   const { data: status, error: statusError } = useDnsStatus();
@@ -118,6 +132,35 @@ export function DnsPage() {
     () => parseResultFilter(searchParams.get('result')),
     [searchParams],
   );
+
+  /** URL 파라미터에 잘못된 값이 들어 있으면 화면 폴백과 URL을 일치시키도록 정정한다 (#414).
+   *  DomainDetailTabs(#321) 의 self-correction 패턴을 동일하게 적용 — 잘못된 ?tab/?range/?result
+   *  값이 URL에 그대로 잔존하면 새로고침/북마크/공유 시 화면-URL 불일치가 영구적으로 남는다.
+   *  - 잘못된 ?tab 값(화이트리스트 미해당)은 키 자체를 제거 → records 폴백을 키 부재로 표현
+   *  - 잘못된 ?range 값(1h/24h 외)은 키 자체를 제거 → 1h 폴백
+   *  - ?result 가비지(유효 라벨 0건)는 키 자체를 제거 → 전체 ON 폴백
+   *  history 누적 방지를 위해 replace: true 사용. */
+  useEffect(() => {
+    const tabRaw = searchParams.get('tab');
+    const rangeRaw = searchParams.get('range');
+    const resultRaw = searchParams.get('result');
+    const tabInvalid = tabRaw !== null && !isValidTab(tabRaw);
+    const rangeInvalid = rangeRaw !== null && !isValidRange(rangeRaw);
+    const resultInvalid = !isResultParamValid(resultRaw);
+
+    if (!tabInvalid && !rangeInvalid && !resultInvalid) return;
+
+    setSearchParams(
+      prev => {
+        const next = new URLSearchParams(prev);
+        if (tabInvalid) next.delete('tab');
+        if (rangeInvalid) next.delete('range');
+        if (resultInvalid) next.delete('result');
+        return next;
+      },
+      { replace: true },
+    );
+  }, [searchParams, setSearchParams]);
 
   /** 탭 전환 시 ?tab=<value> 를 URL에 반영한다.
    *  기존 ?range 파라미터는 보존해 통계 탭으로 돌아왔을 때도 동일 range 유지. */

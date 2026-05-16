@@ -695,3 +695,60 @@ test.describe('DNS — 쿼리 추이 차트 empty state (#21)', () => {
     await expect(page.getByText('DNS 쿼리가 들어오면 자동으로 표시됩니다')).toBeVisible();
   });
 });
+
+// ─── 잘못된 URL 파라미터 정리 (#414, #321 self-correction 패턴 누락 보강) ─────
+// 수정 전: 잘못된 ?tab/?range/?result 값이 화면은 안전한 폴백으로 렌더되지만 URL은 그대로 잔존 →
+//          새로고침/북마크/공유 시 화면-URL 불일치가 영구적으로 남음.
+// 수정 후: DnsPage 의 self-correction useEffect 가 잘못된 키를 URL 에서 제거 (replace: true).
+test.describe('DNS — 잘못된 URL 파라미터 정리 (#414)', () => {
+  test('알려지지 않은 ?tab 값은 URL에서 제거되고 레코드 탭으로 폴백한다', async ({ page }) => {
+    await mockDnsDefaults(page);
+    await page.goto('/dns?tab=bogus');
+
+    // 레코드 탭이 활성 상태
+    await expect(page.getByTestId('tab-records')).toHaveAttribute('aria-selected', 'true');
+    // URL 에서 잘못된 tab 키가 사라져야 한다 (replace 적용 — history 누적 없음)
+    await expect.poll(() => new URL(page.url()).searchParams.get('tab')).toBeNull();
+  });
+
+  test('잘못된 ?range 값은 URL에서 제거되고 1시간으로 폴백한다', async ({ page }) => {
+    await mockDnsDefaults(page);
+    await page.goto('/dns?tab=stats&range=bogus');
+
+    // stats 탭은 유지, range 키는 제거
+    await expect(page.getByTestId('tab-stats')).toHaveAttribute('aria-selected', 'true');
+    await expect.poll(() => new URL(page.url()).searchParams.get('range')).toBeNull();
+    await expect(page.getByRole('button', { name: '1시간' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
+
+  test('유효 라벨이 0건인 ?result 가비지는 URL에서 제거된다', async ({ page }) => {
+    await mockDnsDefaults(page);
+    await page.goto('/dns?tab=queries&result=invalid,unknown');
+
+    // queries 탭은 유지, result 키는 제거 (전체 ON 폴백)
+    await expect(page.getByTestId('tab-queries')).toHaveAttribute('aria-selected', 'true');
+    await expect.poll(() => new URL(page.url()).searchParams.get('result')).toBeNull();
+  });
+
+  test('유효 라벨이 일부 포함된 ?result 는 정리되지 않고 그대로 보존된다', async ({ page }) => {
+    await mockDnsDefaults(page);
+    // matched 는 유효 라벨이므로 가비지가 섞여 있어도 사용자의 의도(matched 활성)는 보존
+    await page.goto('/dns?tab=queries&result=matched,bogus');
+
+    await expect(page.getByTestId('tab-queries')).toHaveAttribute('aria-selected', 'true');
+    // result 키는 정정 대상이 아님 — 가비지 silent drop 은 parseResultFilter 가 처리
+    await expect.poll(() => new URL(page.url()).searchParams.get('result')).toBe('matched,bogus');
+  });
+
+  test('빈 ?result= (모두 OFF) 는 정리되지 않고 그대로 보존된다', async ({ page }) => {
+    await mockDnsDefaults(page);
+    // 사용자가 명시적으로 모든 필터를 끈 상태 — URL self-correction 대상이 아님
+    await page.goto('/dns?tab=queries&result=');
+
+    await expect(page.getByTestId('tab-queries')).toHaveAttribute('aria-selected', 'true');
+    await expect.poll(() => new URL(page.url()).searchParams.get('result')).toBe('');
+  });
+});
