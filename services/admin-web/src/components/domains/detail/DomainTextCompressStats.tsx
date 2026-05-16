@@ -94,12 +94,45 @@ export function DomainTextCompressStats({ host, period = '30d' }: Props) {
     );
   }
 
-  /** by_decision 누적 합산 — 원본/출력 바이트, 평균 절감률 산출 */
-  const totalOrig = data?.by_decision.reduce((s, r) => s + r.total_orig, 0) ?? 0;
-  const totalOut = data?.by_decision.reduce((s, r) => s + r.total_out, 0) ?? 0;
+  /**
+   * 실제로 압축된 이벤트(compressed_br / compressed_gzip)만으로 합계/절감률을 계산한다 (#409).
+   * skipped_small/skipped_type/error 등 비압축 decision의 total_out은 압축 결과 바이트가 아니라
+   * seed/proxy 측 다른 값(또는 미압축 원본)이라, 분모/분자에 포함되면 절감률이 왜곡된다.
+   * '처리 이벤트' 카드와 동일한 화이트리스트(br+gzip)를 적용하여 세 카드의 모집단을 일치시킨다.
+   */
+  const compressed = data.by_decision.filter(
+    (r) => r.decision === 'compressed_br' || r.decision === 'compressed_gzip',
+  );
+  const totalOrig = compressed.reduce((s, r) => s + r.total_orig, 0);
+  const totalOut = compressed.reduce((s, r) => s + r.total_out, 0);
   const savings = totalOrig > 0 ? 1 - totalOut / totalOrig : 0;
-  const brCount = data?.by_decision.find((r) => r.decision === 'compressed_br')?.count ?? 0;
-  const gzipCount = data?.by_decision.find((r) => r.decision === 'compressed_gzip')?.count ?? 0;
+  const brCount = data.by_decision.find((r) => r.decision === 'compressed_br')?.count ?? 0;
+  const gzipCount = data.by_decision.find((r) => r.decision === 'compressed_gzip')?.count ?? 0;
+
+  /**
+   * 압축 이벤트가 0건이면 빈 상태로 폴백 — 위 빈 상태 분기와 동일한 시각 처리.
+   * (예: 전부 skipped/error 인 경우 "0 B → 0 B / 0.0%" 가 아니라 안내문구를 보여준다)
+   */
+  if (compressed.length === 0) {
+    return (
+      <Card data-testid="text-compress-stats">
+        <CardHeader>
+          <CardTitle className="text-base font-semibold">텍스트 압축 ({PERIOD_LABEL[period] ?? period} 누적)</CardTitle>
+          <p className="text-sm text-muted-foreground">Phase 15 brotli/gzip 프리컴프레스 결과</p>
+        </CardHeader>
+        <CardContent>
+          <div
+            className="flex flex-col items-center justify-center gap-2 rounded-md border border-dashed py-6 text-muted-foreground"
+            data-testid="text-compress-stats-empty"
+          >
+            <FileText size={32} className="opacity-30" />
+            <p className="text-sm">아직 데이터가 없습니다</p>
+            <p className="text-xs">텍스트 압축이 실행되면 자동으로 표시됩니다</p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card data-testid="text-compress-stats">

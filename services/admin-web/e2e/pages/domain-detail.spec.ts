@@ -1569,6 +1569,53 @@ test.describe('도메인 상세 — 통계 탭', () => {
   });
 
   /**
+   * 이슈 #409 회귀 방지 — '원본→압축'/'평균 절감' 카드가 skipped_(small|type)/error 이벤트 바이트까지 합산하던 버그.
+   * 수정 전: 모든 by_decision 의 total_orig/total_out 합산 → 절감률 과대 표시 (이벤트 카드와 모집단 불일치)
+   * 수정 후: compressed_br + compressed_gzip 만 필터링하여 합산 → 카드 3개 모두 동일 모집단
+   *
+   * 시나리오: skipped_small / skipped_type / error 까지 섞인 응답에서
+   *   - 처리 이벤트:  br(2) + gzip(2) = 4
+   *   - 원본→압축:   (br.total_orig + gzip.total_orig) = 200 → (br.total_out + gzip.total_out) = 60
+   *   - 평균 절감:   1 - 60/200 = 70.0%
+   * 만약 전체 decision 합산이라면 절감률은 1 - (60+90+80) / (200+100+100+50) = 1 - 230/450 ≈ 48.9% 가 되어
+   * "70.0%" 단언이 깨지게 되므로 회귀 가드로 충분하다.
+   */
+  test('텍스트 압축 통계 카드 — skipped/error decision 은 합계/절감률에서 제외된다 (회귀: #409)', async ({ page }) => {
+    await setupDetailMocks(page);
+
+    // skipped_small / skipped_type / error 가 섞인 응답으로 mock 오버라이드.
+    // 이 mock 은 실제 버그 조건을 재현한다: 비압축 decision 의 total_out 이 합계에 포함되면 절감률 왜곡.
+    await page.unroute('**/api/optimization/stats*');
+    await page.route('**/api/optimization/stats*', (route) =>
+      route.fulfill({
+        json: {
+          total: 7,
+          by_decision: [
+            { decision: 'compressed_br', count: 2, total_orig: 100, total_out: 30 },
+            { decision: 'compressed_gzip', count: 2, total_orig: 100, total_out: 30 },
+            // 아래 3개는 합계/절감률 계산에서 제외되어야 한다.
+            { decision: 'skipped_small', count: 1, total_orig: 100, total_out: 90 },
+            { decision: 'skipped_type', count: 1, total_orig: 100, total_out: 80 },
+            { decision: 'error', count: 1, total_orig: 50, total_out: 50 },
+          ],
+        },
+      }),
+    );
+
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '최적화' }).click();
+
+    const statsCard = page.getByTestId('text-compress-stats');
+    await expect(statsCard).toBeVisible();
+    // br + gzip count = 4 — 처리 이벤트 카드
+    await expect(statsCard).toContainText('br 2 · gzip 2');
+    // 절감률: 1 - 60/200 = 70.0% (skipped/error 포함 시 ~48.9% 가 나오면 회귀)
+    await expect(statsCard).toContainText('70.0%');
+    // skipped/error 포함 시 발생하던 잘못된 절감률(예: 48.9%)이 노출되지 않아야 한다
+    await expect(statsCard).not.toContainText('48.9%');
+  });
+
+  /**
    * 이슈 #53 회귀 방지 — 텍스트 압축 통계 카드가 PeriodSelector 무시하고 항상 30d 조회
    * 수정 후: PeriodSelector 기간 변경 시 텍스트 압축 카드 제목과 API 요청 period가 함께 바뀌어야 한다.
    */
