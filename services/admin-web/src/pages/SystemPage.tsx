@@ -2,7 +2,7 @@
  * Card·Skeleton 기반, 에러 상태 처리, formatUptime 공통 유틸 사용
  * 마이크로서비스 상태 그리드 + 장애 배너 추가
  */
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router';
 import { toast } from 'sonner';
@@ -108,18 +108,37 @@ export function SystemPage() {
       return ax - bx;
     });
   }, [certificates]);
-  // 검색어로 필터링된 인증서 목록 — 도메인 substring 매칭(대소문자 무시).
-  // 검색어 공백 trim 후 빈 문자열이면 전체 노출. sortedCertificates 정렬 결과 위에 적용해
-  // 만료/임박 우선 노출 정책을 유지한다.
-  const filteredCertificates = useMemo(() => {
-    if (!sortedCertificates) return sortedCertificates;
-    const q = certSearchQuery.trim().toLowerCase();
-    if (!q) return sortedCertificates;
-    return sortedCertificates.filter((c) => c.domain.toLowerCase().includes(q));
-  }, [sortedCertificates, certSearchQuery]);
   // 검색 input 노출 여부 — 임계(10건) 초과 시에만 노출해 적은 환경에서는 UI 단순 유지.
   const showCertSearch =
     !!sortedCertificates && sortedCertificates.length > CERT_TABLE_PAGINATION_THRESHOLD;
+  // 검색어로 필터링된 인증서 목록 — 도메인 substring 매칭(대소문자 무시).
+  // 검색어 공백 trim 후 빈 문자열이면 전체 노출. sortedCertificates 정렬 결과 위에 적용해
+  // 만료/임박 우선 노출 정책을 유지한다.
+  //
+  // 임계(10건) 이하에서는 검색 input이 미노출이므로 필터도 적용하지 않는다(#422).
+  // 그렇지 않으면 ?certQ=... 공유 링크로 진입 시 필터는 살아있지만 해제 UI가 없어
+  // 사용자가 "검색 결과가 없습니다" 또는 일부 누락된 목록만 보게 되는 silent 필터 상태가 발생한다.
+  // URL의 ?certQ= 파라미터 자체도 아래 useEffect에서 strip한다 (DomainsPage hasInvalidEnabled 패턴).
+  const filteredCertificates = useMemo(() => {
+    if (!sortedCertificates) return sortedCertificates;
+    if (!showCertSearch) return sortedCertificates; // 검색 UI 미노출 시 필터 무력화 (#422)
+    const q = certSearchQuery.trim().toLowerCase();
+    if (!q) return sortedCertificates;
+    return sortedCertificates.filter((c) => c.domain.toLowerCase().includes(q));
+  }, [sortedCertificates, certSearchQuery, showCertSearch]);
+
+  // 임계 이하에서 ?certQ= 파라미터가 URL에 남아있으면 strip — 검색 UI가 노출되지 않으므로
+  // 해제 수단이 없어진 silent 필터 상태를 방지한다 (#422). 인증서가 늘어나 임계를 넘어가는
+  // 시점에 다시 ?certQ= 가 의미를 갖도록, sortedCertificates 로드 후에만 동작한다.
+  // DomainsPage hasInvalidEnabled useEffect와 동일하게 replace로 히스토리 오염 방지.
+  useEffect(() => {
+    if (!sortedCertificates) return; // 로딩/에러 중에는 URL 보존
+    if (showCertSearch) return; // 임계 초과 — 검색 UI 노출되므로 ?certQ= 유효
+    if (!searchParams.has('certQ')) return;
+    const next = new URLSearchParams(searchParams);
+    next.delete('certQ');
+    setSearchParams(next, { replace: true });
+  }, [sortedCertificates, showCertSearch, searchParams, setSearchParams]);
   // isLoading: 첫 요청이 완료되기 전 true — 로딩 중엔 Skeleton으로 대체해
   // systemStatus=undefined 시 ?? true fallback으로 오표시되는 버그(#139) 방지
   const { data: systemStatus, isLoading: systemStatusLoading } = useSystemStatus();

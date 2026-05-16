@@ -398,6 +398,34 @@ test.describe('발급된 인증서 목록', () => {
     await expect(page.getByTestId('certificates-count')).toHaveText('15 / 15건');
   });
 
+  /// 회귀 방지 #422: 인증서 ≤10건 환경에서 ?certQ= 로 진입하면 검색 input 미노출 + silent
+  /// 필터 적용으로 해제 불가했던 버그. 임계 이하에서는 필터를 무력화하고 URL의 ?certQ= 도 strip한다.
+  test('인증서 10건 이하에서 ?certQ= 로 진입해도 silent 필터가 적용되지 않고 URL 파라미터가 strip된다 — 회귀 방지 #422', async ({ page }) => {
+    const now = Date.now();
+    const issued = new Date(now - 86_400_000).toISOString();
+    // 5건 — 임계 이하
+    const certs = Array.from({ length: 5 }, (_, i) => ({
+      domain: `domain-${i}.test`,
+      issued_at: issued,
+      expires_at: new Date(now + (i + 1) * 86_400_000).toISOString(),
+    }));
+    await mockApi(page, 'GET', '/tls/certificates', certs);
+    // 매칭되지 않는 검색어로 진입 — 버그가 있었다면 "검색 결과가 없습니다"만 보이고
+    // 검색 input이 없어 해제 불가 상태가 된다.
+    await page.goto('/system?certQ=zzznomatch');
+
+    // 테이블이 정상적으로 렌더되어야 한다 (필터가 무력화되어 5건 전부 노출)
+    await expect(page.getByTestId('certificates-table')).toBeVisible({ timeout: 10000 });
+    const rows = page.getByTestId('certificates-table').locator('tbody tr');
+    await expect(rows).toHaveCount(5);
+    // silent 필터로 인한 "검색 결과 없음" 상태가 발생하지 않아야 한다
+    await expect(page.getByTestId('certificates-search-empty')).toHaveCount(0);
+    // 임계 이하이므로 검색 input은 여전히 미노출 (디자인 일관성 유지)
+    await expect(page.getByTestId('certificates-search')).toHaveCount(0);
+    // URL에서 ?certQ= 파라미터가 strip되어 있어야 한다 (공유 링크 오염 방지)
+    await expect(page).not.toHaveURL(/[?&]certQ=/);
+  });
+
   /// 회귀 방지 #301: ?certQ=... 으로 진입한 URL에서 입력값이 즉시 복원되어야 한다 (공유 링크 시나리오).
   test('?certQ= 쿼리로 진입 시 검색어가 자동 복원된다 — 회귀 방지 #301', async ({ page }) => {
     const now = Date.now();
