@@ -1823,6 +1823,28 @@ test.describe('도메인 상세 — Logs 탭', () => {
     await expect(statsCard).not.toContainText('아직 데이터가 없습니다');
   });
 
+  test('최적화 프로파일 조회 실패 시 에러 메시지가 표시되고 활성화 버튼이 노출되지 않는다 (회귀: #246)', async ({ page }) => {
+    // 버그: isError 미사용으로 data=undefined가 null(미설정)과 구분되지 않아 "최적화 미설정" 분기로 빠짐.
+    // 그 결과 [기본값으로 활성화] 버튼 클릭 시 실제 프로파일이 quality=85/max_width=0으로 덮어쓰여짐.
+    // 수정 후: isError=true → "최적화 정보를 불러올 수 없습니다" 표시, 활성화 버튼 숨김.
+    await setupDetailMocks(page);
+    // 최적화 프로파일 엔드포인트만 500으로 오버라이드
+    await page.route('**/api/optimizer/profiles*', (route) =>
+      route.fulfill({ status: 500, json: { error: 'Internal Server Error' } }),
+    );
+    await page.goto('/domains/textbook.com?tab=settings');
+
+    const section = page.getByTestId('domain-optimizer-section');
+    await expect(section).toBeVisible();
+    // 에러 메시지가 표시되어야 한다
+    await expect(section.getByTestId('optimizer-error-message')).toContainText(
+      '최적화 정보를 불러올 수 없습니다',
+    );
+    // 거짓 미설정 UI 및 위험한 활성화 버튼이 표시되면 안 된다
+    await expect(section).not.toContainText('최적화 미설정');
+    await expect(section.getByTestId('optimizer-activate-btn')).toHaveCount(0);
+  });
+
   test('요청 추이 차트 API 실패 시 에러 메시지가 표시된다 (회귀: #153)', async ({ page }) => {
     // 버그: isError 미사용으로 API 실패 시 스켈레톤이 무한 유지됨
     // 수정 후: isError=true → "요청 추이를 불러올 수 없습니다" 표시

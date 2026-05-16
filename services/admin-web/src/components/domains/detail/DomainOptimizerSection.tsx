@@ -16,7 +16,10 @@ interface Props {
 }
 
 export function DomainOptimizerSection({ host }: Props) {
-  const { data: profile, isLoading } = useOptimizerProfile(host);
+  // isError를 함께 destructure하여 API 실패 시 에러 상태를 명시적으로 처리한다 (#246).
+  // 누락 시 data=undefined가 "프로파일 미설정"(null)과 구분되지 않아 [기본값으로 활성화] 버튼이 노출되고,
+  // 사용자가 누르면 실제 존재하던 프로파일을 quality=85/max_width=0으로 덮어쓰는 정합성 문제 발생.
+  const { data: profile, isLoading, isError } = useOptimizerProfile(host);
   const updateMutation = useUpdateOptimizerProfile();
 
   // 편집 중인 로컬 상태.
@@ -113,6 +116,16 @@ export function DomainOptimizerSection({ host }: Props) {
       <CardContent>
         {isLoading ? (
           <p className="text-xs text-muted-foreground">로드 중...</p>
+        ) : isError ? (
+          /* API 실패 시 — 자매 컴포넌트(DomainCacheCards #154, DomainOptimizationStats #153)와 동일 패턴.
+             "최적화 미설정" 분기로 빠지면 [기본값으로 활성화] 버튼이 노출되어 기존 프로파일을
+             기본값으로 덮어쓸 위험이 있으므로, 에러 상태에서는 명시적으로 차단한다 (#246). */
+          <p
+            className="text-sm text-destructive"
+            data-testid="optimizer-error-message"
+          >
+            최적화 정보를 불러올 수 없습니다
+          </p>
         ) : profile ? (
           /* 프로파일 있으면 편집 폼 표시 */
           <div className="space-y-3">
