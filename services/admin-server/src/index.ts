@@ -276,7 +276,27 @@ await app.register(cookie);
 // rate-limit 플러그인 — global: false 로 등록해 라우트별 개별 설정만 동작하도록 한다.
 // 전역 적용 시 SSE 스트림·내부 서비스간 호출·헬스체크 등이 제한될 수 있어 명시적 opt-in 방식 채택.
 // 주의: 리버스 프록시(nginx) 뒤 배포 시 실제 클라이언트 IP를 얻으려면 trustProxy 설정 필요.
-await app.register(rateLimit, { global: false });
+//
+// errorResponseBuilder — 표준 에러 envelope({ error, message }) 강제 (#327, #416).
+// 기본 응답은 raw Fastify shape({statusCode, error: "Too Many Requests", message}) 으로
+// `error` 필드가 사람 친화 문자열이라 admin-web parseApiError 가 머신 코드로 분기 불가.
+//
+// Error 인스턴스를 throw 하도록 builder 를 작성한다. 그러면 setErrorHandler
+// (error-handlers.ts) 가 catch 해서 err.code → envelope.error 로 매핑하고
+// raw Fastify shape 의 추가 필드(statusCode/error="Too Many Requests")는 제거된다.
+// Retry-After / x-ratelimit-* 헤더는 플러그인이 자동 부착.
+await app.register(rateLimit, {
+  global: false,
+  errorResponseBuilder: (_req, ctx) => {
+    const err = new Error(`요청이 너무 잦습니다. ${ctx.after} 후 다시 시도하세요.`) as Error & {
+      statusCode: number;
+      code: string;
+    };
+    err.statusCode = 429;
+    err.code = 'rate_limit_exceeded';
+    return err;
+  },
+});
 
 // preHandler 훅 — 등록 순서가 실행 순서. 토큰 검사를 먼저 수행해
 // /internal/* 의 인증 실패가 즉시 401 로 끊기도록 한다.
@@ -350,6 +370,11 @@ app.get('/api/health', async () => {
   return { status: 'ok' };
 });
 
+// 에러 응답 envelope 통일 (#175) — not-found / schema validation / 미잡힌 throw 정규화.
+// Fastify v5 의 setErrorHandler 는 이후 등록되는 라우트에 적용되므로 라우트 register 호출
+// **이전** 에 등록한다 (#416 — rate-limit Error throw 가 envelope 으로 변환되도록).
+registerErrorHandlers(app);
+
 /** 프록시 상태/로그 API 라우트 등록 */
 await app.register(proxyRoutes, { domainRepo });
 
@@ -388,9 +413,6 @@ await app.register(usersRoutes, { userRepo });
 
 /** 서비스간 내부 호출 라우트 — requireInternalToken 보호 */
 await app.register(internalRoutes, { domainRepo });
-
-// 에러 응답 envelope 통일 (#175) — not-found / schema validation / 미잡힌 throw 정규화
-registerErrorHandlers(app);
 
 const port = Number(process.env.PORT) || 4001;
 

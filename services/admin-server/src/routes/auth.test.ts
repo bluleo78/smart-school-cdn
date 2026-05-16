@@ -8,6 +8,7 @@ import { UserRepository, USER_SCHEMA } from '../db/user-repo.js';
 import { requireAuth } from '../auth/require-auth.js';
 import { SESSION_COOKIE_NAME, signSessionToken } from '../auth/jwt.js';
 import { hashPassword } from '../auth/password.js';
+import { registerErrorHandlers } from '../error-handlers.js';
 
 async function buildApp(): Promise<{ app: FastifyInstance; userRepo: UserRepository }> {
   process.env.JWT_SECRET = 'test-secret-'.repeat(4);
@@ -19,7 +20,21 @@ async function buildApp(): Promise<{ app: FastifyInstance; userRepo: UserReposit
   await app.register(cookie);
   // rate-limit 플러그인 등록 — global: false 로 라우트 개별 설정만 동작.
   // 테스트 환경에서는 낮은 windowMs 를 사용해 테스트 속도를 유지한다.
-  await app.register(rateLimit, { global: false });
+  // errorResponseBuilder 는 prod(index.ts)와 동일하게 표준 envelope({error,message}) 강제 (#416).
+  await app.register(rateLimit, {
+    global: false,
+    errorResponseBuilder: (_req, ctx) => {
+      const err = new Error(`요청이 너무 잦습니다. ${ctx.after} 후 다시 시도하세요.`) as Error & {
+        statusCode: number;
+        code: string;
+      };
+      err.statusCode = 429;
+      err.code = 'rate_limit_exceeded';
+      return err;
+    },
+  });
+  // setErrorHandler — prod 와 동일하게 4xx envelope 매핑을 거치도록 등록 (#327).
+  registerErrorHandlers(app);
   app.addHook('preHandler', requireAuth);
   await app.register(authRoutes, { userRepo });
   return { app, userRepo };
@@ -187,6 +202,13 @@ describe('authRoutes', () => {
       });
       expect(r.statusCode).toBe(429);
       expect(r.headers['retry-after']).toBeDefined();
+      // 표준 에러 envelope({error, message}) 준수 (#327, #416).
+      // raw Fastify shape({statusCode, error: 'Too Many Requests', message}) 는 금지.
+      const body = r.json();
+      expect(body.error).toBe('rate_limit_exceeded');
+      expect(typeof body.message).toBe('string');
+      expect(body.message).toMatch(/요청이 너무 잦습니다/);
+      expect(body.statusCode).toBeUndefined();
     });
   });
 
