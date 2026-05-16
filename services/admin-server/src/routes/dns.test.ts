@@ -188,4 +188,16 @@ describe('dnsRoutes', () => {
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toBe('invalid_input');
   });
+
+  // #410 회귀 — invalid_input envelope에 사용자 표시용 message 필드가 포함되어야 한다 (#327 표준).
+  // message 누락 시 admin-web parseApiError가 "오류가 발생했습니다"로 폴백 → 어떤 필드가 잘못됐는지 알 수 없음.
+  it('GET /api/dns/queries?limit=-1 — invalid_input 응답에 message 필드 포함 (#410)', async () => {
+    const { app } = mkApp();
+    const res = await app.inject({ method: 'GET', url: '/api/dns/queries?limit=-1' });
+    expect(res.statusCode).toBe(400);
+    const body = res.json();
+    expect(body.error).toBe('invalid_input');
+    expect(typeof body.message).toBe('string');
+    expect(body.message.length).toBeGreaterThan(0);
+  });
 });

@@ -74,6 +74,21 @@ describe('GET /api/logs/:service', () => {
     expect(res.statusCode).toBe(400);
   });
 
+  // #410 회귀 — invalid_input envelope에 사용자 표시용 message 필드가 포함되어야 한다 (#327 표준).
+  // message 누락 시 admin-web parseApiError가 "오류가 발생했습니다"로 폴백 → 어떤 필드가 잘못됐는지 알 수 없음.
+  it('tail=-1 — invalid_input 응답에 message 필드 포함 (#410)', async () => {
+    const app = await createApp();
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/logs/admin?tail=-1&follow=false',
+    });
+    expect(res.statusCode).toBe(400);
+    const body = res.json();
+    expect(body.error).toBe('invalid_input');
+    expect(typeof body.message).toBe('string');
+    expect(body.message.length).toBeGreaterThan(0);
+  });
+
   it('허용된 서비스명 6개를 모두 수락한다', async () => {
     const services = ['proxy', 'storage', 'tls', 'dns', 'optimizer', 'admin'];
     const app = await createApp();

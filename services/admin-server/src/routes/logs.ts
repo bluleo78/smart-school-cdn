@@ -146,7 +146,13 @@ export async function logRoutes(app: FastifyInstance) {
     // /api/cache/popular(limit) · /api/dns/queries(limit) 와 동일한 zod coerce 패턴 — 정책 일관성 확보.
     const parsed = logsQuerySchema.safeParse(request.query);
     if (!parsed.success) {
-      return reply.status(400).send({ error: 'invalid_input', issues: parsed.error.issues });
+      // 표준 envelope (#327): 머신 코드 `error` + 사용자 표시용 `message` 필수.
+      // admin-web parseApiError가 message를 토스트에 노출하므로 어떤 필드가 잘못됐는지 즉시 보여준다 (#382, #410).
+      return reply.status(400).send({
+        error: 'invalid_input',
+        message: 'tail은 1~500 정수여야 합니다.',
+        issues: parsed.error.issues,
+      });
     }
     const { tail, follow } = parsed.data;
     const dockerSocket = process.env.DOCKER_SOCKET ?? '/var/run/docker.sock';

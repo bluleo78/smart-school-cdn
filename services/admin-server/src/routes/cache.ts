@@ -173,7 +173,13 @@ export async function cacheRoutes(app: FastifyInstance) {
   app.get<{ Querystring: { limit?: string; domain?: string } }>('/api/cache/popular', async (request, reply) => {
     const parsed = popularQuerySchema.safeParse(request.query);
     if (!parsed.success) {
-      return reply.status(400).send({ error: 'invalid_input', issues: parsed.error.issues });
+      // 표준 envelope (#327): 머신 코드 `error` + 사용자 표시용 `message` 필수.
+      // admin-web parseApiError가 message를 토스트에 노출하므로 어떤 필드가 잘못됐는지 즉시 보여준다 (#382, #410).
+      return reply.status(400).send({
+        error: 'invalid_input',
+        message: 'limit은 1~100 정수여야 합니다.',
+        issues: parsed.error.issues,
+      });
     }
     const { limit, domain } = parsed.data;
     try {

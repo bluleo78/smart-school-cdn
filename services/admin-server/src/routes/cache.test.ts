@@ -310,6 +310,18 @@ describe('GET /api/cache/popular', () => {
       expect(mock.popular).not.toHaveBeenCalled();
     });
 
+    it('invalid_input 응답은 사용자 표시용 message 필드를 포함한다 (#410, #327)', async () => {
+      // admin-web parseApiError가 message 필드를 토스트에 노출하므로 — 누락 시 "오류가 발생했습니다"로 폴백되어
+      // 어떤 필드가 잘못됐는지 운영자가 알 수 없게 된다. message 누락은 #327 표준 envelope 위반.
+      const { app } = makeAppWithMock();
+      const res = await app.inject({ method: 'GET', url: '/api/cache/popular?limit=-1' });
+      expect(res.statusCode).toBe(400);
+      const body = res.json();
+      expect(body.error).toBe('invalid_input');
+      expect(typeof body.message).toBe('string');
+      expect(body.message.length).toBeGreaterThan(0);
+    });
+
     it('limit이 정상 범위(1~100)면 200 + 정수화된 값으로 storage 호출', async () => {
       const { app, mock } = makeAppWithMock();
       const res = await app.inject({ method: 'GET', url: '/api/cache/popular?limit=50' });
