@@ -38,7 +38,21 @@ import { DomainBulkDeleteDialog } from '../components/domains/DomainBulkDeleteDi
  */
 const DOMAIN_RE = /^(\*\.)?[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/i;
 
-function AddDomainDialog({ onClose }: { onClose: () => void }) {
+/**
+ * 도메인 추가 다이얼로그 (#421)
+ *
+ * 구조: Dialog/DialogContent 를 컴포넌트 내부에서 직접 렌더링한다.
+ * 이유: mutation 핸들(`addDomain`)이 컴포넌트 내부에 있어야 ESC/백드롭/X/취소 4개 닫기 경로 모두에
+ *      `isPending` 가드를 일관되게 걸 수 있다. 과거에는 외부 `<Dialog open onClose>` 래퍼가
+ *      DomainsPage 본체에 있어 mutation 상태에 접근하지 못해 silent close 가 발생했다 (#421).
+ *      DomainBulkAddDialog 와 동일한 패턴으로 정리.
+ *
+ * 가드 지점:
+ * - DialogContent disableClose={addDomain.isPending} → X 버튼 disabled
+ * - Dialog onClose 핸들러에서 isPending 이면 닫기 무시 → ESC/백드롭 차단
+ * - 취소 버튼 disabled={addDomain.isPending} → 클릭 차단
+ */
+function AddDomainDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const [host, setHost] = useState('');
   const [origin, setOrigin] = useState('');
   // 필드별 개별 에러 상태 — 각 입력 필드 바로 아래에 인라인으로 표시하기 위해 분리
@@ -47,6 +61,21 @@ function AddDomainDialog({ onClose }: { onClose: () => void }) {
   // 서버 오류 등 전역 에러(어느 필드에 귀속시키기 어려운 경우)
   const [submitError, setSubmitError] = useState<string | null>(null);
   const addDomain = useAddDomain();
+
+  /**
+   * 닫기 공통 핸들러 — mutation 진행 중에는 모든 닫기 경로(ESC/백드롭/X/취소)를 무시한다 (#421).
+   * 외부 Wrapper 가 useState 를 보존하므로 닫힘 직전 입력값/에러 상태를 직접 리셋해
+   * 재오픈 시 잔존을 방지한다 (DomainBulkAddDialog #170 패턴과 동일).
+   */
+  const handleClose = () => {
+    if (addDomain.isPending) return;
+    setHost('');
+    setOrigin('');
+    setHostError(null);
+    setOriginError(null);
+    setSubmitError(null);
+    onOpenChange(false);
+  };
 
   async function handleSubmit(e: React.SyntheticEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -82,84 +111,95 @@ function AddDomainDialog({ onClose }: { onClose: () => void }) {
     try {
       await addDomain.mutateAsync({ host: h, origin: o });
       toast.success(`${h} 도메인이 추가되었습니다.`);
-      onClose();
+      // 성공 시 입력값/에러 잔존 방지 (#421) — handleClose 와 동일 리셋 흐름
+      setHost('');
+      setOrigin('');
+      onOpenChange(false);
     } catch {
       setSubmitError('도메인 추가에 실패했습니다.');
     }
   }
 
   return (
-    <DialogContent data-testid="add-domain-dialog">
-      <DialogTitle>도메인 추가</DialogTitle>
-      <form onSubmit={handleSubmit} className="space-y-3">
-        <div className="space-y-1">
-          {/* 필수 필드 라벨 — text-foreground + * 표시로 시각 위계 명확히 (이슈 #22) */}
-          <label htmlFor="add-host" className="text-sm font-medium text-foreground">
-            도메인 <span className="text-destructive" aria-hidden="true">*</span>
-          </label>
-          <Input
-            id="add-host"
-            value={host}
-            // 입력 즉시 lowercase 로 표시 — DNS host 가 case-insensitive 이므로 사용자가 친 대문자도
-            // 소문자로 보이도록 즉각 정규화 (#201). 서버는 어차피 lowercase 로 저장한다.
-            onChange={(e) => { setHost(e.target.value.toLowerCase()); setHostError(null); }}
-            placeholder="textbook.com 또는 *.textbook.com"
-            data-testid="add-domain-host"
-            // autoFocus 제거 — Radix DialogContent의 onOpenAutoFocus가 첫 포커스를 처리한다.
-            // native autoFocus는 Radix FocusScope useEffect보다 먼저 실행되어
-            // 트리거 버튼으로의 포커스 복귀(WCAG 2.4.3)를 깨뜨린다 (이슈 #29).
-          />
-          {/* 도메인 필드 인라인 에러 */}
-          {hostError && (
-            <p className="text-xs text-destructive" data-testid="add-domain-host-error">
-              {hostError}
+    <Dialog open={open} onClose={handleClose}>
+      <DialogContent data-testid="add-domain-dialog" disableClose={addDomain.isPending}>
+        <DialogTitle>도메인 추가</DialogTitle>
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <div className="space-y-1">
+            {/* 필수 필드 라벨 — text-foreground + * 표시로 시각 위계 명확히 (이슈 #22) */}
+            <label htmlFor="add-host" className="text-sm font-medium text-foreground">
+              도메인 <span className="text-destructive" aria-hidden="true">*</span>
+            </label>
+            <Input
+              id="add-host"
+              value={host}
+              // 입력 즉시 lowercase 로 표시 — DNS host 가 case-insensitive 이므로 사용자가 친 대문자도
+              // 소문자로 보이도록 즉각 정규화 (#201). 서버는 어차피 lowercase 로 저장한다.
+              onChange={(e) => { setHost(e.target.value.toLowerCase()); setHostError(null); }}
+              placeholder="textbook.com 또는 *.textbook.com"
+              data-testid="add-domain-host"
+              // autoFocus 제거 — Radix DialogContent의 onOpenAutoFocus가 첫 포커스를 처리한다.
+              // native autoFocus는 Radix FocusScope useEffect보다 먼저 실행되어
+              // 트리거 버튼으로의 포커스 복귀(WCAG 2.4.3)를 깨뜨린다 (이슈 #29).
+            />
+            {/* 도메인 필드 인라인 에러 */}
+            {hostError && (
+              <p className="text-xs text-destructive" data-testid="add-domain-host-error">
+                {hostError}
+              </p>
+            )}
+          </div>
+          <div className="space-y-1">
+            {/* 필수 필드 라벨 — text-foreground + * 표시로 시각 위계 명확히 (이슈 #22) */}
+            <label htmlFor="add-origin" className="text-sm font-medium text-foreground">
+              오리진 URL <span className="text-destructive" aria-hidden="true">*</span>
+            </label>
+            <Input
+              id="add-origin"
+              value={origin}
+              onChange={(e) => { setOrigin(e.target.value); setOriginError(null); }}
+              placeholder="https://textbook.com"
+              data-testid="add-domain-origin"
+            />
+            {/* 오리진 URL 필드 인라인 에러 — 테이블 헤더 '오리진'과 용어 통일 (이슈 #128) */}
+            {originError && (
+              <p className="text-xs text-destructive" data-testid="add-domain-origin-error">
+                {originError}
+              </p>
+            )}
+          </div>
+          {/* 서버 제출 오류 등 전역 에러 */}
+          {submitError && (
+            <p className="text-xs text-destructive" data-testid="add-domain-error">
+              {submitError}
             </p>
           )}
-        </div>
-        <div className="space-y-1">
-          {/* 필수 필드 라벨 — text-foreground + * 표시로 시각 위계 명확히 (이슈 #22) */}
-          <label htmlFor="add-origin" className="text-sm font-medium text-foreground">
-            오리진 URL <span className="text-destructive" aria-hidden="true">*</span>
-          </label>
-          <Input
-            id="add-origin"
-            value={origin}
-            onChange={(e) => { setOrigin(e.target.value); setOriginError(null); }}
-            placeholder="https://textbook.com"
-            data-testid="add-domain-origin"
-          />
-          {/* 오리진 URL 필드 인라인 에러 — 테이블 헤더 '오리진'과 용어 통일 (이슈 #128) */}
-          {originError && (
-            <p className="text-xs text-destructive" data-testid="add-domain-origin-error">
-              {originError}
-            </p>
-          )}
-        </div>
-        {/* 서버 제출 오류 등 전역 에러 */}
-        {submitError && (
-          <p className="text-xs text-destructive" data-testid="add-domain-error">
-            {submitError}
-          </p>
-        )}
-        {/* Tab 순서 정정 (#237) — DOM 상 주 액션(추가)을 먼저 두어 입력 → 추가 → 취소 → X 순으로
-            포커스가 흐르게 한다. 시각적으로는 좌:취소, 우:추가 위치를 유지해야 하므로
-            flex-row-reverse 로 배치 순서만 뒤집는다. */}
-        <div className="flex flex-row-reverse justify-start gap-2 pt-2">
-          {/* 빈 입력 가드 — toolbar/일괄 삭제·DomainCacheSection 퍼지와 disabled 처리 일관성 유지 (#232).
-              인라인 에러는 의도적 입력 후 형식 오류 알림용이며 빈 폼 제출 가드용으로 쓰지 않는다. */}
-          <Button
-            type="submit"
-            disabled={addDomain.isPending || !host.trim() || !origin.trim()}
-            data-testid="add-domain-submit"
-          >
-            {addDomain.isPending ? '추가 중…' : '추가'}
-          </Button>
-          <Button type="button" variant="outline" onClick={onClose}>
-            취소
-          </Button>
-        </div>
-      </form>
-    </DialogContent>
+          {/* Tab 순서 정정 (#237) — DOM 상 주 액션(추가)을 먼저 두어 입력 → 추가 → 취소 → X 순으로
+              포커스가 흐르게 한다. 시각적으로는 좌:취소, 우:추가 위치를 유지해야 하므로
+              flex-row-reverse 로 배치 순서만 뒤집는다. */}
+          <div className="flex flex-row-reverse justify-start gap-2 pt-2">
+            {/* 빈 입력 가드 — toolbar/일괄 삭제·DomainCacheSection 퍼지와 disabled 처리 일관성 유지 (#232).
+                인라인 에러는 의도적 입력 후 형식 오류 알림용이며 빈 폼 제출 가드용으로 쓰지 않는다. */}
+            <Button
+              type="submit"
+              disabled={addDomain.isPending || !host.trim() || !origin.trim()}
+              data-testid="add-domain-submit"
+            >
+              {addDomain.isPending ? '추가 중…' : '추가'}
+            </Button>
+            {/* 취소 — mutation 진행 중 disabled 로 닫기 차단 (#421) */}
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleClose}
+              disabled={addDomain.isPending}
+            >
+              취소
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -374,10 +414,8 @@ export function DomainsPage() {
         </CardContent>
       </Card>
 
-      {/* 도메인 추가 다이얼로그 */}
-      <Dialog open={showAddDialog} onClose={() => setShowAddDialog(false)}>
-        <AddDomainDialog onClose={() => setShowAddDialog(false)} />
-      </Dialog>
+      {/* 도메인 추가 다이얼로그 — Dialog/onClose 가드는 컴포넌트 내부에서 처리 (#421) */}
+      <AddDomainDialog open={showAddDialog} onOpenChange={setShowAddDialog} />
 
       {/* 단건 삭제 확인 다이얼로그 — 진행 중 ESC/백드롭/X 닫기 차단 (#165) */}
       <AlertDialog open={!!deleteTarget} onClose={() => { if (!deleteMutation.isPending) setDeleteTarget(null); }}>

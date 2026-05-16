@@ -1225,6 +1225,71 @@ test.describe('도메인 관리 — 일괄 추가 (#55)', () => {
   });
 
   /**
+   * 이슈 #421 회귀 방지 — AddDomainDialog mutation 진행 중 silent close 차단
+   *
+   * 과거: `<Dialog open onClose>` 래퍼가 DomainsPage 본체에 있어 mutation 상태에 접근하지 못해
+   *      ESC/백드롭/X/취소 4개 닫기 경로가 모두 무방비였고, 다이얼로그가 unmount 되어
+   *      `setSubmitError`/`toast.success` 가 사용자에게 노출되지 않는 silent close 가 발생.
+   * 수정 후: Dialog 를 컴포넌트 내부로 끌어와 isPending 가드를 4개 경로 모두에 일관 적용.
+   *
+   * mock 사용 이유: useAddDomain mutateAsync 응답을 보류해 isPending=true 를 유지해야
+   *              가드 동작을 검증할 수 있다. mock 은 실제 네트워크 지연 시나리오와 동일하게
+   *              훅이 isPending 상태로 잠겨 있는 상태를 재현한다.
+   */
+  test('AddDomainDialog: mutation 진행 중에는 ESC/취소/X 로 닫기가 차단된다 — 회귀 방지 #421', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', []);
+
+    let resolveRequest: (value: unknown) => void;
+    const requestPromise = new Promise((resolve) => { resolveRequest = resolve; });
+
+    // POST /api/domains 응답을 보류해 isPending 상태 유지 — 실제 네트워크 지연 재현
+    await page.route('**/api/domains', async (route) => {
+      if (route.request().method() === 'POST') {
+        await requestPromise;
+        await route.fulfill({
+          status: 201,
+          contentType: 'application/json',
+          body: JSON.stringify({ host: 'silent.example.com', origin: 'https://silent.example.com', enabled: 1, description: '', created_at: 1700000000, updated_at: 1700000000 }),
+        });
+      } else {
+        return route.fallback();
+      }
+    });
+
+    await page.goto('/domains');
+    await page.getByTestId('toolbar-add-btn').click();
+    await expect(page.getByTestId('add-domain-dialog')).toBeVisible();
+
+    await page.getByTestId('add-domain-host').fill('silent.example.com');
+    await page.getByTestId('add-domain-origin').fill('https://silent.example.com');
+    await page.getByTestId('add-domain-submit').click();
+
+    // isPending 진입 — 제출 버튼이 disabled + "추가 중…" 텍스트로 진행 중 확인
+    await expect(page.getByTestId('add-domain-submit')).toBeDisabled();
+    await expect(page.getByTestId('add-domain-submit')).toHaveText('추가 중…');
+
+    // ESC 닫기 시도 — 차단되어야 함 (#421 핵심)
+    await page.keyboard.press('Escape');
+    await expect(page.getByTestId('add-domain-dialog')).toBeVisible();
+
+    // 취소 버튼 disabled 확인 (#421 핵심)
+    await expect(page.getByRole('button', { name: '취소' })).toBeDisabled();
+    // force 클릭이어도 disabled 핸들러는 발화하지 않아 다이얼로그 유지
+    await page.getByRole('button', { name: '취소' }).click({ force: true }).catch(() => {});
+    await expect(page.getByTestId('add-domain-dialog')).toBeVisible();
+
+    // X(닫기) 버튼 disabled 확인 — DialogContent disableClose 가드
+    await expect(page.getByRole('button', { name: '닫기' })).toBeDisabled();
+    await page.getByRole('button', { name: '닫기' }).click({ force: true }).catch(() => {});
+    await expect(page.getByTestId('add-domain-dialog')).toBeVisible();
+
+    // 보류 해제 → mutation 완료 → 정상적으로 다이얼로그가 닫힌다
+    resolveRequest!(null);
+    await expect(page.getByTestId('add-domain-dialog')).not.toBeVisible();
+  });
+
+  /**
    * 이슈 #197 회귀 방지 — 기존 host 가 포함된 일괄 추가 시 skipped 안내
    *
    * 과거: 서버가 기존 host 의 origin 을 silently upsert 했고, 토스트는 "N건이 추가되었습니다"
