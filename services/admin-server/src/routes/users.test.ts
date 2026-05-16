@@ -150,6 +150,29 @@ describe('usersRoutes', () => {
     expect(found?.username).toBe('newuser@school.local');
   });
 
+  // 이슈 #207 — 동시 요청 race 로 사전 findByUsername 검사를 두 요청이 모두 통과한
+  // 뒤 INSERT 단계에서 SQLite UNIQUE 위반이 던져지는 시나리오.
+  // findByUsername 을 일시적으로 null 반환으로 stub 하면 사전 차단이 우회되어 라우트가
+  // 직접 INSERT 까지 가서 UNIQUE 위반을 받는다 (실제 동시성을 결정적으로 재현).
+  // 기대: raw SQLite 메시지가 500 internal_error 로 노출되지 않고 409 username_already_exists.
+  it('POST /api/users — INSERT 단계 UNIQUE 위반은 500 이 아닌 409 로 매핑 (#207)', async () => {
+    const orig = ctx.userRepo.findByUsername.bind(ctx.userRepo);
+    ctx.userRepo.findByUsername = (() => null) as typeof orig;
+    try {
+      const r = await ctx.app.inject({
+        method: 'POST', url: '/api/users',
+        cookies: ctx.cookies,
+        payload: { username: 'admin@school.local', password: 'password2' },
+      });
+      expect(r.statusCode).toBe(409);
+      expect(r.json().error).toBe('username_already_exists');
+      // raw SQLite 에러 메시지 누출 없는지 확인
+      expect(JSON.stringify(r.json())).not.toMatch(/UNIQUE constraint/i);
+    } finally {
+      ctx.userRepo.findByUsername = orig;
+    }
+  });
+
   // 이슈 #31 — 자기 자신 비밀번호 변경 시 currentPassword 포함 성공
   it('PUT /api/users/:id/password — 자기 자신: currentPassword 포함 성공', async () => {
     const r = await ctx.app.inject({

@@ -99,6 +99,25 @@ function publicUser(u: {
 const SORT_ALLOWED  = new Set(['id', 'username', 'created_at', 'updated_at', 'last_login_at']);
 const ORDER_ALLOWED = new Set(['asc', 'desc']);
 
+/**
+ * better-sqlite3 SqliteError 중 username UNIQUE 제약 위반인지 판별 (#207).
+ *
+ * 무엇을: throw 된 객체가 SqliteError 의 UNIQUE 위반 케이스인지 type-narrowing 한다.
+ * 왜: better-sqlite3 의 SqliteError 는 export 되어도 `instanceof` 비교가 ESM/CJS
+ *     빌드 차이에 따라 흔들리는 사례가 보고되어 있어, `code` 문자열 매칭이 가장
+ *     이식성 높은 판별 방식이다 (Node sqlite3 와 동일 표준 코드 `SQLITE_CONSTRAINT_UNIQUE`).
+ *     향후 다른 UNIQUE 컬럼이 추가되더라도, 이 라우트의 INSERT 가 users.username 만
+ *     건드리므로 UNIQUE 위반 = username 충돌이라는 invariant 가 유지된다.
+ */
+function isUniqueConstraintError(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'code' in err &&
+    (err as { code: unknown }).code === 'SQLITE_CONSTRAINT_UNIQUE'
+  );
+}
+
 export const usersRoutes: FastifyPluginAsync<{ userRepo: UserRepository }> = async (app, opts) => {
   const { userRepo } = opts;
 
@@ -127,12 +146,25 @@ export const usersRoutes: FastifyPluginAsync<{ userRepo: UserRepository }> = asy
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid_input', issues: parsed.error.issues });
     }
+    // 사전 조회로 1차 차단 — 직렬 호출 시는 여기서 409 응답하여 빠른 경로 유지.
     if (userRepo.findByUsername(parsed.data.username)) {
       return reply.code(409).send({ error: 'username_already_exists' });
     }
     const hash = await hashPassword(parsed.data.password);
-    const u = userRepo.create(parsed.data.username, hash);
-    return reply.code(201).send(publicUser(u));
+    // 동시 요청 race (#207) — 두 요청이 findByUsername 을 통과한 뒤 INSERT 단계에서
+    // SQLite UNIQUE 제약을 위반할 수 있다. 사전 조회만으로는 원자적 차단이 불가능하므로
+    // INSERT 단계의 UNIQUE 위반을 잡아 표준 409 응답으로 매핑한다 (raw SQL 에러 메시지가
+    // error-handler 의 500 internal_error 로 노출되어 클라이언트로 전달되는 정보 누출
+    // 및 상태 코드 일관성 깨짐을 방지).
+    try {
+      const u = userRepo.create(parsed.data.username, hash);
+      return reply.code(201).send(publicUser(u));
+    } catch (err) {
+      if (isUniqueConstraintError(err)) {
+        return reply.code(409).send({ error: 'username_already_exists' });
+      }
+      throw err;
+    }
   });
 
   app.put<{ Params: { id: string } }>('/api/users/:id/password', async (req, reply) => {
