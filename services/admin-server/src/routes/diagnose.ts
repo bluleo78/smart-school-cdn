@@ -74,16 +74,25 @@ export async function diagnoseRoutes(app: FastifyInstance) {
   app.get('/api/domains/:host/diagnose', async (req, reply) => {
     const host = normalizeHost((req.params as { host: string }).host);
 
-    // querystring 검증
+    // querystring 검증 — #327 표준 envelope({error: 머신코드, message: 한글})로 응답 (#407)
     const parsed = querySchema.safeParse(req.query);
     if (!parsed.success) {
-      return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? 'invalid query' });
+      return reply.code(400).send({
+        error: 'invalid_input',
+        message: parsed.error.issues[0]?.message ?? '잘못된 입력입니다.',
+        issues: parsed.error.issues,
+      });
     }
     const { path, query, range } = parsed.data;
 
-    // 도메인 존재 확인
+    // 도메인 존재 확인 — 표준 envelope 으로 응답 (#407)
     const exists = app.db.prepare('SELECT 1 FROM domains WHERE host = ?').get(host);
-    if (!exists) return reply.code(404).send({ error: 'domain not found' });
+    if (!exists) {
+      return reply.code(404).send({
+        error: 'domain_not_found',
+        message: '도메인을 찾을 수 없습니다.',
+      });
+    }
 
     const key = cacheKey(host, path, query);
     const fullUrl = `https://${host}${path}${query ? `?${query}` : ''}`;

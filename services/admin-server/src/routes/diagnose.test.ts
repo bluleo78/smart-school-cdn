@@ -45,28 +45,43 @@ function buildApp(opts: BuildOpts = {}): FastifyInstance {
 beforeEach(() => { vi.mocked(axios.get).mockReset(); });
 
 describe('GET /api/domains/:host/diagnose (#387)', () => {
-  it('path 미지정 시 400', async () => {
+  it('path 미지정 시 400 — 표준 envelope({error: invalid_input, message}) 반환 (#407)', async () => {
     const app = buildApp({ domains: ['x.test'] });
     const r = await app.inject({ method: 'GET', url: '/api/domains/x.test/diagnose' });
     expect(r.statusCode).toBe(400);
+    const body = r.json();
+    expect(body.error).toBe('invalid_input');
+    expect(typeof body.message).toBe('string');
+    expect(body.message.length).toBeGreaterThan(0);
+    expect(Array.isArray(body.issues)).toBe(true);
   });
 
-  it('path 가 / 로 시작하지 않으면 400', async () => {
+  it('path 가 / 로 시작하지 않으면 400 — 표준 envelope (#407)', async () => {
     const app = buildApp({ domains: ['x.test'] });
     const r = await app.inject({ method: 'GET', url: '/api/domains/x.test/diagnose?path=foo' });
     expect(r.statusCode).toBe(400);
+    const body = r.json();
+    expect(body.error).toBe('invalid_input');
+    // zod issue 의 message 가 그대로 노출 (사람 가독)
+    expect(body.message).toBe('path must start with /');
   });
 
-  it('range 가 화이트리스트 외면 400', async () => {
+  it('range 가 화이트리스트 외면 400 — 표준 envelope (#407)', async () => {
     const app = buildApp({ domains: ['x.test'] });
     const r = await app.inject({ method: 'GET', url: '/api/domains/x.test/diagnose?path=/p&range=2h' });
     expect(r.statusCode).toBe(400);
+    const body = r.json();
+    expect(body.error).toBe('invalid_input');
+    expect(typeof body.message).toBe('string');
   });
 
-  it('등록되지 않은 host 는 404', async () => {
+  it('등록되지 않은 host 는 404 — 표준 envelope({error: domain_not_found, message}) 반환 (#407)', async () => {
     const app = buildApp({ domains: [] });
     const r = await app.inject({ method: 'GET', url: '/api/domains/unknown.test/diagnose?path=/p' });
     expect(r.statusCode).toBe(404);
+    const body = r.json();
+    expect(body.error).toBe('domain_not_found');
+    expect(body.message).toBe('도메인을 찾을 수 없습니다.');
   });
 
   it('proxy + storage + repo 결과를 fan-in 한 JSON 200 을 반환한다', async () => {
