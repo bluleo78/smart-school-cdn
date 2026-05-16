@@ -1409,6 +1409,18 @@ describe('GET /api/domains/:host/stats', () => {
     const res = await app.inject({ method: 'GET', url: '/api/domains/a.test/stats?period=custom' });
     expect(res.statusCode).toBe(400);
   });
+
+  // #408: 알 수 없는 period 값은 silent fallback('24h') 대신 명시적 400 (invalid_period) 으로 거부
+  it('GET /api/domains/:host/stats — 알 수 없는 period 값은 400 invalid_period (#408)', async () => {
+    const repo = makeRepo();
+    repo.upsert('a.test', 'https://a.test');
+    const app = buildApp(repo);
+    const res = await app.inject({ method: 'GET', url: '/api/domains/a.test/stats?period=invalid' });
+    expect(res.statusCode).toBe(400);
+    const body = JSON.parse(res.body);
+    expect(body.error).toBe('invalid_period');
+    expect(body.message).toContain('period must be one of');
+  });
 });
 
 describe('GET /api/domains/summary — L1/L2/bypass 비율', () => {
@@ -1623,6 +1635,18 @@ describe('GET /api/domains/:host/logs — period/from/to/q 필터', () => {
     const app = buildApp(repo);
     const res = await app.inject({ method: 'GET', url: '/api/domains/a.test/logs?period=custom' });
     expect(res.statusCode).toBe(400);
+  });
+
+  // #408: 알 수 없는 period 값은 silent fallback(시간 필터 무시) 대신 명시적 400 (invalid_period) 으로 거부
+  it('알 수 없는 period 값은 400 invalid_period (#408)', async () => {
+    const repo = makeRepo();
+    repo.upsert('a.test', 'https://a.test');
+    const app = buildApp(repo);
+    const res = await app.inject({ method: 'GET', url: '/api/domains/a.test/logs?period=invalid' });
+    expect(res.statusCode).toBe(400);
+    const body = JSON.parse(res.body);
+    expect(body.error).toBe('invalid_period');
+    expect(body.message).toContain('period must be one of');
   });
 
   it('q= 검색어로 path 필터링', async () => {

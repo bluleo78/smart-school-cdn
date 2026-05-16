@@ -799,10 +799,15 @@ export async function domainRoutes(
       const q = request.query;
       // 1h, custom 추가 — 기존 24h/7d/30d 동작 유지
       const validPeriods: StatsPeriod[] = ['1h', '24h', '7d', '30d', 'custom'];
-      const period: StatsPeriod =
-        q.period && (validPeriods as string[]).includes(q.period)
-          ? (q.period as StatsPeriod)
-          : '24h';
+      // #408: 알 수 없는 period 값은 silent fallback 대신 명시적 400으로 거부
+      //   (#326 정책 — 입력 검증 실패가 silent wrong result 되지 않도록 통일)
+      if (q.period !== undefined && !(validPeriods as string[]).includes(q.period)) {
+        return reply.code(400).send({
+          error: 'invalid_period',
+          message: `period must be one of: ${validPeriods.join(', ')}`,
+        });
+      }
+      const period: StatsPeriod = (q.period as StatsPeriod | undefined) ?? '24h';
 
       // custom 기간: from/to 필수 검증 — 누락·비정수·역전 시 400
       let range: { from: number; to: number } | undefined;
@@ -880,6 +885,16 @@ export async function domainRoutes(
     const offset = rawOffset > 0 ? rawOffset : 0;
     const { status, cache, period, q } = request.query;
 
+    // #408: 알 수 없는 period 값은 silent fallback(필터 무시) 대신 명시적 400으로 거부
+    //   (#326 정책 — stats 라우트와 동일하게 통일)
+    const validLogPeriods = ['1h', '24h', '7d', '30d', 'custom'] as const;
+    if (period !== undefined && !(validLogPeriods as readonly string[]).includes(period)) {
+      return reply.code(400).send({
+        error: 'invalid_period',
+        message: `period must be one of: ${validLogPeriods.join(', ')}`,
+      });
+    }
+
     // period → since/until 변환 (없으면 시간 필터 없음)
     let since: number | undefined;
     let until: number | undefined;
@@ -908,7 +923,7 @@ export async function domainRoutes(
         since = fromNum;
         until = toNum;
       }
-      // 알 수 없는 period 값은 무시하여 기존 동작 유지
+      // 알 수 없는 period 값은 위 화이트리스트 검증에서 이미 400으로 거부됨 (#408)
     }
 
     // access_logs 테이블이 없을 수 있으므로 try/catch로 빈 배열 폴백
