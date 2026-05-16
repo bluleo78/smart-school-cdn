@@ -226,13 +226,33 @@ export async function cacheRoutes(app: FastifyInstance) {
     // 와일드카드 도메인(`*.base`)에 대해서는 base 자체 또는 base의 한 단계 이상 깊은 서브도메인을
     // 매칭으로 허용한다 — URL에 리터럴 `*`이 들어갈 수 없기 때문 (#234).
     if (body.type === 'url') {
-      let hostname: string;
+      let parsed: URL;
       try {
-        // URL 표준상 hostname은 이미 ASCII 소문자로 정규화되지만, 다른 라우트(#190·#201·#296)와
-        // 동일한 헬퍼를 통과시켜 비교 키 일관성을 명시한다.
-        hostname = normalizeHost(new URL(body.target).hostname);
+        parsed = new URL(body.target);
       } catch {
         // 표준 envelope (#327)
+        return reply.status(400).send({
+          error: 'invalid_url',
+          message: '유효하지 않은 URL 형식입니다.',
+        });
+      }
+      // scheme 검증 — CDN 캐시는 http(s)만 다루므로 ftp/ws/wss 등 다른 scheme은
+      // 처음부터 storage까지 보내지 않고 거부한다 (#411).
+      // 또한 javascript:/file:/mailto: 같은 opaque scheme은 hostname이 빈 문자열로
+      // 채워져 이후 domain_not_registered 메시지가 "은(는) 등록된 도메인이 아닙니다."로
+      // 깨지는 부작용도 있어 동일 분기에서 차단한다.
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        return reply.status(400).send({
+          error: 'invalid_url_scheme',
+          message: 'URL은 http 또는 https scheme만 허용됩니다.',
+        });
+      }
+      // URL 표준상 hostname은 이미 ASCII 소문자로 정규화되지만, 다른 라우트(#190·#201·#296)와
+      // 동일한 헬퍼를 통과시켜 비교 키 일관성을 명시한다.
+      const hostname = normalizeHost(parsed.hostname);
+      // http(s) scheme이라도 hostname이 누락된 비정상 URL(`http:///path` 등)은 거부한다.
+      // 정규화된 hostname을 사용하므로 trim/lowercase 결과 기준이다.
+      if (!hostname) {
         return reply.status(400).send({
           error: 'invalid_url',
           message: '유효하지 않은 URL 형식입니다.',

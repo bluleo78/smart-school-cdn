@@ -460,6 +460,101 @@ describe('DELETE /api/cache/purge', () => {
     expect(mock.purgeUrl).not.toHaveBeenCalled();
   });
 
+  // #411: type=url 분기에서 scheme이 http(s)가 아닌 경우 차단한다.
+  // CDN 캐시는 http(s)만 캐싱하므로 ftp/ws/wss 등은 처음부터 의미가 없고,
+  // storage gRPC 호출까지 도달하면 클라이언트에 "0건 퍼지 성공" 토스트가 떠 잘못된 안내가 된다.
+  describe('url scheme 검증 (#411)', () => {
+    it('url 타입 + ftp scheme이면 400과 invalid_url_scheme을 반환하고 storage를 호출하지 않는다', async () => {
+      const mock = makeStorageMock(async () => ({ used_bytes: 0, total_bytes: 0 }));
+      const { app } = mkApp({ storage: mock, domains: ['httpbin.org'] });
+
+      const res = await app.inject({
+        method: 'DELETE', url: '/api/cache/purge',
+        headers: { 'content-type': 'application/json' },
+        payload: { type: 'url', target: 'ftp://httpbin.org/x' },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe('invalid_url_scheme');
+      expect(res.json().message).toContain('http');
+      expect(mock.purgeUrl).not.toHaveBeenCalled();
+    });
+
+    it('url 타입 + ws scheme이면 400과 invalid_url_scheme을 반환한다', async () => {
+      const mock = makeStorageMock(async () => ({ used_bytes: 0, total_bytes: 0 }));
+      const { app } = mkApp({ storage: mock, domains: ['httpbin.org'] });
+
+      const res = await app.inject({
+        method: 'DELETE', url: '/api/cache/purge',
+        headers: { 'content-type': 'application/json' },
+        payload: { type: 'url', target: 'ws://httpbin.org/x' },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe('invalid_url_scheme');
+      expect(mock.purgeUrl).not.toHaveBeenCalled();
+    });
+
+    // javascript:/file:/mailto:는 opaque scheme이라 hostname이 빈 문자열로 채워진다.
+    // 이전에는 domain_not_registered로 흘러 메시지가 "은(는) 등록된 도메인이 아닙니다."로 깨졌다.
+    it('url 타입 + javascript: scheme이면 invalid_url_scheme으로 차단하고 메시지가 깨지지 않는다', async () => {
+      const mock = makeStorageMock(async () => ({ used_bytes: 0, total_bytes: 0 }));
+      const { app } = mkApp({ storage: mock });
+
+      const res = await app.inject({
+        method: 'DELETE', url: '/api/cache/purge',
+        headers: { 'content-type': 'application/json' },
+        payload: { type: 'url', target: 'javascript:alert(1)' },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe('invalid_url_scheme');
+      // 회귀 가드: "은(는) 등록된 도메인이 아닙니다." 같은 깨진 메시지가 노출되면 안 된다
+      expect(res.json().message).not.toMatch(/^은\(는\)/);
+      expect(mock.purgeUrl).not.toHaveBeenCalled();
+    });
+
+    it('url 타입 + file: scheme이면 invalid_url_scheme으로 차단한다', async () => {
+      const mock = makeStorageMock(async () => ({ used_bytes: 0, total_bytes: 0 }));
+      const { app } = mkApp({ storage: mock });
+
+      const res = await app.inject({
+        method: 'DELETE', url: '/api/cache/purge',
+        headers: { 'content-type': 'application/json' },
+        payload: { type: 'url', target: 'file:///etc/passwd' },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe('invalid_url_scheme');
+      expect(mock.purgeUrl).not.toHaveBeenCalled();
+    });
+
+    it('url 타입 + mailto: scheme이면 invalid_url_scheme으로 차단한다', async () => {
+      const mock = makeStorageMock(async () => ({ used_bytes: 0, total_bytes: 0 }));
+      const { app } = mkApp({ storage: mock });
+
+      const res = await app.inject({
+        method: 'DELETE', url: '/api/cache/purge',
+        headers: { 'content-type': 'application/json' },
+        payload: { type: 'url', target: 'mailto:foo@httpbin.org' },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe('invalid_url_scheme');
+      expect(mock.purgeUrl).not.toHaveBeenCalled();
+    });
+
+    it('url 타입 + https scheme + 등록 도메인이면 정상적으로 통과한다 (회귀 가드)', async () => {
+      const purgeResult = { purged_files: 1, freed_bytes: 100 };
+      const mock = makeStorageMock(async () => ({ used_bytes: 0, total_bytes: 0 }));
+      mock.purgeUrl.mockResolvedValueOnce(purgeResult);
+      const { app } = mkApp({ storage: mock, domains: ['example.com'] });
+
+      const res = await app.inject({
+        method: 'DELETE', url: '/api/cache/purge',
+        headers: { 'content-type': 'application/json' },
+        payload: { type: 'url', target: 'https://example.com/x.png' },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(mock.purgeUrl).toHaveBeenCalledWith('https://example.com/x.png');
+    });
+  });
+
   it('domain 타입 + 등록된 target이면 purgeDomain 호출 후 결과를 반환한다', async () => {
     const purgeResult = { purged_files: 5, freed_bytes: 2048 };
     const mock = makeStorageMock(async () => ({ used_bytes: 0, total_bytes: 0 }));
