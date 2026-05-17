@@ -406,8 +406,10 @@ function RecordsTab({ q, onQueryChange }: { q: string; onQueryChange: (value: st
       <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         {/* whitespace-nowrap — "DNS 레코 / 드 (7)" 단어 중간 줄바꿈 차단 (#177) */}
         <CardTitle className="whitespace-nowrap">DNS 레코드 ({filtered.length})</CardTitle>
+        {/* aria-label 필수 — placeholder는 WCAG 1.3.1/4.1.2/3.3.2상 label로 인정 안 됨 (포커스/입력 시 사라짐) (#356) */}
         <Input
           placeholder="호스트 검색…"
+          aria-label="호스트 검색"
           value={searchValue}
           onChange={handleSearchChange}
           onCompositionStart={handleCompositionStart}
