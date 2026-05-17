@@ -20,9 +20,9 @@ import { ErrorBoundary } from '../error/ErrorBoundary';
 /** 사이드바 네비게이션 항목 — 대시보드/도메인/DNS/사용자/시스템 */
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: '대시보드' },
-  { to: '/domains', icon: Globe, label: '도메인 관리' },
+  { to: '/domains', icon: Globe, label: '도메인' },
   { to: '/dns', icon: Network, label: 'DNS' },
-  { to: '/users', icon: UsersIcon, label: '사용자 관리' },
+  { to: '/users', icon: UsersIcon, label: '사용자' },
   { to: '/system', icon: Settings, label: '시스템' },
 ];
 

@@ -96,7 +96,7 @@ test.describe('사용자 관리', () => {
 
     await page.goto('/users');
     // h2로 변경 — h1 회귀를 방지하기 위해 level 명시
-    await expect(page.getByRole('heading', { name: '사용자 관리', level: 2 })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '사용자', level: 2 })).toBeVisible();
 
     // 추가 버튼 클릭 → 다이얼로그
     await page.getByRole('button', { name: '+ 사용자 추가' }).click();
@@ -1332,7 +1332,7 @@ test.describe('사용자 관리', () => {
   test('다중 탭 동기화 — 본인 user-disabled 신호 수신 시 강제 로그아웃 (#332)', async ({ page }) => {
     await mockApi(page, 'GET', '/users', baseUsers);
     await page.goto('/users');
-    await expect(page.getByRole('heading', { name: '사용자 관리', level: 2 })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '사용자', level: 2 })).toBeVisible();
 
     // 본인 id로 user-disabled 신호 — 강제 로그아웃 → /login 리다이렉트
     await page.evaluate((myId) => {
@@ -1350,7 +1350,7 @@ test.describe('사용자 관리', () => {
   test('다중 탭 동기화 — logout 신호 수신 시 강제 로그아웃 (#332)', async ({ page }) => {
     await mockApi(page, 'GET', '/users', baseUsers);
     await page.goto('/users');
-    await expect(page.getByRole('heading', { name: '사용자 관리', level: 2 })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '사용자', level: 2 })).toBeVisible();
 
     // 다른 탭에서 logout 발신 — 본 탭도 needs_login 전이 + /login
     await page.evaluate(() => {

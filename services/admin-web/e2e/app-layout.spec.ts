@@ -11,7 +11,7 @@ test.describe('AppLayout', () => {
 
     // 사이드바 네비게이션 항목 — 4개 존재 (대시보드/도메인/DNS/시스템)
     await expect(page.getByRole('link', { name: '대시보드' })).toBeVisible();
-    await expect(page.getByRole('link', { name: '도메인 관리' })).toBeVisible();
+    await expect(page.getByRole('link', { name: '도메인', exact: true })).toBeVisible();
     await expect(page.getByRole('link', { name: 'DNS' })).toBeVisible();
     await expect(page.getByRole('link', { name: '시스템' })).toBeVisible();
 
@@ -26,9 +26,9 @@ test.describe('AppLayout', () => {
   test('사이드바 네비게이션으로 페이지 이동이 동작한다', async ({ page }) => {
     await page.goto('/');
 
-    // 도메인 관리 페이지로 이동
-    await page.getByRole('link', { name: '도메인 관리' }).click();
-    await expect(page.getByRole('heading', { name: '도메인 관리' })).toBeVisible();
+    // 도메인 페이지로 이동
+    await page.getByRole('link', { name: '도메인', exact: true }).click();
+    await expect(page.getByRole('heading', { name: '도메인', exact: true })).toBeVisible();
 
     // 시스템 페이지로 이동
     await page.getByRole('link', { name: '시스템' }).click();
@@ -47,16 +47,16 @@ test.describe('AppLayout', () => {
 
     const cases: { path: string; label: string }[] = [
       { path: '/', label: '대시보드' },
-      { path: '/domains', label: '도메인 관리' },
+      { path: '/domains', label: '도메인' },
       { path: '/dns', label: 'DNS' },
-      { path: '/users', label: '사용자 관리' },
+      { path: '/users', label: '사용자' },
       { path: '/system', label: '시스템' },
     ];
 
     for (const { path, label } of cases) {
       await page.goto(path);
       // banner role = <header> — 그 안에 페이지 제목 span이 포함돼야 함
-      await expect(page.getByRole('banner').getByText(label)).toBeVisible();
+      await expect(page.getByRole('banner').getByText(label, { exact: true })).toBeVisible();
     }
   });
 
@@ -123,7 +123,7 @@ test.describe('AppLayout', () => {
     // 회귀 방지: startsWith 단순 매칭으로 인한 false-positive 재발 차단.
     const cases: { path: string; wrongLabel: string }[] = [
       { path: '/system-extra', wrongLabel: '시스템' },
-      { path: '/usersxxx', wrongLabel: '사용자 관리' },
+      { path: '/usersxxx', wrongLabel: '사용자' },
       { path: '/dnsfoo', wrongLabel: 'DNS' },
     ];
 

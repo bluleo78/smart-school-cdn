@@ -181,7 +181,7 @@ export function UsersPage() {
        *  flex-col로 stack 처리하고 데스크탑에서만 좌우 배치 (#177) */}
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
-          <h2 className="text-2xl font-semibold tracking-tight">사용자 관리</h2>
+          <h2 className="text-2xl font-semibold tracking-tight">사용자</h2>
           <p className="text-sm text-muted-foreground mt-1">관리자 계정을 추가하거나 비밀번호를 재설정합니다.</p>
         </div>
         {/* whitespace-nowrap — 좁은 뷰포트에서 "+ 사용자 추 / 가" 글자 단위 줄바꿈 방지 (#177) */}

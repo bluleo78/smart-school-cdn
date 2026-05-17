@@ -411,7 +411,7 @@ export function DomainsPage() {
     <div className="flex flex-col gap-4 h-full">
       {/* 페이지 헤더 */}
       <div>
-        <h2 className="text-2xl font-semibold tracking-tight">도메인 관리</h2>
+        <h2 className="text-2xl font-semibold tracking-tight">도메인</h2>
         <p className="text-muted-foreground mt-1 text-sm">
           등록된 도메인에 대해 DNS CDN IP 반환 + HTTPS 프록시 + 캐시가 활성화됩니다.
         </p>

@@ -50,8 +50,8 @@ test.describe('ErrorBoundary — 렌더 예외 처리', () => {
     await expect(fallback).toBeVisible({ timeout: 5000 });
     await expect(fallback).toHaveAttribute('data-variant', 'inline');
 
-    // 사이드바 — "도메인 관리" NavLink 와 사용자 메뉴가 살아있어야 한다
-    await expect(page.getByRole('link', { name: '도메인 관리' })).toBeVisible();
+    // 사이드바 — "도메인" NavLink 와 사용자 메뉴가 살아있어야 한다
+    await expect(page.getByRole('link', { name: '도메인', exact: true })).toBeVisible();
 
     // 다른 페이지로 이동하면 폴백이 풀리고 정상 렌더 — resetKey=location.key 동작 검증
     await page.getByRole('link', { name: '대시보드', exact: true }).click();
