@@ -193,7 +193,7 @@ export function DomainTable({
         <p className="text-xs">CDN을 시작하려면 도메인을 추가하세요.</p>
         {/* 첫 방문 사용자가 바로 도메인을 추가할 수 있도록 CTA 제공 */}
         <Button size="sm" onClick={onAddDomain} data-testid="empty-add-domain-btn">
-          + 도메인 추가
+          도메인 추가
         </Button>
       </div>
     );

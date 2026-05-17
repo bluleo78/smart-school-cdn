@@ -1869,7 +1869,7 @@ test.describe('도메인 관리 — TLS 상태 표시 (#99)', () => {
  * 2. 열린 상태에서 Tab이 다이얼로그 안에서만 순환 (포커스 트랩)
  */
 test.describe('도메인 관리 — 다이얼로그 포커스 관리 (#29)', () => {
-  test('ESC로 닫으면 트리거 버튼("+ 도메인 추가")으로 포커스가 복귀한다', async ({ page }) => {
+  test('ESC로 닫으면 트리거 버튼("도메인 추가")으로 포커스가 복귀한다', async ({ page }) => {
     await setupBaseMocks(page);
     await mockApi(page, 'GET', '/domains', []);
 
@@ -2531,5 +2531,41 @@ test.describe('도메인 관리 — 요청(24h)·캐시 히트 셀 표시 (#346 
     // 매칭 행은 '1,234'/'82.1%'라 '—'가 없어야 하지만, 미매칭 행에는 두 셀 모두 '—'가 있어야 한다.
     const dashCount = await unmatchedRow.locator('td').filter({ hasText: /^—$/ }).count();
     expect(dashCount).toBeGreaterThanOrEqual(2);
+  });
+});
+
+/**
+ * 이슈 #304 회귀 방지 — 도메인 추가 진입 버튼 카피 일관성
+ *
+ * 무엇을: 툴바·빈 상태 CTA의 진입 버튼이 `+` 기호 없이 "도메인 추가" / "도메인 일괄 추가"로
+ *        통일되었는지 확인한다.
+ * 왜: 이전에는 `+ 도메인 추가` / `일괄 추가` 가 섞여 있어 카피 일관성이 깨져 있었다.
+ *     단순 동사 제출 버튼(`추가` / `일괄 추가`)과 진입 버튼(액션+대상명)을 분리한 규칙을 보존.
+ */
+test.describe('도메인 관리 — 진입 버튼 카피 일관성 (#304)', () => {
+  test('툴바 진입 버튼은 "+" 기호 없이 "도메인 추가" / "도메인 일괄 추가"로 표기된다', async ({
+    page,
+  }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', []);
+
+    await page.goto('/domains');
+
+    const addBtn = page.getByTestId('toolbar-add-btn');
+    await expect(addBtn).toHaveText('도메인 추가');
+
+    // 일괄 추가 진입 버튼: 액션 + 대상명 패턴
+    await expect(page.getByRole('button', { name: '도메인 일괄 추가', exact: true })).toBeVisible();
+  });
+
+  test('빈 상태 CTA 진입 버튼은 "+" 기호 없이 "도메인 추가"로 표기된다', async ({ page }) => {
+    await setupBaseMocks(page);
+    await mockApi(page, 'GET', '/domains', []);
+
+    await page.goto('/domains');
+
+    const emptyBtn = page.getByTestId('empty-add-domain-btn');
+    await expect(emptyBtn).toBeVisible();
+    await expect(emptyBtn).toHaveText('도메인 추가');
   });
 });

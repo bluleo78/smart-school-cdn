@@ -147,14 +147,14 @@ export function DomainToolbar({
           data-testid="toolbar-add-btn"
           className="whitespace-nowrap"
         >
-          + 도메인 추가
+          도메인 추가
         </Button>
         <Button
           variant="outline"
           onClick={onBulkAddClick}
           className="whitespace-nowrap"
         >
-          일괄 추가
+          도메인 일괄 추가
         </Button>
         <Button
           variant="outline"
