@@ -17,6 +17,7 @@ import {
   AlertDialogTitle,
 } from '../../ui/alert-dialog';
 import { useState } from 'react';
+import { eulReul } from '../../../lib/korean';
 
 interface Props {
   domain: Domain;
@@ -180,7 +181,7 @@ export function DomainDetailHeader({ domain }: Props) {
         <AlertDialogContent className="max-w-sm" data-testid="domain-delete-dialog" disableClose={deleteDomain.isPending}>
           <AlertDialogTitle>도메인 삭제</AlertDialogTitle>
           <p className="text-sm text-muted-foreground">
-            <span className="font-mono font-medium">{domain.host}</span>을(를) 삭제하시겠습니까?
+            <span className="font-mono font-medium">{domain.host}</span>{eulReul(domain.host)} 삭제하시겠습니까?
             DNS 오버라이드와 캐시가 함께 해제됩니다.
           </p>
           <div className="flex justify-end gap-2 pt-2">

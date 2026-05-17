@@ -27,6 +27,7 @@ import { DomainToolbar } from '../components/domains/DomainToolbar';
 import { DomainTable } from '../components/domains/DomainTable';
 import { DomainBulkAddDialog } from '../components/domains/DomainBulkAddDialog';
 import { DomainBulkDeleteDialog } from '../components/domains/DomainBulkDeleteDialog';
+import { eulReul } from '../lib/korean';
 
 // ─── 도메인 추가 다이얼로그 ──────────────────────────────────────
 
@@ -275,7 +276,7 @@ function DeleteConfirmDialog({
     <AlertDialogContent className="max-w-sm" data-testid="delete-domain-dialog" disableClose={isPending}>
       <AlertDialogTitle>도메인 삭제</AlertDialogTitle>
       <p className="text-sm text-muted-foreground">
-        <span className="font-mono font-medium">{host}</span>을(를) 삭제하시겠습니까?
+        <span className="font-mono font-medium">{host}</span>{eulReul(host)} 삭제하시겠습니까?
         DNS 오버라이드와 캐시가 함께 해제됩니다.
       </p>
       <div className="flex justify-end gap-2">

@@ -29,6 +29,7 @@ import {
   TableRow,
 } from '../components/ui/table';
 import { Skeleton } from '../components/ui/skeleton';
+import { eulReul } from '../lib/korean';
 
 // 빈 입력 우선 체크 → 포맷/길이 검증 순서로 단계적으로 에러 메시지 표시
 // confirmPassword: 신규 사용자 추가 시 재입력 — 단일 필드 + 토글 미사용 시 plaintext 미확인 오타 저장 방지 (#217, #211 패턴)
@@ -416,7 +417,7 @@ export function UsersPage() {
         <AlertDialogContent className="max-w-sm" data-testid="enable-user-dialog" disableClose={enableMut.isPending}>
           <AlertDialogTitle>사용자 재활성화</AlertDialogTitle>
           <p className="text-sm text-muted-foreground">
-            <span className="font-medium">{enableTarget ? formatUsername(enableTarget.username).display : ''}</span>을(를) 재활성화하시겠습니까?
+            <span className="font-medium">{enableTarget ? formatUsername(enableTarget.username).display : ''}</span>{eulReul(enableTarget ? formatUsername(enableTarget.username).display : '')} 재활성화하시겠습니까?
             재활성화된 사용자는 다시 로그인할 수 있습니다.
           </p>
           <div className="flex justify-end gap-2">
@@ -443,7 +444,7 @@ export function UsersPage() {
         <AlertDialogContent className="max-w-sm" data-testid="disable-user-dialog" disableClose={disableMut.isPending}>
           <AlertDialogTitle>사용자 비활성화</AlertDialogTitle>
           <p className="text-sm text-muted-foreground">
-            <span className="font-medium">{disableTarget ? formatUsername(disableTarget.username).display : ''}</span>을(를) 비활성화하시겠습니까?
+            <span className="font-medium">{disableTarget ? formatUsername(disableTarget.username).display : ''}</span>{eulReul(disableTarget ? formatUsername(disableTarget.username).display : '')} 비활성화하시겠습니까?
             비활성화된 사용자는 로그인할 수 없습니다.
           </p>
           <div className="flex justify-end gap-2">
