@@ -1822,6 +1822,42 @@ test.describe('도메인 상세 — Logs 탭', () => {
     await expect(page.getByTestId('domain-top-urls')).toContainText('30');
   });
 
+  // 검색 input debounce 회귀 (#374):
+  // 빠른 keystroke 입력이 keystroke 수 만큼 /logs 요청을 발사하면 안 된다.
+  // 250ms debounce 가 적용되어 마지막 입력으로만 1~2회 이내로 수렴해야 한다.
+  // 같은 패턴: DomainDiagnoseTab path 입력 debounce (#402).
+  test('로그 검색 input debounce — 빠른 연속 입력에 /logs 호출이 쌓이지 않는다 (#374)', async ({
+    page,
+  }) => {
+    await setupDetailMocks(page);
+    // /logs 호출 횟수를 카운트한다. q 파라미터가 있는 호출만 집계해서
+    // 초기 로드(q 없음)와 debounce 발사를 명확히 구분한다.
+    let qLogsCount = 0;
+    await page.route('**/api/domains/textbook.com/logs*', async (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get('q')) qLogsCount += 1;
+      await route.fulfill({ json: createDomainLogs() });
+    });
+
+    await page.goto('/domains/textbook.com');
+    await page.getByRole('tab', { name: '트래픽' }).click();
+
+    // 8글자를 빠르게 순차 입력 — 과거에는 8회 호출이 발사되었음 (이슈 본문 재현).
+    // debounce 적용 후엔 마지막 안정값으로 1~2회 이내로 수렴해야 한다.
+    const input = page.getByTestId('domain-logs-search-input');
+    for (const v of ['i', 'in', 'int', 'inte', 'inter', 'intern', 'interna', 'internal']) {
+      await input.fill(v);
+    }
+
+    // debounce 윈도우(250ms) + 여유분 — 마지막 입력으로 발사된 호출이 완료될 시간 확보
+    await page.waitForTimeout(600);
+
+    // 회귀 가드: keystroke 수(8) 보다 훨씬 적어야 한다. 3회 이내(=debounce 가 동작)면 통과.
+    expect(qLogsCount).toBeLessThanOrEqual(3);
+    // 그리고 입력값 자체는 즉시 input 에 반영되어 사용자 체감 지연이 없어야 한다.
+    await expect(input).toHaveValue('internal');
+  });
+
   test('top-urls API 실패 시 에러 메시지가 표시된다 (회귀: #148)', async ({ page }) => {
     // 버그: error를 destructure하지 않아 500 응답 시 "데이터 없음"으로 표시됨
     // 수정 후: error가 있으면 "상위 URL을 불러올 수 없습니다" 표시

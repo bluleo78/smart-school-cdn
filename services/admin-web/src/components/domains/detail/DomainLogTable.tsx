@@ -1,6 +1,7 @@
 /// 도메인 요청 로그 테이블 — 검색/에러 필터, 자동 갱신 + 기간 필터 지원
 import { useState } from 'react';
 import { useDomainLogs } from '../../../hooks/useDomainLogs';
+import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
 import { formatBytes, formatDateTime } from '../../../lib/format';
 import { Input } from '../../ui/input';
 import { Button } from '../../ui/button';
@@ -49,12 +50,17 @@ export function DomainLogTable({ host, period, range, refetchIntervalMs = false 
     setLimit(50);
   }
 
+  // 검색어 debounce — keystroke 마다 /logs API 가 발사되는 fan-in 부하 차단 (#374).
+  // 클라이언트 측 filter 는 즉시값(search)으로 유지해 사용자 체감 반응은 동일하게 두고,
+  // 서버 호출(queryKey 의 q 파라미터)만 250ms 안정화한다. 같은 패턴: DomainDiagnoseTab (#402).
+  const debouncedSearch = useDebouncedValue(search, 250);
+
   const { data, isLoading, error } = useDomainLogs(
     host,
     {
       limit,
       offset: 0,
-      q: search || undefined,
+      q: debouncedSearch || undefined,
       // 'error' 필터: 4xx + 5xx 모두 포함 — '5xx'만 전송 시 4xx 에러가 누락되는 버그 수정 (#46)
       status: errorsOnly ? 'error' : undefined,
       period,
@@ -96,6 +102,7 @@ export function DomainLogTable({ host, period, range, refetchIntervalMs = false 
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="max-w-xs h-8 text-xs"
+            data-testid="domain-logs-search-input"
           />
           <Button
             variant={errorsOnly ? 'default' : 'outline'}
