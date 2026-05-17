@@ -39,6 +39,13 @@ export interface ProxyTestResult {
   /** CDN 관련 주요 응답 헤더 (X-Cache, Content-Type 등) — 서버가 없거나 오류 시 undefined */
   response_headers?: Record<string, string>;
   error?: string;
+  /**
+   * 서버가 분류한 에러 머신 코드 (#166) — 화이트리스트 카테고리.
+   * - connection_refused / host_not_found / timeout / connection_reset
+   * - tls_handshake_failed / cert_expired / cert_invalid / unknown
+   * UI 분기 표시·로깅 태그 용도. raw OpenSSL/Node 메시지는 절대 포함되지 않는다.
+   */
+  error_code?: string;
 }
 
 /** 프록시 테스트 — 지정 도메인+경로로 실제 요청을 전송하고 결과를 반환한다 */

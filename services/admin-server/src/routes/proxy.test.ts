@@ -183,9 +183,12 @@ describe('프록시 라우트', () => {
     expect(body.response_headers).not.toHaveProperty('x-custom');
   });
 
-  it('프록시 서버 연결 실패 시 success: false와 error를 반환한다 (response_headers 없음)', async () => {
-    // 프록시 서버 자체에 연결할 수 없는 상황
-    mockAxiosGet.mockRejectedValueOnce(new Error('connect ECONNREFUSED 127.0.0.1:8080'));
+  it('프록시 서버 연결 실패 시 sanitize된 한국어 메시지와 error_code를 반환한다 (#166)', async () => {
+    // 프록시 서버 자체에 연결할 수 없는 상황 — axios는 err.code='ECONNREFUSED'를 부여한다
+    const econnRefused = Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:8080'), {
+      code: 'ECONNREFUSED',
+    });
+    mockAxiosGet.mockRejectedValueOnce(econnRefused);
 
     const app = await createApp({ domainRepo: makeMockDomainRepo() });
     const res = await app.inject({
@@ -199,7 +202,108 @@ describe('프록시 라우트', () => {
     const body = res.json();
     expect(body.success).toBe(false);
     expect(body.status_code).toBe(0);
-    expect(body.error).toContain('ECONNREFUSED');
+    // 머신 코드는 화이트리스트의 connection_refused여야 한다
+    expect(body.error_code).toBe('connection_refused');
+    // 사용자 표시 메시지는 한국어 한 문장 — raw 'ECONNREFUSED' 토큰이 새어나가지 않아야 한다
+    expect(body.error).toBe('프록시 서버에 연결할 수 없습니다.');
+    expect(body.error).not.toContain('ECONNREFUSED');
+    expect(body.error).not.toContain('127.0.0.1');
+  });
+
+  // 회귀 테스트 (#166) — axios가 OpenSSL EPROTO를 throw하면 err.message에 OpenSSL 내부
+  // 빌드 경로(`../deps/openssl/openssl/ssl/record/rec_layer_s3.c:918`), 라이브러리 심볼,
+  // SSL alert 번호가 포함된다. 이를 그대로 응답으로 흘리면 사용자 화면에 영문 stack-like
+  // 메시지가 노출되고 내부 의존성 단서가 새어나간다. classify로 tls_handshake_failed 카테고리로
+  // 환원되고, 사용자 표시 메시지는 한국어 한 문장이어야 한다.
+  it('TLS 핸드셰이크 실패(OpenSSL EPROTO) 시 raw 메시지를 노출하지 않고 카테고리화한다 (#166)', async () => {
+    const tlsAlert = Object.assign(
+      new Error(
+        'write EPROTO C0182AEE01000000:error:0A000419:SSL routines:ssl3_read_bytes:tlsv1 alert access denied:../deps/openssl/openssl/ssl/record/rec_layer_s3.c:918:SSL alert number 49\n',
+      ),
+      { code: 'EPROTO' },
+    );
+    mockAxiosGet.mockRejectedValueOnce(tlsAlert);
+
+    const app = await createApp({ domainRepo: makeMockDomainRepo() });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/proxy/test',
+      headers: { 'content-type': 'application/json' },
+      payload: { domain: 'httpbin.org', path: '/get', protocol: 'https' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.success).toBe(false);
+    expect(body.error_code).toBe('tls_handshake_failed');
+    expect(body.error).toBe('TLS 핸드셰이크에 실패했습니다.');
+    // raw 토큰들이 응답 어디에도 포함되지 않아야 한다 (정보 노출 회귀 방지)
+    const serialized = JSON.stringify(body);
+    expect(serialized).not.toContain('OpenSSL');
+    expect(serialized).not.toContain('openssl');
+    expect(serialized).not.toContain('rec_layer_s3');
+    expect(serialized).not.toContain('SSL alert');
+    expect(serialized).not.toContain('EPROTO');
+    expect(serialized).not.toMatch(/0x?[0-9A-F]{16,}/i);
+  });
+
+  it('타임아웃(ETIMEDOUT) 시 timeout 카테고리와 한국어 메시지를 반환한다 (#166)', async () => {
+    const timeout = Object.assign(new Error('timeout of 10000ms exceeded'), {
+      code: 'ECONNABORTED',
+    });
+    mockAxiosGet.mockRejectedValueOnce(timeout);
+
+    const app = await createApp({ domainRepo: makeMockDomainRepo() });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/proxy/test',
+      headers: { 'content-type': 'application/json' },
+      payload: { domain: 'httpbin.org', path: '/get' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.error_code).toBe('timeout');
+    expect(body.error).toBe('요청 시간이 초과되었습니다.');
+    expect(body.error).not.toContain('10000ms');
+  });
+
+  it('분류되지 않은 에러는 unknown 카테고리로 일반화한다 (#166)', async () => {
+    // 화이트리스트 외 — raw 메시지가 새어나가지 않아야 한다
+    mockAxiosGet.mockRejectedValueOnce(new Error('Some weird internal failure with /private/path'));
+
+    const app = await createApp({ domainRepo: makeMockDomainRepo() });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/proxy/test',
+      headers: { 'content-type': 'application/json' },
+      payload: { domain: 'httpbin.org', path: '/get' },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.error_code).toBe('unknown');
+    expect(body.error).toBe('프록시 요청에 실패했습니다.');
+    expect(body.error).not.toContain('/private/path');
+    expect(body.error).not.toContain('weird');
+  });
+
+  // 방어 심층화 (#166) — path가 '/'로 시작하지 않으면 backend에 도달하지 않고 400을 반환해
+  // raw 에러 노출 경로 자체를 축소한다.
+  it('path가 "/"로 시작하지 않으면 400 invalid_path를 반환한다 (#166)', async () => {
+    const app = await createApp({ domainRepo: makeMockDomainRepo() });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/proxy/test',
+      headers: { 'content-type': 'application/json' },
+      payload: { domain: 'httpbin.org', path: 'abc', protocol: 'https' },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('invalid_path');
+    expect(res.json().message).toContain('"/"로 시작');
+    // axios 호출이 발생하지 않아야 — raw TLS 에러 경로가 열리지 않음을 보증
+    expect(mockAxiosGet).not.toHaveBeenCalled();
   });
 
   it('domain 또는 path가 누락된 경우 400을 반환한다', async () => {

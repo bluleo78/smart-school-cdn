@@ -37,6 +37,8 @@ function ProxyTestDialog({
     /** CDN 관련 주요 응답 헤더 — 서버가 반환한 경우에만 존재 */
     response_headers?: Record<string, string>;
     error?: string;
+    /** 서버가 분류한 에러 머신 코드 (#166) — connection_refused/tls_handshake_failed/timeout 등 */
+    error_code?: string;
   } | null>(null);
 
   /** 테스트 요청 전송 — 경로가 비어있으면 API 호출 없이 클라이언트 오류 반환 */

@@ -25,6 +25,72 @@ const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 /** 연결 타임아웃 (3초) — Proxy 서버가 내려가 있을 때 빠르게 실패하도록 */
 const TIMEOUT_MS = 3000;
 
+/**
+ * 프록시 테스트 에러 분류 결과
+ * - `error_code`: 머신 가독 키 (UI 분기·로깅 태그 용도, 화이트리스트)
+ * - `message`: 사용자 표시용 한국어 문장 (OpenSSL/Node 내부 메시지·경로 비포함)
+ */
+interface ClassifiedError {
+  error_code: string;
+  message: string;
+}
+
+/**
+ * axios/Node 에러를 사용자 친화 카테고리로 분류한다 (#166).
+ *
+ * 왜: axios가 throw하는 err.message는 OpenSSL 내부 빌드 경로
+ * (`../deps/openssl/openssl/ssl/record/rec_layer_s3.c:918`), 라이브러리 심볼,
+ * SSL alert 번호 등 내부 진단 정보를 포함한다. 이를 그대로 클라이언트에 흘리면:
+ *   1) 외부 사용자에게 의미 불명의 영문 stack-like 메시지가 노출되어 UX 결함
+ *   2) 내부 의존성 단서 노출 (낮은 위험이지만 내부망 전용 어드민도 모범상 차단)
+ *
+ * 따라서 `err.code`(Node syscall errno) + 메시지 패턴 매칭으로 카테고리를 결정하고,
+ * 미리 정의된 한국어 한 문장만 반환한다. raw err.message는 호출부에서 pino로만 기록.
+ */
+function classifyProxyError(err: unknown): ClassifiedError {
+  // Node/axios 공통: err.code (string), err.message (string)
+  const code = typeof (err as { code?: unknown })?.code === 'string'
+    ? ((err as { code: string }).code)
+    : undefined;
+  const rawMessage = err instanceof Error ? err.message : '';
+
+  // 1) 연결 거부 — Proxy 서버 자체가 내려간 경우 가장 흔함
+  if (code === 'ECONNREFUSED') {
+    return { error_code: 'connection_refused', message: '프록시 서버에 연결할 수 없습니다.' };
+  }
+  // 2) 호스트 미해석 / DNS 실패
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') {
+    return { error_code: 'host_not_found', message: '프록시 서버 호스트를 찾을 수 없습니다.' };
+  }
+  // 3) 타임아웃 — axios timeout / socket timeout / connect timeout
+  if (code === 'ETIMEDOUT' || code === 'ESOCKETTIMEDOUT' || code === 'ECONNABORTED') {
+    return { error_code: 'timeout', message: '요청 시간이 초과되었습니다.' };
+  }
+  // 4) 연결 끊김
+  if (code === 'ECONNRESET' || code === 'EPIPE') {
+    return { error_code: 'connection_reset', message: '프록시 서버와의 연결이 끊어졌습니다.' };
+  }
+  // 5) TLS 인증서 만료/검증 실패 — Node TLS errno 화이트리스트
+  if (code === 'CERT_HAS_EXPIRED' || code === 'CERT_NOT_YET_VALID') {
+    return { error_code: 'cert_expired', message: 'TLS 인증서가 만료되었거나 아직 유효하지 않습니다.' };
+  }
+  if (
+    code === 'DEPTH_ZERO_SELF_SIGNED_CERT' ||
+    code === 'SELF_SIGNED_CERT_IN_CHAIN' ||
+    code === 'UNABLE_TO_VERIFY_LEAF_SIGNATURE' ||
+    code === 'UNABLE_TO_GET_ISSUER_CERT' ||
+    code === 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY'
+  ) {
+    return { error_code: 'cert_invalid', message: 'TLS 인증서를 검증할 수 없습니다.' };
+  }
+  // 6) TLS/SSL 핸드셰이크 실패 — EPROTO + OpenSSL alert. raw 메시지는 절대 노출 금지
+  if (code === 'EPROTO' || /SSL routines|tlsv1 alert|ssl3_/i.test(rawMessage)) {
+    return { error_code: 'tls_handshake_failed', message: 'TLS 핸드셰이크에 실패했습니다.' };
+  }
+  // 7) 그 외 — 카테고리 미상. 분류 화이트리스트 외 메시지는 절대 그대로 노출하지 않는다.
+  return { error_code: 'unknown', message: '프록시 요청에 실패했습니다.' };
+}
+
 /** 라우트 옵션 — domainRepo가 있으면 테스트 엔드포인트에서 SSRF 방어용 도메인 검증에 사용 */
 interface ProxyRouteOptions {
   domainRepo?: DomainRepository;
@@ -113,6 +179,15 @@ export async function proxyRoutes(app: FastifyInstance, opts: ProxyRouteOptions 
         message: '유효하지 않은 경로입니다.',
       });
     }
+    // path는 슬래시(/)로 시작해야 한다 — 방어 심층화(#166).
+    // 그렇지 않으면 baseUrl + `/${path}` 정규화 후 origin에 도달해 TLS 핸드셰이크 단계의
+    // raw OpenSSL 에러를 유발하는 경로가 열린다. 서버에서 명시적으로 거부해 raw 에러 노출 표면을 줄인다.
+    if (!path.startsWith('/')) {
+      return reply.status(400).send({
+        error: 'invalid_path',
+        message: '경로는 "/"로 시작해야 합니다.',
+      });
+    }
 
     const baseUrl = protocol === 'https' ? PROXY_HTTPS_URL : PROXY_URL;
     const targetUrl = `${baseUrl}${path.startsWith('/') ? path : `/${path}`}`;
@@ -143,13 +218,24 @@ export async function proxyRoutes(app: FastifyInstance, opts: ProxyRouteOptions 
         response_headers,
       };
     } catch (err) {
-      // 프록시 서버 자체에 연결할 수 없는 경우
-      const message = err instanceof Error ? err.message : '알 수 없는 오류';
+      // axios/Node 에러 분류 — raw OpenSSL/Node 메시지를 절대 그대로 노출하지 않는다 (#166).
+      // 디버그용 raw 정보는 pino 로그에만 기록하고, 응답에는 화이트리스트 매핑된
+      // error_code + 사용자 친화 한국어 message만 반환한다.
+      const classified = classifyProxyError(err);
+      const rawMessage = err instanceof Error ? err.message : String(err);
+      const rawCode = typeof (err as { code?: unknown })?.code === 'string'
+        ? (err as { code: string }).code
+        : undefined;
+      app.log.warn(
+        { err, code: rawCode, raw_message: rawMessage, domain, path, protocol, classified: classified.error_code },
+        '[proxy/test] 프록시 요청 실패',
+      );
       return {
         success: false,
         status_code: 0,
         response_time_ms: Date.now() - startMs,
-        error: message,
+        error_code: classified.error_code,
+        error: classified.message,
       };
     }
   });
