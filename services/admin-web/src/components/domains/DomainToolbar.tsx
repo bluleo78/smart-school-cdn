@@ -172,8 +172,10 @@ export function DomainToolbar({
         {/* 검색 입력 + 클리어(X) 버튼 — 입력값이 있고 IME 조합 중이 아닐 때만 X 노출(#213).
             X는 절대 위치로 입력 우측에 겹치며, 텍스트가 아이콘에 가려지지 않도록 pr-8 여백을 둔다. */}
         <div className="relative flex-1 md:flex-none md:w-64">
+          {/* aria-label 필수 — placeholder는 WCAG 1.3.1/4.1.2/3.3.2상 label로 인정 안 됨 (포커스/입력 시 사라짐) (#355) */}
           <Input
             placeholder="도메인 검색..."
+            aria-label="도메인 검색"
             value={searchValue}
             onChange={handleSearchChange}
             onKeyDown={handleSearchKeyDown}
