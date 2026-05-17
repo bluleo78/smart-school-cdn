@@ -335,6 +335,38 @@ test.describe('도메인 상세 — 진단 탭 (#387)', () => {
     await expect(page).toHaveURL(/dgRange=24h/);
   });
 
+  // path 입력 debounce 회귀 (#402):
+  // 빠른 keystroke 입력이 keystroke 수 만큼 /diagnose 요청을 발사하면 안 된다.
+  // 250ms debounce 가 적용되어 마지막 입력으로만 1회(또는 2회 이내) 발사돼야 한다.
+  test('path 입력 debounce — 빠른 연속 입력에 fan-in 호출이 쌓이지 않는다 (#402)', async ({
+    page,
+  }) => {
+    await setupBaseMocks(page);
+    // /diagnose 호출 횟수를 카운트한다. mock 응답은 정적이라 무관.
+    let diagnoseCount = 0;
+    await page.route(`**/api/domains/${HOST}/diagnose*`, async (route) => {
+      diagnoseCount += 1;
+      await route.fulfill({ json: diagnoseHit() });
+    });
+
+    await page.goto(`/domains/${HOST}?tab=diagnose`);
+
+    // 7글자를 빠르게 순차 입력 — 과거에는 7회 호출이 발사되었음 (이슈 본문 재현).
+    // debounce 적용 후엔 마지막 안정값으로 1~2회 이내로 수렴해야 한다.
+    const input = page.getByTestId('diagnose-path-input');
+    for (const v of ['/', '/a', '/ab', '/abc', '/abcd', '/abcde', '/abcdef']) {
+      await input.fill(v);
+    }
+
+    // debounce 윈도우(250ms) + 여유분 — 마지막 입력으로 발사된 호출이 완료될 시간 확보
+    await page.waitForTimeout(600);
+
+    // 회귀 가드: keystroke 수(7) 보다 훨씬 적어야 한다. 3회 이내(=debounce 가 동작)면 통과.
+    expect(diagnoseCount).toBeLessThanOrEqual(3);
+    // 그리고 최종 안정 path 로 한 번은 발사되어 결과가 표시되어야 한다
+    await expect(page.getByTestId('diagnose-summary')).toBeVisible();
+  });
+
   // 비정상 숫자값(음수 size / epoch 0 / 무제한 소수 ratio / sample=0+5xx>0) 방어 회귀 (#401):
   // diagnose 응답이 비정상이거나 경계값일 때 UI가 그대로 노출하지 않고 sanity 처리하는지 검증.
   test('비정상 숫자값 방어 — 음수 size·epoch 0·소수 ratio·sample=0 모순 (#401)', async ({ page }) => {

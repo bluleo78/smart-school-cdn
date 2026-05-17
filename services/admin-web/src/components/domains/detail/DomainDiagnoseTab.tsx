@@ -6,6 +6,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'react-router';
 import { toast } from 'sonner';
 import { useDomainDiagnose } from '../../../hooks/useDomainDiagnose';
+import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
 import { usePurgeCache } from '../../../hooks/usePurgeCache';
 import type {
   DiagnoseRange,
@@ -61,7 +62,19 @@ export function DomainDiagnoseTab({ host }: Props) {
   // UI 단에서 사용자에게 명시적인 검증 메시지를 노출해 무피드백 상태를 제거한다.
   const pathInvalid = pathInput.trim().length > 0 && !pathOnly.startsWith('/');
 
-  const diagnoseQuery = useDomainDiagnose({ host, path: pathOnly, query: queryOnly, range });
+  // 입력 debounce — keystroke 마다 /diagnose 요청이 발사되는 fan-in 부하 차단 (#402).
+  // path 길이만큼 직렬 호출이 쌓이던 회귀를 막기 위해 query 입력값을 250ms 안정화해서
+  // queryKey 에 흘려보낸다. URL searchParams 동기화(pathInput 기반)는 즉시성을 유지해
+  // 북마크·공유 링크 UX는 변하지 않는다.
+  const debouncedPath = useDebouncedValue(pathOnly, 250);
+  const debouncedQuery = useDebouncedValue(queryOnly, 250);
+
+  const diagnoseQuery = useDomainDiagnose({
+    host,
+    path: debouncedPath,
+    query: debouncedQuery,
+    range,
+  });
   const purgeMutation = usePurgeCache();
 
   // 진단 API 에러(500/네트워크 등) 시 toast로 1회 알림 — 무피드백 문제 해소 (#399).
