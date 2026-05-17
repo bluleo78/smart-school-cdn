@@ -307,7 +307,9 @@ export function UsersPage() {
               {/* 이메일 입력 — autocomplete="username"으로 브라우저 자동완성·비밀번호 매니저 연동 지원.
                *  maxLength=254 — 서버 한도와 동기화한 입력 단계 가드. zod max(254)와 이중 방어 (#253).
                *  IME 환경에서도 키보드 입력 단계에서 길이 초과를 차단해 서버 왕복 비용 절감. */}
-              <Input id="add-user-email" type="email" autoComplete="username" maxLength={254} {...createForm.register('username')} />
+              {/* placeholder — 형식 예시 제공으로 비밀번호/비밀번호 확인 필드와 정책 일관화 (#288).
+               *  도메인 추가 다이얼로그의 "모든 필드에 예시 제공" 정책과 통일. */}
+              <Input id="add-user-email" type="email" autoComplete="username" maxLength={254} placeholder="user@example.com" {...createForm.register('username')} />
               {createForm.formState.errors.username && <p className="text-xs text-destructive">{createForm.formState.errors.username.message}</p>}
             </div>
             <div>

@@ -325,6 +325,25 @@ test.describe('사용자 관리', () => {
     expect(autocomplete).toBe('username');
   });
 
+  // 이슈 #288 회귀 방지 — 사용자 추가 다이얼로그 이메일 input placeholder 누락
+  // 비밀번호/비밀번호 확인 필드는 placeholder 힌트가 있는데 이메일만 비어 있어 정책 일관성이 깨졌던 UX 버그.
+  test('사용자 추가 다이얼로그 — 이메일 입력에 placeholder 예시 존재', async ({ page }) => {
+    await mockApi(page, 'GET', '/users', baseUsers);
+
+    await page.goto('/users');
+
+    // 사용자 추가 다이얼로그 열기
+    await page.getByRole('button', { name: '+ 사용자 추가' }).click();
+
+    // 이메일 input placeholder — 형식 예시 제공으로 비밀번호 필드들과 정책 일관화
+    const emailInput = page.locator('input#add-user-email');
+    await expect(emailInput).toBeVisible();
+    const placeholder = await emailInput.getAttribute('placeholder');
+    // 빈 문자열/null 모두 회귀로 간주 — 어떤 형식 예시든 비어 있지 않아야 함
+    expect(placeholder).toBeTruthy();
+    expect(placeholder).toMatch(/@/);
+  });
+
   // 이슈 #52 회귀 방지 — 빈 사용자 목록 시 안내 메시지 누락
   test('빈 사용자 목록 시 "등록된 사용자가 없습니다." 메시지 표시', async ({ page }) => {
     // 빈 배열 반환 — 테이블 헤더만 표시되고 빈 바디가 나오는 버그 재현 조건
