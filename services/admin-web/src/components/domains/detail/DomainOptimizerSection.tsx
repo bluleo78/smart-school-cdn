@@ -203,7 +203,7 @@ export function DomainOptimizerSection({ host }: Props) {
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">최적화 미설정</p>
             <p className="text-xs text-muted-foreground">
-              이 도메인에 설정된 최적화 프로파일이 없습니다.
+              이 도메인에 설정된 최적화 프로파일이 없습니다
             </p>
             <Button
               onClick={handleActivate}

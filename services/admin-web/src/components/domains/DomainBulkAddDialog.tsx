@@ -164,7 +164,7 @@ export function DomainBulkAddDialog({ open, onOpenChange }: DomainBulkAddDialogP
           aria-live="polite"
         >
           {domainCount === 0
-            ? '입력된 도메인이 없습니다.'
+            ? '입력된 도메인이 없습니다'
             : overLineLimit
               ? `${totalLines}줄 / 도메인 ${domainCount}개 — 최대 ${BULK_ADD_MAX_LINES}줄까지 등록할 수 있습니다.`
               : `${totalLines}줄 / 도메인 ${domainCount}개`}
@@ -178,7 +178,7 @@ export function DomainBulkAddDialog({ open, onOpenChange }: DomainBulkAddDialogP
           <Button variant="outline" onClick={handleClose} disabled={bulkAdd.isPending}>
             취소
           </Button>
-          {/* 빈 입력 가드 — domainCount === 0 (입력 미리보기 "입력된 도메인이 없습니다." 상태)와
+          {/* 빈 입력 가드 — domainCount === 0 (입력 미리보기 "입력된 도메인이 없습니다" 상태)와
               버튼 disabled 신호를 동기화하여 toolbar 일괄 삭제와 일관성 확보 (#232) */}
           <Button
             onClick={handleSubmit}

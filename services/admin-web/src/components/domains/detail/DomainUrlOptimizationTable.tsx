@@ -240,14 +240,14 @@ export function DomainUrlOptimizationTable({
                 <p className="text-sm font-medium text-foreground">
                   {trimmed.length > 0 && decision !== 'all' ? (
                     <>
-                      검색어 <strong>&ldquo;{trimmed}&rdquo;</strong> + 결과 필터 조건에 맞는 항목이 없습니다.
+                      검색어 <strong>&ldquo;{trimmed}&rdquo;</strong> + 결과 필터 조건에 맞는 항목이 없습니다
                     </>
                   ) : trimmed.length > 0 ? (
                     <>
-                      검색어 <strong>&ldquo;{trimmed}&rdquo;</strong>에 일치하는 항목이 없습니다.
+                      검색어 <strong>&ldquo;{trimmed}&rdquo;</strong>에 일치하는 항목이 없습니다
                     </>
                   ) : (
-                    <>선택한 결과 필터에 맞는 항목이 없습니다.</>
+                    <>선택한 결과 필터에 맞는 항목이 없습니다</>
                   )}
                 </p>
                 <p className="text-xs">조건을 변경하거나 초기화해 보세요.</p>

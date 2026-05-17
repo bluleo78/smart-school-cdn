@@ -484,7 +484,7 @@ test.describe('도메인 관리 — 도메인 목록', () => {
 
     // 필터 전용 빈 상태가 표시되어야 한다 (#95 핵심)
     await expect(page.getByTestId('domains-empty-filter')).toBeVisible();
-    await expect(page.getByText('비활성 상태인 도메인이 없습니다.')).toBeVisible();
+    await expect(page.getByText('비활성 상태인 도메인이 없습니다')).toBeVisible();
     await expect(page.getByText('필터를 변경하거나 해제해 보세요.')).toBeVisible();
     // 도메인 추가 CTA 버튼은 표시되지 않아야 한다 (#95 핵심)
     await expect(page.getByTestId('empty-add-domain-btn')).not.toBeVisible();
@@ -506,7 +506,7 @@ test.describe('도메인 관리 — 도메인 목록', () => {
 
     // 필터 전용 빈 상태가 표시되어야 한다
     await expect(page.getByTestId('domains-empty-filter')).toBeVisible();
-    await expect(page.getByText('활성 상태인 도메인이 없습니다.')).toBeVisible();
+    await expect(page.getByText('활성 상태인 도메인이 없습니다')).toBeVisible();
     // 도메인 추가 CTA 버튼은 표시되지 않아야 한다 (#95 핵심)
     await expect(page.getByTestId('empty-add-domain-btn')).not.toBeVisible();
   });
@@ -1002,8 +1002,8 @@ test.describe('도메인 관리 — 일괄 추가 (#55)', () => {
     await page.getByRole('button', { name: '일괄 추가' }).click();
     await expect(page.getByTestId('bulk-add-dialog')).toBeVisible();
 
-    // 입력 미리보기는 "입력된 도메인이 없습니다." 안내 + 버튼은 disabled (#232)
-    await expect(page.getByTestId('bulk-add-preview')).toHaveText('입력된 도메인이 없습니다.');
+    // 입력 미리보기는 "입력된 도메인이 없습니다" 안내 + 버튼은 disabled (#232)
+    await expect(page.getByTestId('bulk-add-preview')).toHaveText('입력된 도메인이 없습니다');
     await expect(page.getByTestId('bulk-add-submit')).toBeDisabled();
 
     // 한 번 입력했다가 비우면 다시 disabled로 돌아가는지 확인 (toggle 회귀)
@@ -2360,7 +2360,7 @@ test.describe('도메인 관리 — 일괄 추가 미리보기 (#219)', () => {
     await expect(page.getByTestId('bulk-add-dialog')).toBeVisible();
 
     // 빈 입력일 때 미리보기 안내 + 제출 버튼 정적 라벨
-    await expect(page.getByTestId('bulk-add-preview')).toHaveText('입력된 도메인이 없습니다.');
+    await expect(page.getByTestId('bulk-add-preview')).toHaveText('입력된 도메인이 없습니다');
     await expect(page.getByTestId('bulk-add-submit')).toHaveText('일괄 추가');
   });
 

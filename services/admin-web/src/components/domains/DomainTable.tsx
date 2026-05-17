@@ -139,7 +139,7 @@ export function DomainTable({
         >
           <Globe size={40} className="opacity-25" />
           <p className="text-sm font-medium text-foreground">
-            <strong>&ldquo;{searchQuery}&rdquo;</strong>에 일치하는 도메인이 없습니다.
+            <strong>&ldquo;{searchQuery}&rdquo;</strong>에 일치하는 도메인이 없습니다
           </p>
           <p className="text-xs">검색어를 바꿔 다시 시도해보세요.</p>
           {/* 검색 초기화 CTA — 클릭 시 검색어를 지워 전체 목록으로 돌아간다 (#126) */}
@@ -166,7 +166,7 @@ export function DomainTable({
         >
           <Globe size={40} className="opacity-25" />
           <p className="text-sm font-medium text-foreground">
-            {filterLabel} 상태인 도메인이 없습니다.
+            {filterLabel} 상태인 도메인이 없습니다
           </p>
           <p className="text-xs">필터를 변경하거나 해제해 보세요.</p>
           {/* 필터 해제 CTA — 클릭 시 상태 필터를 해제하여 전체 목록으로 돌아간다 (#126) */}
