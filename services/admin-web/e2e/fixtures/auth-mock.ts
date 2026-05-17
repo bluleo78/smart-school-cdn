@@ -91,3 +91,22 @@ export async function mockLoginFailure(page: Page) {
     });
   });
 }
+
+/**
+ * 로그인 rate-limit 응답을 시뮬레이션 — 429 + retry-after 헤더 + 본문 message 반환 (#169).
+ * 기본 retry-after 는 900초(15분) — admin-server `/api/auth/login` 라우트의 실제 응답을 모사.
+ */
+export async function mockLoginRateLimited(page: Page, retryAfterSec: number = 900) {
+  await page.route('**/api/auth/login', async (route) => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    await route.fulfill({
+      status: 429,
+      contentType: 'application/json',
+      headers: { 'retry-after': String(retryAfterSec) },
+      body: JSON.stringify({
+        error: 'rate_limit_exceeded',
+        message: `요청이 너무 잦습니다. ${Math.ceil(retryAfterSec / 60)} minutes 후 다시 시도하세요.`,
+      }),
+    });
+  });
+}

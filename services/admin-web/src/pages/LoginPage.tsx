@@ -23,6 +23,30 @@ const schema = z.object({
 
 type FormData = z.infer<typeof schema>;
 
+/**
+ * 429 응답에서 재시도까지 남은 "분"을 추출 (#169).
+ *
+ * 우선순위:
+ * 1) HTTP `retry-after` 헤더(초) — 60으로 나눠 올림 (최소 1분 보장)
+ * 2) 응답 본문 message 에서 "<숫자> minutes" 또는 "<숫자>분" 패턴 추출
+ *    (admin-server 메시지가 "요청이 너무 잦습니다. 15 minutes 후 ..." 같은 혼합 표기를 사용함)
+ * 3) 모두 실패 시 null — 호출부가 "잠시 후" 같은 일반 카피로 폴백
+ */
+function extractRetryMinutes(retryAfter: string | undefined, message: string | undefined): number | null {
+  if (retryAfter) {
+    const sec = Number(retryAfter);
+    if (Number.isFinite(sec) && sec > 0) return Math.max(1, Math.ceil(sec / 60));
+  }
+  if (message) {
+    const m = message.match(/(\d+)\s*(?:minutes?|분)/);
+    if (m) {
+      const n = Number(m[1]);
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+  }
+  return null;
+}
+
 export function LoginPage() {
   // AppLayout 바깥에서 렌더링되므로 usePageTitle 로 직접 탭 타이틀 설정 — WCAG 2.4.2
   usePageTitle('로그인');
@@ -44,8 +68,19 @@ export function LoginPage() {
       const from = rawFrom.startsWith('/') && !rawFrom.startsWith('//') ? rawFrom : '/';
       navigate(from, { replace: true });
     } catch (e) {
-      const status = (e as { response?: { status?: number } }).response?.status;
-      setServerError(status === 401 ? '아이디 또는 비밀번호가 올바르지 않습니다' : '로그인 중 오류가 발생했습니다');
+      // 서버 에러 분기 — 401(자격증명 오류), 429(rate-limit) 별도 안내, 그 외 일반 오류 (#169)
+      const err = e as { response?: { status?: number; headers?: Record<string, string>; data?: { message?: string } } };
+      const status = err.response?.status;
+      if (status === 401) {
+        setServerError('아이디 또는 비밀번호가 올바르지 않습니다');
+      } else if (status === 429) {
+        // retry-after 헤더(초) 우선, 없으면 응답 본문 message 에서 분 단위 추출, 둘 다 없으면 "잠시 후"
+        const minutes = extractRetryMinutes(err.response?.headers?.['retry-after'], err.response?.data?.message);
+        const when = minutes != null ? `약 ${minutes}분 후` : '잠시 후';
+        setServerError(`요청이 너무 잦습니다. ${when} 다시 시도해 주세요.`);
+      } else {
+        setServerError('로그인 중 오류가 발생했습니다');
+      }
     }
   };
 

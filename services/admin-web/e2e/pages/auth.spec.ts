@@ -5,7 +5,7 @@
 /// - 로그인 후 로그아웃 → /login 이동
 /// - from 파라미터 외부 URL → / 로 fallback (Open Redirect 방어)
 import { test, expect } from '../fixtures/test';
-import { mockUnauthenticated, mockLoginFailure } from '../fixtures/auth-mock';
+import { mockUnauthenticated, mockLoginFailure, mockLoginRateLimited } from '../fixtures/auth-mock';
 
 test.describe('인증', () => {
   test('비로그인 상태에서 보호 경로 접근 → /login 리다이렉트', async ({ page }) => {
@@ -46,6 +46,24 @@ test.describe('인증', () => {
 
     // server-error 영역에 "올바르지" 문구 노출 (LoginPage 의 401 분기)
     await expect(page.getByTestId('server-error')).toContainText('올바르지');
+  });
+
+  // 이슈 #169 회귀 방지 — 429 응답 시 "로그인 중 오류" 모호 메시지 대신 재시도 안내 노출
+  test('429 rate-limit 응답 → 재시도 안내 메시지 노출 (#169)', async ({ page }) => {
+    await mockUnauthenticated(page);
+    await mockLoginRateLimited(page, 900); // retry-after 900s = 15분
+
+    await page.goto('/login');
+    await page.fill('input[name=username]', 'user@example.com');
+    await page.fill('input[name=password]', 'some-password-1');
+    await page.getByRole('button', { name: '로그인' }).click();
+
+    // 입력→처리→출력: 429 응답 입력 → LoginPage 의 429 분기 → "요청이 너무 잦습니다" + 약 15분 안내 출력
+    const err = page.getByTestId('server-error');
+    await expect(err).toContainText('요청이 너무 잦습니다');
+    await expect(err).toContainText('15분');
+    // 모호한 일반 오류 카피가 더 이상 표시되지 않아야 함
+    await expect(err).not.toContainText('로그인 중 오류가 발생');
   });
 
   test('올바른 자격증명 → / 로 이동', async ({ page }) => {
