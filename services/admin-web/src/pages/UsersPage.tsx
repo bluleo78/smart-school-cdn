@@ -303,7 +303,7 @@ export function UsersPage() {
           <form onSubmit={createForm.handleSubmit((d) => { createMut.mutate(d); })} className="space-y-3">
             <div>
               {/* htmlFor/id 연결 — 레이블 클릭 시 입력 필드 포커스·스크린 리더 연동 (#79) */}
-              <Label htmlFor="add-user-email">이메일</Label>
+              <Label htmlFor="add-user-email">이메일 <span className="text-destructive" aria-hidden="true">*</span></Label>
               {/* 이메일 입력 — autocomplete="username"으로 브라우저 자동완성·비밀번호 매니저 연동 지원.
                *  maxLength=254 — 서버 한도와 동기화한 입력 단계 가드. zod max(254)와 이중 방어 (#253).
                *  IME 환경에서도 키보드 입력 단계에서 길이 초과를 차단해 서버 왕복 비용 절감. */}
@@ -314,7 +314,7 @@ export function UsersPage() {
             </div>
             <div>
               {/* htmlFor/id 연결 — 레이블 클릭 시 입력 필드 포커스·스크린 리더 연동 (#79) */}
-              <Label htmlFor="add-user-password">비밀번호</Label>
+              <Label htmlFor="add-user-password">비밀번호 <span className="text-destructive" aria-hidden="true">*</span></Label>
               {/* PasswordInput — 표시/숨기기 토글 포함, autocomplete="new-password"로 자동완성 힌트 유지 (#76) */}
               <PasswordInput id="add-user-password" autoComplete="new-password" placeholder="8자 이상" {...createForm.register('password')} />
               {createForm.formState.errors.password && <p className="text-xs text-destructive">{createForm.formState.errors.password.message}</p>}
@@ -323,7 +323,7 @@ export function UsersPage() {
               {/* htmlFor/id 연결 — 레이블 클릭 시 입력 필드 포커스·스크린 리더 연동 (#79)
                *  비밀번호 확인 — 단일 필드 + 토글 미사용 시 plaintext 미확인 오타 저장 방지 (#217, #211 패턴).
                *  zod refine 에서 password 와 일치 검증, 불일치 시 인라인 에러 표시 → mutation 차단 */}
-              <Label htmlFor="add-user-password-confirm">비밀번호 확인</Label>
+              <Label htmlFor="add-user-password-confirm">비밀번호 확인 <span className="text-destructive" aria-hidden="true">*</span></Label>
               {/* PasswordInput — 표시/숨기기 토글 포함, autocomplete="new-password" 동일 적용 */}
               <PasswordInput id="add-user-password-confirm" autoComplete="new-password" placeholder="비밀번호 재입력" {...createForm.register('confirmPassword')} />
               {createForm.formState.errors.confirmPassword && <p className="text-xs text-destructive">{createForm.formState.errors.confirmPassword.message}</p>}
@@ -376,7 +376,7 @@ export function UsersPage() {
             {passwordTarget?.id === myId && (
               <div>
                 {/* htmlFor/id 연결 — 레이블 클릭 시 입력 필드 포커스·스크린 리더 연동 */}
-                <Label htmlFor="current-password">현재 비밀번호</Label>
+                <Label htmlFor="current-password">현재 비밀번호 <span className="text-destructive" aria-hidden="true">*</span></Label>
                 {/* autocomplete="current-password" — 비밀번호 매니저 연동 (프로젝트 autocomplete 정책 준수)
                  *  placeholder — 빈 라벨로 컨텍스트 부족 문제 보완 (#193) */}
                 <PasswordInput id="current-password" autoComplete="current-password" placeholder="현재 사용 중인 비밀번호" {...passwordForm.register('currentPassword')} />
@@ -387,7 +387,7 @@ export function UsersPage() {
             )}
             <div>
               {/* htmlFor/id 연결 — 레이블 클릭 시 입력 필드 포커스·스크린 리더 연동 (#79) */}
-              <Label htmlFor="reset-password">새 비밀번호</Label>
+              <Label htmlFor="reset-password">새 비밀번호 <span className="text-destructive" aria-hidden="true">*</span></Label>
               {/* PasswordInput — 표시/숨기기 토글 포함, autocomplete="new-password"로 자동완성 힌트 유지 (#76)
                *  placeholder — 비밀번호 정책 힌트 노출, 빈 라벨 컨텍스트 보완 (#193) */}
               <PasswordInput id="reset-password" autoComplete="new-password" placeholder="8자 이상" {...passwordForm.register('password')} />
@@ -397,7 +397,7 @@ export function UsersPage() {
               {/* htmlFor/id 연결 — 레이블 클릭 시 입력 필드 포커스·스크린 리더 연동 (#79)
                *  새 비밀번호 확인 — 단일 필드 + 토글 미사용 시 plaintext 미확인 오타 저장 방지 (#211).
                *  zod refine 에서 password 와 일치 검증, 불일치 시 인라인 에러 표시 → mutation 차단 */}
-              <Label htmlFor="reset-password-confirm">새 비밀번호 확인</Label>
+              <Label htmlFor="reset-password-confirm">새 비밀번호 확인 <span className="text-destructive" aria-hidden="true">*</span></Label>
               {/* PasswordInput — 표시/숨기기 토글 포함, autocomplete="new-password" 동일 적용 */}
               <PasswordInput id="reset-password-confirm" autoComplete="new-password" placeholder="새 비밀번호 재입력" {...passwordForm.register('confirmPassword')} />
               {passwordForm.formState.errors.confirmPassword && <p className="text-xs text-destructive">{passwordForm.formState.errors.confirmPassword.message}</p>}

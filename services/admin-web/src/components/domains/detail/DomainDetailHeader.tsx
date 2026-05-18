@@ -103,9 +103,13 @@ export function DomainDetailHeader({ domain }: Props) {
 
       {/* 오른쪽: 액션 버튼 */}
       <div className="flex items-center gap-2">
-        {/* 캐시 퍼지 — 비활성 도메인에서는 disabled + 안내(#230) */}
+        {/* 캐시 퍼지 — 비활성 도메인에서는 disabled + 안내(#230)
+         *  이슈 #353 — 3개 진입점(header/quick-actions/table) 의 variant 통일.
+         *  outline + destructive 텍스트로 1차 액션은 가볍게, 실제 확정은 확인 다이얼로그의
+         *  destructive 버튼이 담당. */}
         <Button
-          variant="default"
+          variant="outline"
+          className="text-destructive hover:text-destructive"
           onClick={() => setShowPurgeDialog(true)}
           disabled={purgeDomain.isPending || isInactive}
           title={isInactive ? inactiveTitle : undefined}

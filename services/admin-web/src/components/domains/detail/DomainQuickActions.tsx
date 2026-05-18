@@ -311,8 +311,11 @@ export function DomainQuickActions({ domain }: Props) {
           title="캐시 퍼지"
           description="이 도메인의 전체 캐시를 즉시 삭제합니다."
         >
+          {/* 이슈 #353 — header/table 과 variant 통일. 1차 액션은 outline,
+           *  실제 확정은 확인 다이얼로그의 destructive 버튼이 담당. */}
           <Button
-            variant="destructive"
+            variant="outline"
+            className="text-destructive hover:text-destructive"
             onClick={() => setPurgeOpen(true)}
             disabled={isInactive}
             title={isInactive ? inactiveTitle : undefined}

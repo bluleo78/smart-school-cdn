@@ -263,7 +263,9 @@ export function DomainTable({
           <TableHead className="text-right whitespace-nowrap">요청(24h)</TableHead>
           <TableHead className="text-right whitespace-nowrap">캐시 히트</TableHead>
           <TableHead className="whitespace-nowrap">TLS</TableHead>
-          <TableHead className="text-right">액션</TableHead>
+          {/* 이슈 #290 — iPad portrait(810px) 등 좁은 viewport 에서 우측 가로 스크롤로 가려지는 문제 차단.
+           *  sticky right-0 + bg-card 로 항상 노출. shadow 로 스크롤 가능 어포던스 제공. */}
+          <TableHead className="text-right sticky right-0 bg-card shadow-[-4px_0_4px_-4px_rgba(0,0,0,0.1)]">액션</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -336,16 +338,19 @@ export function DomainTable({
                 <TlsStatusBadge expiresAt={tlsExpiryByHost?.get(domain.host) ?? null} />
               </TableCell>
 
-              {/* 액션 버튼 — shadcn Tooltip으로 감싸 다크모드 대응·즉시 표시 UX 확보 */}
-              <TableCell className="text-right">
+              {/* 액션 버튼 — shadcn Tooltip으로 감싸 다크모드 대응·즉시 표시 UX 확보.
+               *  이슈 #290 — sticky right-0 + bg-card 로 좁은 viewport(iPad portrait 810px)에서도 항상 노출.
+               *  shadow-[-4px..] 로 스크롤 가능 어포던스 제공. */}
+              <TableCell className="text-right sticky right-0 bg-card shadow-[-4px_0_4px_-4px_rgba(0,0,0,0.1)]">
                 <div className="flex items-center justify-end gap-1">
-                  {/* 캐시 퍼지 — in-flight 호스트 집합에 포함된 행을 disabled 처리해 중복 클릭 방지 (#162, #205) */}
+                  {/* 캐시 퍼지 — in-flight 호스트 집합에 포함된 행을 disabled 처리해 중복 클릭 방지 (#162, #205).
+                   *  이슈 #353 — header/quick-actions 와 variant 통일 (outline + destructive 컬러). */}
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <Button
-                        variant="ghost"
+                        variant="outline"
                         size="icon"
-                        className="h-7 w-7"
+                        className="h-7 w-7 text-destructive hover:text-destructive"
                         onClick={() => onPurge(domain.host)}
                         disabled={pendingPurgeHosts?.has(domain.host) ?? false}
                         data-testid={`domain-purge-${domain.host}`}
