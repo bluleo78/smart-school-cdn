@@ -85,32 +85,48 @@ test.describe('대시보드 — 인기 콘텐츠', () => {
   });
 });
 
-// ─── 전체 캐시 퍼지 ──────────────────────────────────────────
-test.describe('대시보드 — 전체 캐시 퍼지', () => {
+// ─── 전체 캐시 퍼지 (이슈 #282 — /system 으로 이동) ──────────
+test.describe('시스템 — 전체 캐시 퍼지', () => {
   test('전체 캐시 퍼지 버튼 → 확인 다이얼로그 → 닫힘', async ({ page }) => {
-    await setupDashboardMocks(page);
+    // /system 페이지가 호출하는 API 들을 빈 응답으로 모킹 (UI 렌더에만 관심)
+    await mockApi(page, 'GET', '/proxy/status', { status: 'online', uptime: 3600, total_requests: 42 });
+    await mockApi(page, 'GET', '/cache/stats', createCacheStats());
+    await mockApi(page, 'GET', '/system/status', {
+      proxy:     { status: 'online' },
+      storage:   { status: 'online' },
+      tls:       { status: 'online' },
+      dns:       { status: 'online' },
+      optimizer: { status: 'online' },
+    });
+    await mockApi(page, 'GET', '/tls/certificates', []);
     await mockApi(page, 'DELETE', '/cache/purge', { purged_count: 100, freed_bytes: 1048576 });
 
-    await page.goto('/');
+    await page.goto('/system');
 
-    await page.getByRole('button', { name: '전체 캐시 퍼지' }).click();
-    await expect(page.getByText('전체 캐시 퍼지').nth(1)).toBeVisible();
+    await page.getByTestId('purge-all-btn').click();
+    await expect(page.getByTestId('purge-all-dialog')).toBeVisible();
 
     await page.getByRole('button', { name: '퍼지 실행' }).click();
-    await expect(page.getByRole('button', { name: '퍼지 실행' })).not.toBeVisible();
+    await expect(page.getByTestId('purge-all-dialog')).not.toBeVisible();
   });
 
   /**
-   * 이슈 #419 회귀 방지 — usePurgeCache(전체 퍼지) onSuccess에서 ['cache','series']·['domains','summary'] 미무효화
-   * 수정 전: ['cache','stats']·['cache','popular']만 invalidate → CacheHitRateChart(10s 폴링) stale
-   * 수정 후: ['cache','series']도 invalidate → 즉시 refetch
+   * 이슈 #419 회귀 방지 — usePurgeCache(전체 퍼지) onSuccess에서 ['cache','series']·['domains','summary'] invalidate.
+   * 이슈 #282 이후 퍼지 진입점은 /system 으로 이동했지만 invalidate 대상은 Dashboard 쿼리.
    *
-   * 검증 전략: Dashboard에 활성 마운트된 ['cache','series'](/api/cache/series) 호출 수를 카운트한다.
-   * 퍼지 후 baseline보다 증가해야 한다. 수정 전(invalidate 누락)에는 폴링 외 추가 호출이 발생하지 않아 실패한다.
-   * (['domains','summary']는 Dashboard 외 /domains 페이지에서 마운트되므로 본 테스트 범위에서 제외 — usePurgeDomain #333 패턴과 정렬한 invalidate 코드 자체를 회귀 방지 근거로 삼음)
+   * 검증 전략: 먼저 Dashboard 를 방문해 ['cache','series'] 쿼리를 QueryClient 에 등록 → /system 으로 이동 →
+   * 퍼지 실행 → Dashboard 로 복귀 시 invalidate 된 쿼리가 즉시 refetch 되어 호출 수가 증가하는 것을 검증.
    */
   test('전체 퍼지 성공 시 ["cache","series"] 쿼리가 invalidate되어 refetch된다 (회귀: #419)', async ({ page }) => {
     await setupDashboardMocks(page);
+    await mockApi(page, 'GET', '/system/status', {
+      proxy:     { status: 'online' },
+      storage:   { status: 'online' },
+      tls:       { status: 'online' },
+      dns:       { status: 'online' },
+      optimizer: { status: 'online' },
+    });
+    await mockApi(page, 'GET', '/tls/certificates', []);
     await mockApi(page, 'DELETE', '/cache/purge', { purged_count: 100, freed_bytes: 1048576 });
 
     // cache series 호출 카운트 (setupDashboardMocks 위에 재정의해 우선순위 확보)
@@ -120,21 +136,21 @@ test.describe('대시보드 — 전체 캐시 퍼지', () => {
       await route.fulfill({ json: { buckets: createCacheSeriesBuckets() } });
     });
 
+    // 1) Dashboard 방문해 ['cache','series'] 쿼리를 QueryClient 에 등록
     await page.goto('/');
-    await page.getByTestId('purge-all-btn').waitFor();
-
-    // 초기 마운트 호출이 모두 끝나도록 잠시 대기 후 baseline 캡처
     await page.waitForLoadState('networkidle');
     const baselineSeries = cacheSeriesCalls;
     expect(baselineSeries).toBeGreaterThan(0);
 
-    // 퍼지 트리거
+    // 2) /system 으로 이동 후 퍼지 실행
+    await page.goto('/system');
     await page.getByTestId('purge-all-btn').click();
     await expect(page.getByTestId('purge-all-dialog')).toBeVisible();
     await page.getByRole('button', { name: '퍼지 실행' }).click();
     await expect(page.getByTestId('purge-all-dialog')).not.toBeVisible();
 
-    // invalidate → refetch로 series 호출이 baseline보다 증가해야 한다.
+    // 3) Dashboard 로 복귀 — invalidate → refetch 로 series 호출이 baseline 보다 증가해야 한다.
+    await page.goto('/');
     await expect.poll(() => cacheSeriesCalls, { timeout: 3000 }).toBeGreaterThan(baselineSeries);
   });
 });

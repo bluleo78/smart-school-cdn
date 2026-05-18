@@ -51,25 +51,30 @@ export function DomainAlertBanner() {
   if (tlsHosts.length > 0) parts.push(`TLS 만료 임박 ${tlsHosts.length}건`);
   if (syncHosts.length > 0) parts.push(`동기화 실패 ${syncHosts.length}건`);
 
+  // 이슈 #281 — 2단 구조로 위계 명확화.
+  // 첫 줄: 아이콘 + '주의' + 카운트 요약 (font-medium, 시각 가중치 최상)
+  // 둘째 줄: 타입별 도메인 링크 5개 + '외 N건' (text-xs opacity-70 보조)
+  // 좁은 viewport(iPad portrait/landscape) 에서 줄바꿈으로 위계가 평탄해지던 문제 차단.
   return (
     <div
-      className="flex flex-wrap items-center gap-2 rounded-lg border border-warning/40 bg-warning-subtle px-4 py-3 text-sm text-warning"
+      className="rounded-lg border border-warning/40 bg-warning-subtle px-4 py-3 text-sm text-warning"
       data-testid="domain-alert-banner"
     >
-      <AlertTriangle size={16} className="shrink-0" />
-      <span className="font-medium">주의: </span>
-      <span className="flex-1">{parts.join(' · ')}</span>
-      {/* TLS 만료 임박 도메인 링크 — 타입별로 각 도메인을 개별 접근 가능하게 나열 */}
-      {tlsHosts.length > 0 && (
-        <span className="shrink-0">
-          <AlertLinks hosts={tlsHosts} />
-        </span>
-      )}
-      {/* 동기화 실패 도메인 링크 */}
-      {syncHosts.length > 0 && (
-        <span className="shrink-0">
-          <AlertLinks hosts={syncHosts} />
-        </span>
+      {/* 첫 줄: 핵심 메시지 */}
+      <div className="flex items-center gap-2">
+        <AlertTriangle size={16} className="shrink-0" />
+        <span className="font-medium">주의 · {parts.join(' · ')}</span>
+      </div>
+      {/* 둘째 줄: 도메인 링크 (보조 정보, 작은 글씨) */}
+      {(tlsHosts.length > 0 || syncHosts.length > 0) && (
+        <div className="mt-1 pl-6 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs opacity-70">
+          {tlsHosts.length > 0 && (
+            <span><AlertLinks hosts={tlsHosts} /></span>
+          )}
+          {syncHosts.length > 0 && (
+            <span><AlertLinks hosts={syncHosts} /></span>
+          )}
+        </div>
       )}
     </div>
   );

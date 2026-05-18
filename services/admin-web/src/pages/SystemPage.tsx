@@ -23,6 +23,7 @@ import { downloadCACert, downloadMobileConfig } from '../api/tls';
 import { useCertificates } from '../hooks/useTls';
 import { formatBytes, formatUptime } from '../lib/format';
 import { LogViewer } from '../components/system/LogViewer';
+import { DangerZoneCard } from '../components/system/DangerZoneCard';
 import type { SystemStatus } from '../api/system';
 
 /** 서비스 키 → 표시 레이블 매핑 (SystemStatus 타입과 동기화)
@@ -433,6 +434,10 @@ export function SystemPage() {
           )}
         </CardContent>
       </Card>
+      {/* 위험 구역 — 전체 캐시 퍼지 (이슈 #282 — DashboardPage 에서 이동).
+       *  파괴적 전역 액션이라 읽기 전용 대시보드가 아닌 유지보수 영역에 둔다. */}
+      <DangerZoneCard />
+
       {/* 테마 설정 */}
       <Card>
         <CardHeader>

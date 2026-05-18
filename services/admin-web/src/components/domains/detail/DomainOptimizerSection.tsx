@@ -147,7 +147,7 @@ export function DomainOptimizerSection({ host }: Props) {
                   const v = e.target.value;
                   setQuality(v === '' ? null : Number(v));
                 }}
-                className="h-8 text-sm"
+                className="h-8 text-sm max-w-[160px]"
                 data-testid="optimizer-quality-input"
               />
               <p className="text-xs text-muted-foreground">1–100 사이의 정수</p>
@@ -171,7 +171,7 @@ export function DomainOptimizerSection({ host }: Props) {
                   const v = e.target.value;
                   setMaxWidth(v === '' ? null : Number(v));
                 }}
-                className="h-8 text-sm"
+                className="h-8 text-sm max-w-[160px]"
                 data-testid="optimizer-max-width-input"
               />
               <p className="text-xs text-muted-foreground">
