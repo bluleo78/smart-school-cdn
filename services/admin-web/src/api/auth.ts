@@ -26,9 +26,18 @@ export async function login(username: string, password: string): Promise<AuthUse
   return r.data.user;
 }
 
-/** 로그아웃 — 쿠키 무효화 */
+/**
+ * 로그아웃 — 쿠키 무효화.
+ * 이슈 #328 이후 서버는 미인증 호출에 401 을 반환한다. 사용자 의도는 "세션 종료" 이므로
+ * 401(=이미 종료된 세션) 도 성공으로 간주하고, 그 외 네트워크 오류도 swallow 한다.
+ * UI 는 후속 navigate('/login') 으로 로컬 상태를 비우면 그만이라 오류 throw 가 무의미.
+ */
 export async function logout(): Promise<void> {
-  await api.post('/auth/logout');
+  try {
+    await api.post('/auth/logout');
+  } catch {
+    /* 무시 — navigate('/login') 으로 로컬 세션이 정리된다 */
+  }
 }
 
 /** 최초 관리자 계정 생성 — needs_setup 상태에서만 호출 */

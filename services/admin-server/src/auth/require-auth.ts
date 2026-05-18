@@ -23,15 +23,28 @@ declare module 'fastify' {
  * 아래 경로는 스킵한다:
  * - /internal/* (별도 requireInternalToken 훅)
  * - /api/health
- * - /api/auth/*  (login/logout/setup/state)
+ * - /api/auth/state, /api/auth/login, /api/auth/setup  (인증 미필요 진입점)
+ *
+ * /api/auth/logout 은 의도적으로 인증을 거치게 한다 (이슈 #328):
+ *   미인증 호출에 200 을 반환하던 기존 동작이 CSRF/로그 위조 노이즈/세션 만료 감지 오용
+ *   여지를 만들어, 명시적 화이트리스트 방식으로 좁힌다.
  */
 export function createRequireAuth(userRepo: UserRepository): preHandlerHookHandler {
+  // 인증 스킵 경로 — 화이트리스트. `/api/auth/*` 통째 스킵 → 명시 목록으로 좁혀 logout 을 보호한다 (#328).
+  const AUTH_SKIP_PATHS: ReadonlySet<string> = new Set([
+    '/api/auth/state',
+    '/api/auth/login',
+    '/api/auth/setup',
+  ]);
+
   return async function requireAuth(req: FastifyRequest, reply: FastifyReply): Promise<void> {
     const url = req.url;
+    // querystring 이 붙은 경로 매칭을 위해 '?' 앞부분만 비교
+    const pathOnly = url.split('?', 1)[0];
     if (
       url.startsWith('/internal/') ||
-      url === '/api/health' ||
-      url.startsWith('/api/auth/')
+      pathOnly === '/api/health' ||
+      AUTH_SKIP_PATHS.has(pathOnly)
     ) {
       return;
     }

@@ -24,6 +24,9 @@ async function buildApp(): Promise<{ app: FastifyInstance; repo: UserRepository;
   app.get('/api/protected', async () => ({ secret: 42 }));
   app.get('/internal/x', async () => ({ internal: true }));
   app.post('/api/auth/login', async () => ({ login: true }));
+  app.post('/api/auth/logout', async () => ({ logout: true }));
+  app.get('/api/auth/state', async () => ({ state: 'authenticated' }));
+  app.post('/api/auth/setup', async () => ({ setup: true }));
   return { app, repo, user };
 }
 
@@ -42,6 +45,31 @@ describe('auth hooks', () => {
 
   it('/api/auth/login 은 인증 스킵', async () => {
     const r = await app.inject({ method: 'POST', url: '/api/auth/login' });
+    expect(r.statusCode).toBe(200);
+  });
+
+  it('/api/auth/state 는 인증 스킵', async () => {
+    const r = await app.inject({ method: 'GET', url: '/api/auth/state' });
+    expect(r.statusCode).toBe(200);
+  });
+
+  it('/api/auth/setup 은 인증 스킵', async () => {
+    const r = await app.inject({ method: 'POST', url: '/api/auth/setup' });
+    expect(r.statusCode).toBe(200);
+  });
+
+  // 이슈 #328 — logout 은 인증 필수. 미인증 호출은 401 로 거부되어 CSRF·로그 위조 방지.
+  it('/api/auth/logout — 쿠키 없으면 401 (#328)', async () => {
+    const r = await app.inject({ method: 'POST', url: '/api/auth/logout' });
+    expect(r.statusCode).toBe(401);
+  });
+
+  it('/api/auth/logout — 유효 쿠키면 200 (#328)', async () => {
+    const token = signSessionToken({ sub: String(user.id), username: user.username, tv: user.token_version });
+    const r = await app.inject({
+      method: 'POST', url: '/api/auth/logout',
+      cookies: { [SESSION_COOKIE_NAME]: token },
+    });
     expect(r.statusCode).toBe(200);
   });
 
