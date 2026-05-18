@@ -52,7 +52,8 @@ export const authRoutes: FastifyPluginAsync<{ userRepo: UserRepository }> = asyn
       return { state: 'needs_login' as const };
     }
     const u = userRepo.findById(Number(claims.sub));
-    if (!u || u.disabled_at !== null) {
+    // 이슈 #330/#331 — disabled_at 또는 token_version 불일치 시 needs_login 으로 분류.
+    if (!u || u.disabled_at !== null || u.token_version !== claims.tv) {
       return { state: 'needs_login' as const };
     }
     return { state: 'authenticated' as const, user: publicUser(u) };
@@ -69,7 +70,7 @@ export const authRoutes: FastifyPluginAsync<{ userRepo: UserRepository }> = asyn
     }
     const hash = await hashPassword(parsed.data.password);
     const user = userRepo.create(parsed.data.username, hash);
-    const token = signSessionToken({ sub: String(user.id), username: user.username });
+    const token = signSessionToken({ sub: String(user.id), username: user.username, tv: user.token_version });
     reply.setCookie(SESSION_COOKIE_NAME, token, buildSessionCookieOptions());
     return reply.code(201).send({ user: publicUser(user) });
   });
@@ -101,7 +102,7 @@ export const authRoutes: FastifyPluginAsync<{ userRepo: UserRepository }> = asyn
       return reply.code(401).send({ error: 'invalid_credentials' });
     }
     userRepo.updateLastLogin(user.id);
-    const token = signSessionToken({ sub: String(user.id), username: user.username });
+    const token = signSessionToken({ sub: String(user.id), username: user.username, tv: user.token_version });
     reply.setCookie(SESSION_COOKIE_NAME, token, buildSessionCookieOptions());
     return { user: publicUser(user) };
   });

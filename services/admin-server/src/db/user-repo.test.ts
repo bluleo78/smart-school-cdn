@@ -178,4 +178,26 @@ describe('UserRepository', () => {
     expect(repo.findById(u.id)?.username).toBe('a@b.c');
     expect(repo.findById(9999)).toBeNull();
   });
+
+  // 이슈 #330/#331 — JWT 세션 무효화를 위한 token_version 컬럼.
+  // 비활성화·비밀번호 변경 시 bump 하여 기존 stateless JWT 를 즉시 무효화한다.
+  describe('token_version (#330/#331)', () => {
+    it('신규 사용자의 token_version 기본값은 0', () => {
+      const u = repo.create('a@b.c', 'h');
+      expect(u.token_version).toBe(0);
+      expect(repo.findById(u.id)?.token_version).toBe(0);
+    });
+
+    it('bumpTokenVersion 호출 시 1씩 증가하고 updated_at 도 갱신', async () => {
+      const u = repo.create('a@b.c', 'h');
+      const before = repo.findById(u.id)!;
+      await new Promise((r) => setTimeout(r, 5));
+      repo.bumpTokenVersion(u.id);
+      const after = repo.findById(u.id)!;
+      expect(after.token_version).toBe(1);
+      expect(after.updated_at).not.toBe(before.updated_at);
+      repo.bumpTokenVersion(u.id);
+      expect(repo.findById(u.id)!.token_version).toBe(2);
+    });
+  });
 });

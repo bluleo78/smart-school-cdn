@@ -30,7 +30,7 @@ import { diagnoseRoutes } from './routes/diagnose.js';
 import { authRoutes } from './routes/auth.js';
 import { usersRoutes } from './routes/users.js';
 import { internalRoutes } from './routes/internal.js';
-import { requireAuth } from './auth/require-auth.js';
+import { createRequireAuth } from './auth/require-auth.js';
 import { requireInternalToken } from './auth/require-internal-token.js';
 import { registerErrorHandlers } from './error-handlers.js';
 
@@ -239,7 +239,8 @@ db.exec(USER_SCHEMA);
             created_at     TEXT    NOT NULL,
             updated_at     TEXT    NOT NULL,
             disabled_at    TEXT,
-            last_login_at  TEXT
+            last_login_at  TEXT,
+            token_version  INTEGER NOT NULL DEFAULT 0
           );
         `);
         db.exec(`
@@ -253,6 +254,23 @@ db.exec(USER_SCHEMA);
       });
       tx();
     }
+  }
+}
+
+// users.token_version 컬럼 마이그레이션 — 이슈 #330/#331
+// 무엇을: 기존 DB 의 users 테이블에 token_version 컬럼이 없으면 추가한다 (NOT NULL DEFAULT 0).
+// 왜: 비활성화·비밀번호 재설정 후에도 기존 JWT 세션이 TTL(1시간)까지 유효하던 보안 결함 해소.
+//     requireAuth 가 매 요청마다 DB token_version 과 JWT tv claim 을 비교해 즉시 무효화한다.
+// 배포 영향(의도된 동작): 배포 시점에 유통 중이던 기존 JWT 는 tv claim 자체가 없으므로
+//     `user.token_version(0) !== claims.tv(undefined)` 평가가 참이 되어 401 로 끊긴다.
+//     즉 모든 활성 관리자 세션이 즉시 강제 로그아웃되며, 재로그인 시 새 토큰은 tv=0 으로
+//     서명되어 정상 통과한다. 보안 수정의 본질상 받아들이는 비용. ADD COLUMN 자체는
+//     SQLite 에서 O(1) 메타데이터 변경.
+{
+  type ColInfo = { name: string };
+  const cols = db.pragma('table_info(users)') as ColInfo[];
+  if (!cols.some((c) => c.name === 'token_version')) {
+    db.exec('ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0');
   }
 }
 
@@ -301,7 +319,7 @@ await app.register(rateLimit, {
 // preHandler 훅 — 등록 순서가 실행 순서. 토큰 검사를 먼저 수행해
 // /internal/* 의 인증 실패가 즉시 401 로 끊기도록 한다.
 app.addHook('preHandler', requireInternalToken);
-app.addHook('preHandler', requireAuth);
+app.addHook('preHandler', createRequireAuth(userRepo));
 
 // 캐시 차단 훅 — `/api/*` 모든 응답에 Cache-Control: no-store 부착 (#316)
 // 이유: admin-server 응답은 인증 세션·도메인 목록·로그 등 민감 데이터를 포함한다.

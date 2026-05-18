@@ -1,29 +1,38 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import Fastify, { FastifyInstance } from 'fastify';
 import cookie from '@fastify/cookie';
-import { requireAuth } from './require-auth.js';
+import Database from 'better-sqlite3';
+import { createRequireAuth } from './require-auth.js';
 import { requireInternalToken } from './require-internal-token.js';
 import { signSessionToken, SESSION_COOKIE_NAME } from './jwt.js';
+import { UserRepository, USER_SCHEMA, type UserRow } from '../db/user-repo.js';
 
-async function buildApp(): Promise<FastifyInstance> {
+async function buildApp(): Promise<{ app: FastifyInstance; repo: UserRepository; user: UserRow }> {
   process.env.JWT_SECRET = 'test-secret-'.repeat(4);
   process.env.INTERNAL_API_TOKEN = 'a'.repeat(64);
 
+  const db = new Database(':memory:');
+  db.exec(USER_SCHEMA);
+  const repo = new UserRepository(db);
+  const user = repo.create('a@b.c', 'h');
+
   const app = Fastify();
   await app.register(cookie);
-  app.addHook('preHandler', requireAuth);
+  app.addHook('preHandler', createRequireAuth(repo));
   app.addHook('preHandler', requireInternalToken);
   app.get('/api/health', async () => ({ ok: true }));
   app.get('/api/protected', async () => ({ secret: 42 }));
   app.get('/internal/x', async () => ({ internal: true }));
   app.post('/api/auth/login', async () => ({ login: true }));
-  return app;
+  return { app, repo, user };
 }
 
 describe('auth hooks', () => {
   let app: FastifyInstance;
+  let repo: UserRepository;
+  let user: UserRow;
   beforeEach(async () => {
-    app = await buildApp();
+    ({ app, repo, user } = await buildApp());
   });
 
   it('/api/health 는 인증 스킵', async () => {
@@ -42,7 +51,7 @@ describe('auth hooks', () => {
   });
 
   it('/api/protected — 유효 쿠키 → 200', async () => {
-    const token = signSessionToken({ sub: '1', username: 'a@b.c' });
+    const token = signSessionToken({ sub: String(user.id), username: user.username, tv: user.token_version });
     const r = await app.inject({
       method: 'GET',
       url: '/api/protected',
@@ -56,6 +65,43 @@ describe('auth hooks', () => {
       method: 'GET',
       url: '/api/protected',
       cookies: { [SESSION_COOKIE_NAME]: 'bad.token.here' },
+    });
+    expect(r.statusCode).toBe(401);
+  });
+
+  // 이슈 #330 — 비활성화된 사용자의 기존 JWT 세션은 즉시 차단되어야 한다.
+  it('/api/protected — 사용자가 비활성화되면 기존 토큰 401 + 쿠키 삭제', async () => {
+    const token = signSessionToken({ sub: String(user.id), username: user.username, tv: user.token_version });
+    repo.disable(user.id);
+    const r = await app.inject({
+      method: 'GET',
+      url: '/api/protected',
+      cookies: { [SESSION_COOKIE_NAME]: token },
+    });
+    expect(r.statusCode).toBe(401);
+    // 쿠키 무효화 헤더 — Max-Age=0 (또는 expires past) 확인
+    const setCookie = r.headers['set-cookie'];
+    expect(String(setCookie)).toMatch(/Max-Age=0/i);
+  });
+
+  // 이슈 #331 — 비밀번호 변경(token_version bump) 후 기존 JWT 세션 즉시 무효화.
+  it('/api/protected — token_version bump 후 기존 토큰 401', async () => {
+    const token = signSessionToken({ sub: String(user.id), username: user.username, tv: user.token_version });
+    repo.bumpTokenVersion(user.id);
+    const r = await app.inject({
+      method: 'GET',
+      url: '/api/protected',
+      cookies: { [SESSION_COOKIE_NAME]: token },
+    });
+    expect(r.statusCode).toBe(401);
+  });
+
+  it('/api/protected — 존재하지 않는 사용자 sub → 401', async () => {
+    const token = signSessionToken({ sub: '9999', username: 'ghost@x.y', tv: 0 });
+    const r = await app.inject({
+      method: 'GET',
+      url: '/api/protected',
+      cookies: { [SESSION_COOKIE_NAME]: token },
     });
     expect(r.statusCode).toBe(401);
   });

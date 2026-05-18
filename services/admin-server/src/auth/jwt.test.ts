@@ -7,22 +7,30 @@ describe('jwt', () => {
   });
 
   it('sign 후 verify 하면 payload 복원', () => {
-    const token = signSessionToken({ sub: '1', username: 'a@b.c' });
+    const token = signSessionToken({ sub: '1', username: 'a@b.c', tv: 0 });
     const claims = verifySessionToken(token);
     expect(claims?.sub).toBe('1');
     expect(claims?.username).toBe('a@b.c');
+    expect(claims?.tv).toBe(0);
     expect(claims?.exp).toBeGreaterThan(Math.floor(Date.now() / 1000));
   });
 
+  // 이슈 #330/#331 — token_version(tv) claim 이 round-trip 으로 보존되어
+  // requireAuth 가 DB token_version 과 비교 가능.
+  it('tv claim 이 그대로 보존된다', () => {
+    const token = signSessionToken({ sub: '7', username: 'x@y.z', tv: 42 });
+    expect(verifySessionToken(token)?.tv).toBe(42);
+  });
+
   it('서명 조작된 토큰은 null', () => {
-    const token = signSessionToken({ sub: '1', username: 'a@b.c' });
+    const token = signSessionToken({ sub: '1', username: 'a@b.c', tv: 0 });
     const bad = token.slice(0, -2) + 'xx';
     expect(verifySessionToken(bad)).toBeNull();
   });
 
   it('만료된 토큰은 null', () => {
     vi.useFakeTimers();
-    const token = signSessionToken({ sub: '1', username: 'a@b.c' });
+    const token = signSessionToken({ sub: '1', username: 'a@b.c', tv: 0 });
     vi.setSystemTime(Date.now() + 3601 * 1000);
     expect(verifySessionToken(token)).toBeNull();
     vi.useRealTimers();
@@ -30,6 +38,6 @@ describe('jwt', () => {
 
   it('JWT_SECRET 미설정 시 sign 호출하면 throw', () => {
     delete process.env.JWT_SECRET;
-    expect(() => signSessionToken({ sub: '1', username: 'a@b.c' })).toThrow();
+    expect(() => signSessionToken({ sub: '1', username: 'a@b.c', tv: 0 })).toThrow();
   });
 });

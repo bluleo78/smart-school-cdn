@@ -4,7 +4,7 @@ import cookie from '@fastify/cookie';
 import Database from 'better-sqlite3';
 import { usersRoutes } from './users.js';
 import { UserRepository, USER_SCHEMA } from '../db/user-repo.js';
-import { requireAuth } from '../auth/require-auth.js';
+import { createRequireAuth } from '../auth/require-auth.js';
 import { SESSION_COOKIE_NAME, signSessionToken } from '../auth/jwt.js';
 import { hashPassword } from '../auth/password.js';
 
@@ -14,11 +14,11 @@ async function buildApp() {
   db.exec(USER_SCHEMA);
   const userRepo = new UserRepository(db);
   const u = userRepo.create('admin@school.local', await hashPassword('password1'));
-  const token = signSessionToken({ sub: String(u.id), username: u.username });
+  const token = signSessionToken({ sub: String(u.id), username: u.username, tv: u.token_version });
 
   const app = Fastify();
   await app.register(cookie);
-  app.addHook('preHandler', requireAuth);
+  app.addHook('preHandler', createRequireAuth(userRepo));
   await app.register(usersRoutes, { userRepo });
   return { app, userRepo, adminId: u.id, cookies: { [SESSION_COOKIE_NAME]: token } };
 }
@@ -222,6 +222,37 @@ describe('usersRoutes', () => {
     expect(await verifyPassword(u.password_hash, 'adminreset123')).toBe(true);
   });
 
+  // 이슈 #331 — 다른 사용자 비밀번호 재설정 시 대상 사용자의 token_version 이 +1 되어
+  // 기존 발급 JWT 세션이 다음 요청에서 즉시 무효화된다.
+  it('PUT /api/users/:id/password — 다른 사용자: 대상의 token_version bump (#331)', async () => {
+    const other = ctx.userRepo.create('other@x.y', await hashPassword('p'));
+    expect(other.token_version).toBe(0);
+    const r = await ctx.app.inject({
+      method: 'PUT', url: `/api/users/${other.id}/password`,
+      cookies: ctx.cookies,
+      payload: { password: 'adminreset123' },
+    });
+    expect(r.statusCode).toBe(200);
+    expect(ctx.userRepo.findById(other.id)?.token_version).toBe(1);
+  });
+
+  // 이슈 #331 — 자기 자신 비밀번호 변경: token_version 이 bump 되고 동시에
+  // 새 토큰을 쿠키로 재발급하여 진행 중인 세션이 끊기지 않도록 한다.
+  it('PUT /api/users/:id/password — 자기 자신: token_version bump + 새 쿠키 재발급 (#331)', async () => {
+    const r = await ctx.app.inject({
+      method: 'PUT', url: `/api/users/${ctx.adminId}/password`,
+      cookies: ctx.cookies,
+      payload: { password: 'newpass123', currentPassword: 'password1' },
+    });
+    expect(r.statusCode).toBe(200);
+    const updated = ctx.userRepo.findById(ctx.adminId)!;
+    expect(updated.token_version).toBe(1);
+    // Set-Cookie 로 새 session 토큰이 동봉되어야 한다 (기존 토큰은 tv=0 이라 다음 요청에서 무효)
+    const setCookie = String(r.headers['set-cookie'] ?? '');
+    expect(setCookie).toMatch(new RegExp(`${SESSION_COOKIE_NAME}=`));
+    expect(setCookie).not.toMatch(/Max-Age=0/);
+  });
+
   // 이슈 #106 회귀 방지 — PUT /api/users/:id/enable 엔드포인트 누락
   it('PUT /api/users/:id/enable — 비활성 사용자 재활성화', async () => {
     const other = ctx.userRepo.create('other@x.y', await hashPassword('p'));
@@ -264,6 +295,18 @@ describe('usersRoutes', () => {
     });
     expect(r.statusCode).toBe(200);
     expect(ctx.userRepo.findById(other.id)?.disabled_at).not.toBeNull();
+  });
+
+  // 이슈 #330 — 비활성화 시 token_version 도 +1 되어 기존 JWT 가 다음 요청에서 무효화된다.
+  it('DELETE /api/users/:id — 비활성화 시 대상의 token_version bump (#330)', async () => {
+    const other = ctx.userRepo.create('other@x.y', await hashPassword('p'));
+    expect(other.token_version).toBe(0);
+    const r = await ctx.app.inject({
+      method: 'DELETE', url: `/api/users/${other.id}`,
+      cookies: ctx.cookies,
+    });
+    expect(r.statusCode).toBe(200);
+    expect(ctx.userRepo.findById(other.id)?.token_version).toBe(1);
   });
 
   // 이슈 #194 — 이미 비활성 사용자에게 DELETE 재호출 시 disabled_at 변경 없음 (멱등)

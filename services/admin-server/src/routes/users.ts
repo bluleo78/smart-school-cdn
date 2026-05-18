@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import type { UserRepository } from '../db/user-repo.js';
 import { hashPassword, verifyPassword } from '../auth/password.js';
+import { signSessionToken, SESSION_COOKIE_NAME, buildSessionCookieOptions } from '../auth/jwt.js';
 
 // Task 4 와 동일한 permissive email 검증 — z.string().email() 의 strict 정책은
 // 단일 문자 TLD(예: a@b.c)를 거부해 내부망 호환성/테스트가 깨진다.
@@ -194,6 +195,23 @@ export const usersRoutes: FastifyPluginAsync<{ userRepo: UserRepository }> = asy
 
     const hash = await hashPassword(parsed.data.password);
     userRepo.updatePassword(id, hash);
+
+    // 이슈 #330/#331 — 비밀번호 변경 후 기존 발급 JWT 세션을 즉시 무효화.
+    // bumpTokenVersion 으로 requireAuth 의 tv claim 비교가 다음 요청부터 실패하게 한다.
+    userRepo.bumpTokenVersion(id);
+
+    // 자기 자신 변경 케이스: 현재 요청을 보낸 세션도 즉시 끊기지 않도록 새 토큰을 재발급.
+    // 다른 기기/탭에 남아있던 세션은 tv 불일치로 자동 차단되지만, 본인이 방금 비밀번호를
+    // 바꾼 이 브라우저는 UX 상 즉시 로그아웃되지 않아야 자연스럽다.
+    if (isSelf) {
+      const updated = userRepo.findById(id)!;
+      const newToken = signSessionToken({
+        sub: String(updated.id),
+        username: updated.username,
+        tv: updated.token_version,
+      });
+      reply.setCookie(SESSION_COOKIE_NAME, newToken, buildSessionCookieOptions());
+    }
     return { ok: true };
   });
 
@@ -230,6 +248,8 @@ export const usersRoutes: FastifyPluginAsync<{ userRepo: UserRepository }> = asy
       return { ok: true };
     }
     userRepo.disable(id);
+    // 이슈 #330 — 비활성화된 사용자의 기존 JWT 세션도 즉시 무효화한다.
+    userRepo.bumpTokenVersion(id);
     return { ok: true };
   });
 };

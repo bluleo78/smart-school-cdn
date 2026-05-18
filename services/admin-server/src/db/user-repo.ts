@@ -13,7 +13,10 @@ export const USER_SCHEMA = `
     created_at     TEXT    NOT NULL,
     updated_at     TEXT    NOT NULL,
     disabled_at    TEXT,
-    last_login_at  TEXT
+    last_login_at  TEXT,
+    -- 이슈 #330/#331 — JWT 세션 무효화를 위한 카운터.
+    -- 비활성화/비밀번호 변경 시 +1 하여 기존 stateless JWT(tv claim) 를 즉시 무효화한다.
+    token_version  INTEGER NOT NULL DEFAULT 0
   );
   CREATE INDEX IF NOT EXISTS idx_users_username ON users(username COLLATE NOCASE);
 `;
@@ -26,6 +29,7 @@ export interface UserRow {
   updated_at: string;
   disabled_at: string | null;
   last_login_at: string | null;
+  token_version: number;
 }
 
 /** list() 정렬 옵션 — 라우트에서 화이트리스트 검증 후 전달 (#344) */
@@ -130,6 +134,17 @@ export class UserRepository {
   disable(id: number): void {
     const now = new Date().toISOString();
     this.db.prepare('UPDATE users SET disabled_at = ?, updated_at = ? WHERE id = ?').run(now, now, id);
+  }
+
+  /**
+   * 이슈 #330/#331 — JWT 세션 즉시 무효화.
+   * 무엇을: token_version 을 +1 하여 해당 사용자의 기존 발급 토큰(tv claim 비교 실패)을 무효화.
+   * 왜: 비활성화/비밀번호 재설정 후 기존 세션이 JWT TTL(1시간)까지 유효한 보안 결함 해소.
+   * 호출 위치: disable, updatePassword. updated_at 도 동일 시점으로 갱신해 mutation 일관성 유지.
+   */
+  bumpTokenVersion(id: number): void {
+    const now = new Date().toISOString();
+    this.db.prepare('UPDATE users SET token_version = token_version + 1, updated_at = ? WHERE id = ?').run(now, id);
   }
 
   /** 비활성화된 사용자를 재활성화한다 — disabled_at 을 NULL 로 초기화 */

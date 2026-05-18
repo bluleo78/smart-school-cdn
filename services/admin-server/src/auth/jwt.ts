@@ -5,6 +5,9 @@ const TTL_SECONDS = 3600;
 export interface SessionClaims {
   sub: string;
   username: string;
+  // 이슈 #330/#331 — DB users.token_version 스냅샷. requireAuth 매 요청 비교 후
+  // 불일치 시 401 처리. 비활성화·비밀번호 변경 시 +1 하여 기존 토큰 즉시 무효화.
+  tv: number;
   iat?: number;
   exp?: number;
 }
@@ -20,7 +23,7 @@ function getSecret(): string {
 /**
  * HS256 서명 + 1시간 만료.
  */
-export function signSessionToken(payload: { sub: string; username: string }): string {
+export function signSessionToken(payload: { sub: string; username: string; tv: number }): string {
   return jwt.sign(payload, getSecret(), { algorithm: 'HS256', expiresIn: TTL_SECONDS });
 }
 

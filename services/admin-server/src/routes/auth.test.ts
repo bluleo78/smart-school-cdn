@@ -5,7 +5,7 @@ import rateLimit from '@fastify/rate-limit';
 import Database from 'better-sqlite3';
 import { authRoutes } from './auth.js';
 import { UserRepository, USER_SCHEMA } from '../db/user-repo.js';
-import { requireAuth } from '../auth/require-auth.js';
+import { createRequireAuth } from '../auth/require-auth.js';
 import { SESSION_COOKIE_NAME, signSessionToken } from '../auth/jwt.js';
 import { hashPassword } from '../auth/password.js';
 import { registerErrorHandlers } from '../error-handlers.js';
@@ -35,7 +35,7 @@ async function buildApp(): Promise<{ app: FastifyInstance; userRepo: UserReposit
   });
   // setErrorHandler — prod 와 동일하게 4xx envelope 매핑을 거치도록 등록 (#327).
   registerErrorHandlers(app);
-  app.addHook('preHandler', requireAuth);
+  app.addHook('preHandler', createRequireAuth(userRepo));
   await app.register(authRoutes, { userRepo });
   return { app, userRepo };
 }
@@ -62,7 +62,7 @@ describe('authRoutes', () => {
 
     it('유효 쿠키 → authenticated + user 반환', async () => {
       const u = userRepo.create('a@b.c', await hashPassword('p'));
-      const token = signSessionToken({ sub: String(u.id), username: u.username });
+      const token = signSessionToken({ sub: String(u.id), username: u.username, tv: u.token_version });
       const r = await app.inject({
         method: 'GET', url: '/api/auth/state',
         cookies: { [SESSION_COOKIE_NAME]: token },
@@ -70,6 +70,18 @@ describe('authRoutes', () => {
       const body = r.json();
       expect(body.state).toBe('authenticated');
       expect(body.user.username).toBe('a@b.c');
+    });
+
+    // 이슈 #330/#331 — token_version bump 후 기존 쿠키는 needs_login 으로 분류된다.
+    it('token_version bump 후 기존 쿠키 → needs_login (#331)', async () => {
+      const u = userRepo.create('a@b.c', await hashPassword('p'));
+      const token = signSessionToken({ sub: String(u.id), username: u.username, tv: u.token_version });
+      userRepo.bumpTokenVersion(u.id);
+      const r = await app.inject({
+        method: 'GET', url: '/api/auth/state',
+        cookies: { [SESSION_COOKIE_NAME]: token },
+      });
+      expect(r.json().state).toBe('needs_login');
     });
   });
 
@@ -215,7 +227,7 @@ describe('authRoutes', () => {
   describe('POST /api/auth/logout', () => {
     it('쿠키 삭제 헤더 반환', async () => {
       const u = userRepo.create('a@b.c', await hashPassword('p1234567'));
-      const token = signSessionToken({ sub: String(u.id), username: u.username });
+      const token = signSessionToken({ sub: String(u.id), username: u.username, tv: u.token_version });
       const r = await app.inject({
         method: 'POST', url: '/api/auth/logout',
         cookies: { [SESSION_COOKIE_NAME]: token },
