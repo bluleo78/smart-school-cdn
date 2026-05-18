@@ -37,6 +37,11 @@ const mockTlsClient = {
   listCertificates: vi.fn().mockResolvedValue({ certs: [] }),
 };
 const mockDnsClient = { syncDomains: vi.fn().mockResolvedValue({ success: true }) };
+/** optimizer-service gRPC mock — setProfile/removeProfile 호출 검증 (#184) */
+const mockOptimizerClient = {
+  setProfile: vi.fn().mockResolvedValue({}),
+  removeProfile: vi.fn().mockResolvedValue({}),
+};
 
 function buildApp(domainRepo: DomainRepository) {
   const app = Fastify({ logger: false });
@@ -45,6 +50,8 @@ function buildApp(domainRepo: DomainRepository) {
   app.decorate('tlsClient', mockTlsClient as any);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   app.decorate('dnsClient', mockDnsClient as any);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  app.decorate('optimizerClient', mockOptimizerClient as any);
   app.register(domainRoutes, { domainRepo });
   return app;
 }
@@ -1120,6 +1127,30 @@ describe('DELETE /api/domains/:host', () => {
     expect(repo.findByHost('*.textbook.com')).toBeUndefined();
   });
 
+  // 이슈 #184 — 도메인 삭제 시 optimizer profile 도 함께 정리되어 orphan 누적 방지.
+  it('도메인 삭제 시 optimizer removeProfile 가 호출된다 (#184)', async () => {
+    mockOptimizerClient.removeProfile.mockClear();
+    const repo = makeRepo();
+    repo.upsert('httpbin.org', 'https://httpbin.org');
+    const app = buildApp(repo);
+    const res = await app.inject({ method: 'DELETE', url: '/api/domains/httpbin.org' });
+    expect(res.statusCode).toBe(204);
+    expect(mockOptimizerClient.removeProfile).toHaveBeenCalledWith('httpbin.org');
+  });
+
+  // 이슈 #184 — proxy sync 실패로 도메인 복원 시 optimizer profile 도 보존되어야 함 (호출 안 됨)
+  it('proxy sync 실패로 복원되는 경우 removeProfile 는 호출되지 않는다 (#184)', async () => {
+    mockOptimizerClient.removeProfile.mockClear();
+    const axiosMod = await import('axios');
+    vi.mocked(axiosMod.default.post).mockRejectedValueOnce(new Error('Network error'));
+    const repo = makeRepo();
+    repo.upsert('httpbin.org', 'https://httpbin.org');
+    const app = buildApp(repo);
+    const res = await app.inject({ method: 'DELETE', url: '/api/domains/httpbin.org' });
+    expect(res.statusCode).toBe(502);
+    expect(mockOptimizerClient.removeProfile).not.toHaveBeenCalled();
+  });
+
   it('syncToProxy 실패 시 502를 반환하고 삭제된 도메인을 DB에 복원한다 (#151)', async () => {
     // Proxy 동기화 실패 시 DB에서 삭제한 도메인을 원복하여 toggle·PUT과 동일한 일관성을 보장한다
     const axiosMod = await import('axios');
@@ -1295,6 +1326,22 @@ describe('DELETE /api/domains/bulk', () => {
     expect(eventsRepo.query({ host: 'a.test' })).toHaveLength(0);
     expect(eventsRepo.query({ host: 'b.test' })).toHaveLength(0);
     expect(eventsRepo.query({ host: 'keep.test' })).toHaveLength(1);
+  });
+
+  // 이슈 #184 — 일괄 삭제 시 각 host 의 optimizer profile 도 함께 정리.
+  it('일괄 삭제 시 각 host 에 대해 optimizer removeProfile 가 호출된다 (#184)', async () => {
+    mockOptimizerClient.removeProfile.mockClear();
+    const repo = makeRepo();
+    repo.upsert('a.test', 'https://a.test');
+    repo.upsert('b.test', 'https://b.test');
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'DELETE', url: '/api/domains/bulk',
+      payload: { hosts: ['a.test', 'b.test'] },
+    });
+    expect(res.statusCode).toBe(200);
+    const called = mockOptimizerClient.removeProfile.mock.calls.map(c => c[0]);
+    expect(called.sort()).toEqual(['a.test', 'b.test']);
   });
 
   // (#310) hosts 배열에 비문자열(숫자/null/객체)이 섞이면 raw SQLite 에러로 500이 떨어지던 회귀 — 입력 경계에서 400으로 거부해야 한다.

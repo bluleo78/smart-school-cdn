@@ -112,6 +112,15 @@ impl OptimizerDb {
         Ok(())
     }
 
+    /// 도메인 프로파일 제거 (이슈 #184).
+    /// 무엇을: profiles 테이블에서 해당 domain 행을 삭제한다. 없으면 no-op (idempotent).
+    /// 왜: admin-server 의 도메인 DELETE 와 짝맞춤 — orphan profile 누적 방지.
+    pub fn remove_profile(&self, domain: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        conn.execute("DELETE FROM profiles WHERE domain = ?1", params![domain])?;
+        Ok(())
+    }
+
     /// 모든 프로파일 목록 반환
     pub fn get_all_profiles(&self) -> Result<Vec<(String, Profile)>, Box<dyn std::error::Error>> {
         let conn = self.conn.lock().unwrap_or_else(|e| e.into_inner());
@@ -334,6 +343,28 @@ mod tests {
         db.set_profile("b.com", 60, 800, false).unwrap();
         let profiles = db.get_all_profiles().unwrap();
         assert_eq!(profiles.len(), 2);
+    }
+
+    // 이슈 #184 — 도메인 삭제 시 orphan profile 정리. 존재하지 않는 domain 도 idempotent.
+    #[test]
+    fn remove_profile_은_저장된_프로파일을_제거한다() {
+        let (db, _dir) = make_db();
+        db.set_profile("a.com", 80, 0, true).unwrap();
+        db.set_profile("b.com", 60, 800, false).unwrap();
+        db.remove_profile("a.com").unwrap();
+        let profiles = db.get_all_profiles().unwrap();
+        assert_eq!(profiles.len(), 1);
+        assert_eq!(profiles[0].0, "b.com");
+    }
+
+    #[test]
+    fn remove_profile_은_존재하지_않는_도메인에_대해_idempotent() {
+        let (db, _dir) = make_db();
+        db.remove_profile("ghost.com").unwrap();
+        db.set_profile("real.com", 80, 0, true).unwrap();
+        db.remove_profile("real.com").unwrap();
+        db.remove_profile("real.com").unwrap();
+        assert_eq!(db.get_all_profiles().unwrap().len(), 0);
     }
 
     #[test]

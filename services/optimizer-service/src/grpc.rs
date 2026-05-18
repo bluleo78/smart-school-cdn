@@ -4,7 +4,7 @@ use tonic::{Request, Response, Status};
 use cdn_proto::optimizer::{
     optimizer_service_server::OptimizerService,
     OptimizeRequest, OptimizeResponse,
-    Empty, GetProfilesResponse, Profile as ProtoProfile, SetProfileRequest,
+    Empty, GetProfilesResponse, Profile as ProtoProfile, SetProfileRequest, RemoveProfileRequest,
     GetStatsResponse, DomainStats, HealthResponse,
 };
 use crate::optimizer::OptimizerDb;
@@ -49,6 +49,17 @@ impl OptimizerService for OptimizerGrpc {
         let p = req.into_inner().profile
             .ok_or_else(|| Status::invalid_argument("profile is required"))?;
         self.db.set_profile(&p.domain, p.quality, p.max_width, p.enabled)
+            .map_err(|e| Status::internal(e.to_string()))?;
+        Ok(Response::new(Empty {}))
+    }
+
+    /// 이슈 #184 — 도메인 프로파일 제거. 존재하지 않아도 idempotent ok.
+    async fn remove_profile(&self, req: Request<RemoveProfileRequest>) -> Result<Response<Empty>, Status> {
+        let r = req.into_inner();
+        if r.domain.is_empty() {
+            return Err(Status::invalid_argument("domain is required"));
+        }
+        self.db.remove_profile(&r.domain)
             .map_err(|e| Status::internal(e.to_string()))?;
         Ok(Response::new(Empty {}))
     }

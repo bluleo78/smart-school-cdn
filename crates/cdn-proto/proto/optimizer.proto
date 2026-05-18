@@ -2,11 +2,13 @@ syntax = "proto3";
 package cdn.optimizer;
 
 service OptimizerService {
-  rpc Optimize(OptimizeRequest)      returns (OptimizeResponse);
-  rpc GetProfiles(Empty)             returns (GetProfilesResponse);
-  rpc SetProfile(SetProfileRequest)  returns (Empty);
-  rpc GetStats(Empty)                returns (GetStatsResponse);
-  rpc Health(Empty)                  returns (HealthResponse);
+  rpc Optimize(OptimizeRequest)            returns (OptimizeResponse);
+  rpc GetProfiles(Empty)                   returns (GetProfilesResponse);
+  rpc SetProfile(SetProfileRequest)        returns (Empty);
+  // 이슈 #184 — 도메인 삭제 시 orphan profile 누적 방지. 존재하지 않는 domain 도 idempotent ok.
+  rpc RemoveProfile(RemoveProfileRequest)  returns (Empty);
+  rpc GetStats(Empty)                      returns (GetStatsResponse);
+  rpc Health(Empty)                        returns (HealthResponse);
 }
 
 message OptimizeRequest {
@@ -33,6 +35,9 @@ message Profile {
 message GetProfilesResponse { repeated Profile profiles = 1; }
 
 message SetProfileRequest { Profile profile = 1; }
+
+// 이슈 #184 — 도메인 삭제와 짝맞춤 정리 RPC. 존재하지 않으면 no-op.
+message RemoveProfileRequest { string domain = 1; }
 
 message DomainStats {
   string domain          = 1;

@@ -578,6 +578,17 @@ export async function domainRoutes(
         return reply.status(502).send({ error: 'proxy_sync_failed', message: 'Proxy 동기화 실패' });
       }
       await fanOutGrpc(app, domainRepo);
+      // 이슈 #184 — 일괄 삭제도 단일 DELETE 와 동일하게 optimizer profile 정리. best-effort.
+      // Promise.allSettled 로 한 host 의 실패가 다른 host 처리를 막지 않도록 한다.
+      await Promise.allSettled(
+        hosts.map(async (h) => {
+          try {
+            await app.optimizerClient.removeProfile(h);
+          } catch (err) {
+            app.log.warn({ err }, `[optimizer] profile 정리 실패: ${h}`);
+          }
+        }),
+      );
       // requested 는 사용자가 보낸 호스트 수(중복 포함 원본 길이) — 토스트의 "요청 N건 중 M건"의 N에 해당.
       return reply.status(200).send({
         deleted: txResult.deleted,
@@ -1260,6 +1271,14 @@ export async function domainRoutes(
     // 호출해 도메인 복원 경로와의 일관성을 유지한다.
     const optEventsRepo = new OptimizationEventsRepository(domainRepo.database);
     optEventsRepo.deleteByHost(host);
+    // 이슈 #184 — optimizer-service profile 도 삭제와 짝맞춤 정리. best-effort:
+    // optimizer-service 가 일시 다운이라도 도메인 삭제 자체는 성공으로 진행하고, 다음
+    // sync 또는 별도 reconcile 에서 정리되도록 둔다 (도메인 PUT 후 setProfile 실패와 동일 정책).
+    try {
+      await app.optimizerClient.removeProfile(host);
+    } catch (err) {
+      app.log.warn({ err }, `[optimizer] profile 정리 실패: ${host}`);
+    }
     return reply.status(204).send();
     });
   });

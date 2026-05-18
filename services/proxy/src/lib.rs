@@ -1878,7 +1878,7 @@ mod tests {
     use cdn_proto::optimizer::{
         optimizer_service_server::{OptimizerService, OptimizerServiceServer},
         OptimizeRequest, OptimizeResponse,
-        GetProfilesResponse, SetProfileRequest, GetStatsResponse,
+        GetProfilesResponse, SetProfileRequest, RemoveProfileRequest, GetStatsResponse,
         Empty as OptimizerEmpty, HealthResponse as OptimizerHealthResponse,
     };
     use std::sync::Mutex as StdMutex;
@@ -2120,6 +2120,14 @@ mod tests {
         async fn set_profile(
             &self,
             _: tonic::Request<SetProfileRequest>,
+        ) -> Result<tonic::Response<OptimizerEmpty>, tonic::Status> {
+            Ok(tonic::Response::new(OptimizerEmpty {}))
+        }
+
+        // 이슈 #184 — mock 도 trait 의 RemoveProfile 메서드 구현 (no-op).
+        async fn remove_profile(
+            &self,
+            _: tonic::Request<RemoveProfileRequest>,
         ) -> Result<tonic::Response<OptimizerEmpty>, tonic::Status> {
             Ok(tonic::Response::new(OptimizerEmpty {}))
         }
@@ -3223,6 +3231,9 @@ mod tests {
         async fn set_profile(&self, _: tonic::Request<SetProfileRequest>) -> Result<tonic::Response<OptimizerEmpty>, tonic::Status> {
             Ok(tonic::Response::new(OptimizerEmpty {}))
         }
+        async fn remove_profile(&self, _: tonic::Request<RemoveProfileRequest>) -> Result<tonic::Response<OptimizerEmpty>, tonic::Status> {
+            Ok(tonic::Response::new(OptimizerEmpty {}))
+        }
         async fn get_stats(&self, _: tonic::Request<OptimizerEmpty>) -> Result<tonic::Response<GetStatsResponse>, tonic::Status> {
             Ok(tonic::Response::new(GetStatsResponse { stats: vec![] }))
         }
@@ -3261,6 +3272,9 @@ mod tests {
             Ok(tonic::Response::new(GetProfilesResponse { profiles: vec![] }))
         }
         async fn set_profile(&self, _: tonic::Request<SetProfileRequest>) -> Result<tonic::Response<OptimizerEmpty>, tonic::Status> {
+            Ok(tonic::Response::new(OptimizerEmpty {}))
+        }
+        async fn remove_profile(&self, _: tonic::Request<RemoveProfileRequest>) -> Result<tonic::Response<OptimizerEmpty>, tonic::Status> {
             Ok(tonic::Response::new(OptimizerEmpty {}))
         }
         async fn get_stats(&self, _: tonic::Request<OptimizerEmpty>) -> Result<tonic::Response<GetStatsResponse>, tonic::Status> {

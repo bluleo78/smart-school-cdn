@@ -64,7 +64,12 @@ impl TlsService for TlsGrpc {
         Ok(Response::new(CertListResponse { certs }))
     }
 
-    /// 수신된 도메인 목록에 대해 인증서 사전 발급
+    /// 수신된 도메인 목록과 cert_cache 를 동기화한다 (이슈 #412).
+    /// 무엇을:
+    ///   1) 목록의 각 도메인에 대해 cert 가 없으면 발급 (기존 동작 유지)
+    ///   2) 목록에 없는 cert 를 prune — orphan 누적 방지
+    /// 왜: admin-server 가 도메인 추가/삭제 후 호출하는 단일 동기화 RPC. 이전 구현은 발급만 수행해
+    ///     삭제된 도메인의 cert 가 영구히 in-memory 캐시에 남아 list_certificates 응답이 domains 와 어긋났다.
     async fn sync_domains(
         &self, req: Request<SyncDomainsRequest>,
     ) -> Result<Response<SyncDomainsResponse>, Status> {
@@ -78,6 +83,13 @@ impl TlsService for TlsGrpc {
                     failed += 1;
                 }
             }
+        }
+        // prune 단계: 목록과 일치하지 않는 cert 제거. 발급 실패 도메인도 keep 에 포함시켜
+        // "발급은 실패했지만 의도된 도메인" 이 잘못 prune 되지 않도록 한다.
+        let keep: std::collections::HashSet<String> = domains.iter().map(|d| d.host.clone()).collect();
+        let pruned = self.tls_manager.prune_to(&keep);
+        if pruned > 0 {
+            tracing::info!("sync_domains: orphan cert {} 건 prune", pruned);
         }
         let success = failed == 0;
         if !success {
@@ -173,6 +185,48 @@ mod tests {
             .into_inner();
 
         assert!(res.success);
+    }
+
+    // 이슈 #412 — sync_domains 가 "목록과 일치하도록 동기화" 의미를 가진다.
+    // 이전에 발급된 cert 중 도메인 목록에서 빠진 것은 prune 되어 orphan 누적이 방지된다.
+    #[tokio::test]
+    async fn sync_domains_는_목록에_없는_인증서를_prune한다() {
+        let (grpc, _dir) = make_grpc();
+        // 사전 발급된 인증서들 — 일부는 곧 도메인 목록에서 빠질 예정
+        grpc.get_or_issue_cert(Request::new(CertRequest { domain: "keep1.example.com".to_string() })).await.unwrap();
+        grpc.get_or_issue_cert(Request::new(CertRequest { domain: "keep2.example.com".to_string() })).await.unwrap();
+        grpc.get_or_issue_cert(Request::new(CertRequest { domain: "orphan1.example.com".to_string() })).await.unwrap();
+        grpc.get_or_issue_cert(Request::new(CertRequest { domain: "orphan2.example.com".to_string() })).await.unwrap();
+
+        // sync_domains: keep1/keep2 만 포함된 목록 — orphan1/orphan2 는 prune 되어야 한다.
+        let res = grpc
+            .sync_domains(Request::new(SyncDomainsRequest {
+                domains: vec![
+                    TlsDomain { host: "keep1.example.com".to_string(), origin: "x".to_string() },
+                    TlsDomain { host: "keep2.example.com".to_string(), origin: "x".to_string() },
+                ],
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(res.success);
+
+        let list = grpc.list_certificates(Request::new(Empty {})).await.unwrap().into_inner();
+        let hosts: Vec<String> = list.certs.into_iter().map(|c| c.domain).collect();
+        assert!(hosts.contains(&"keep1.example.com".to_string()));
+        assert!(hosts.contains(&"keep2.example.com".to_string()));
+        assert!(!hosts.contains(&"orphan1.example.com".to_string()));
+        assert!(!hosts.contains(&"orphan2.example.com".to_string()));
+    }
+
+    // 이슈 #412 — 빈 목록으로 sync_domains 호출 시 모든 cert 가 prune 된다.
+    #[tokio::test]
+    async fn sync_domains_빈_목록은_모든_cert를_prune한다() {
+        let (grpc, _dir) = make_grpc();
+        grpc.get_or_issue_cert(Request::new(CertRequest { domain: "x.example.com".to_string() })).await.unwrap();
+        grpc.sync_domains(Request::new(SyncDomainsRequest { domains: vec![] })).await.unwrap();
+        let list = grpc.list_certificates(Request::new(Empty {})).await.unwrap().into_inner();
+        assert!(list.certs.is_empty());
     }
 
     #[tokio::test]

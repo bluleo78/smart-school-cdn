@@ -1,7 +1,7 @@
 /// TLS 관리 모듈
 /// - CA 키·인증서를 파일 시스템에 영속화 (certs_dir/ca.key, ca.crt)
 /// - 도메인별 서버 인증서를 온디맨드 발급 후 메모리 캐시
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -162,6 +162,19 @@ impl TlsManager {
             expires_at,
             certified_key,
         })
+    }
+
+    /// 캐시 정리 — `keep` 집합에 없는 도메인 인증서를 cert_cache 에서 제거 (이슈 #412).
+    /// 무엇을: 주어진 `keep` 도메인 목록과 일치하도록 cert_cache 를 동기화한다.
+    /// 왜: sync_domains 가 "이 목록과 일치시켜라" 의미를 가지려면 list 에서 빠진 cert 를 prune 해야 한다.
+    ///     도메인 등록/삭제 사이클을 반복하면 cert_cache 가 무한 누적되어 list_certificates 응답이
+    ///     domains 와 어긋난다(현재 47/9 orphan). in-memory 캐시 prune 으로 정합성을 복원한다.
+    /// 반환: prune 된 도메인 수.
+    pub fn prune_to(&self, keep: &HashSet<String>) -> usize {
+        let mut cache = self.cert_cache.lock().unwrap_or_else(|e| e.into_inner());
+        let before = cache.len();
+        cache.retain(|host, _| keep.contains(host));
+        before - cache.len()
     }
 
     /// 관리 API용: 현재 캐시된 인증서 목록 반환

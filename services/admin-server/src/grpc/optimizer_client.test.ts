@@ -45,6 +45,13 @@ describe('createOptimizerClient', () => {
     expect(mockCall).toHaveBeenCalledWith(mockClientInstance, 'SetProfile', { profile });
   });
 
+  // 이슈 #184 — 도메인 삭제와 짝맞춤 정리.
+  it('removeProfile()이 RemoveProfile gRPC 메서드를 호출한다 (#184)', async () => {
+    const client = createOptimizerClient('localhost:50054');
+    await client.removeProfile('orphan.example');
+    expect(mockCall).toHaveBeenCalledWith(mockClientInstance, 'RemoveProfile', { domain: 'orphan.example' });
+  });
+
   it('getStats()가 GetStats gRPC 메서드를 호출한다', async () => {
     mockCall.mockResolvedValue({ stats: [] });
     const client = createOptimizerClient('localhost:50054');

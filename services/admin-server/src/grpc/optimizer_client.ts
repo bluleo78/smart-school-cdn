@@ -21,6 +21,8 @@ export function createOptimizerClient(url: string) {
   return {
     getProfiles: () => call<{ profiles: OptimizerProfile[] }>(client, 'GetProfiles', {}),
     setProfile:  (profile: OptimizerProfile) => call<object>(client, 'SetProfile', { profile }),
+    // 이슈 #184 — 도메인 삭제와 짝맞춤 정리. 존재하지 않는 domain 도 optimizer-service 에서 idempotent 처리.
+    removeProfile: (domain: string) => call<object>(client, 'RemoveProfile', { domain }),
     getStats:    () => call<{ stats: DomainStats[] }>(client, 'GetStats', {}),
     health:      () => call<{ online: boolean; latency_ms: number }>(client, 'Health', {}),
   };
