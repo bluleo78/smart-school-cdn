@@ -331,6 +331,18 @@ fn compute_cache_key(method: &str, host: &str, path: &str, query: &str) -> Strin
     hex::encode(hash)
 }
 
+/// Host 헤더 정규화 (이슈 #404/#405).
+/// 무엇을: 포트 제거(`:443`) → trailing dot 제거(`example.com.`) → ASCII lowercase.
+/// 왜: cache_key·이벤트 host·domain_map 조회가 모두 같은 정규화를 거치도록 통일한다.
+///     admin-server `routes/diagnose.ts` 의 `normalizeHost(v)` 와 동일 규칙.
+///     비정규 Host 헤더(`Example.COM`, `host:443`, FQDN trailing dot) 가 들어와도 진단·집계가
+///     같은 키로 일관되게 매치된다 (silent under-count 방지).
+fn normalize_host(raw: &str) -> String {
+    let no_port = raw.split(':').next().unwrap_or(raw);
+    let no_dot = no_port.trim_end_matches('.');
+    no_dot.to_ascii_lowercase()
+}
+
 /// Phase 15: 텍스트 압축 설정 — 환경변수로만 조정.
 #[derive(Debug, Clone, Copy)]
 pub struct TextCompressConfig {
@@ -598,18 +610,20 @@ async fn proxy_handler(
     let state = ps.shared.clone();
     let client = ps.http_client.clone();
 
+    // Host 헤더 정규화 (이슈 #404/#405) — cache_key·domain_map·이벤트 host 가 모두 같은 규칙으로 정렬.
+    // 비정규 Host(`Example.COM`, `host:443`, FQDN trailing dot) 가 들어와도 admin-server 의
+    // lowercase 키와 결정적 매치되어 진단/집계의 silent under-count 가 발생하지 않는다.
     let host = match headers.get("host").and_then(|v| v.to_str().ok()) {
-        Some(h) => h.to_string(),
+        Some(h) => normalize_host(h),
         None => return (StatusCode::BAD_REQUEST, "Missing Host header").into_response(),
     };
 
-    // domain_map에서 호스트:포트 → 호스트 추출 후 원본 서버 URL 조회
+    // domain_map 조회 — host 는 이미 정규화되어 있어 port/case 차이로 인한 lookup miss 가 없다.
     let origin = {
         let map = ps.domain_map.read().await;
-        let domain = host.split(':').next().unwrap_or(&host);
-        map.get(domain).cloned().or_else(|| {
-            domain.find('.').and_then(|pos| {
-                let wildcard = format!("*.{}", &domain[pos + 1..]);
+        map.get(&host).cloned().or_else(|| {
+            host.find('.').and_then(|pos| {
+                let wildcard = format!("*.{}", &host[pos + 1..]);
                 map.get(&wildcard).cloned()
             })
         })
@@ -1591,10 +1605,12 @@ async fn cache_purge_handler(
             if let Some(ref target) = req.target {
                 if !target.is_empty() {
                     if let Ok(parsed) = target.parse::<Uri>() {
-                        let host = parsed.authority().map(|a| a.as_str()).unwrap_or("");
+                        // 이슈 #404 — proxy_handler 가 cache_key 계산 시 normalize_host 를 거치므로
+                        // 퍼지 lookup 도 같은 정규화를 적용해야 mixed-case/port 포함 입력이 매치된다.
+                        let host = normalize_host(parsed.authority().map(|a| a.as_str()).unwrap_or(""));
                         let path = parsed.path();
                         let query = parsed.query().unwrap_or("");
-                        let key = compute_cache_key("GET", host, path, query);
+                        let key = compute_cache_key("GET", &host, path, query);
                         admin.memory_cache.invalidate(&key).await;
                     }
                 }
@@ -2975,6 +2991,37 @@ mod tests {
         let get = compute_cache_key("GET", "example.com", "/foo", "");
         let post = compute_cache_key("POST", "example.com", "/foo", "");
         assert_ne!(get, post);
+    }
+
+    // ── normalize_host (이슈 #404/#405) ──────────────────────────
+    // admin-server `routes/diagnose.ts` 의 normalizeHost() 와 동일 규칙으로 통일.
+    // 동일하지 않으면 cache_key SHA-256 입력 문자열이 달라 진단이 항상 미스.
+
+    #[test]
+    fn test_normalize_host_lowercase() {
+        assert_eq!(normalize_host("Example.COM"), "example.com");
+        assert_eq!(normalize_host("EXAMPLE.com"), "example.com");
+    }
+
+    #[test]
+    fn test_normalize_host_strips_port() {
+        assert_eq!(normalize_host("example.com:443"), "example.com");
+        assert_eq!(normalize_host("Example.COM:8080"), "example.com");
+    }
+
+    #[test]
+    fn test_normalize_host_strips_trailing_dot() {
+        assert_eq!(normalize_host("example.com."), "example.com");
+        assert_eq!(normalize_host("Example.COM.:443"), "example.com");
+    }
+
+    #[test]
+    fn test_cache_key_host_case_insensitive() {
+        let lower = compute_cache_key("GET", &normalize_host("example.com"), "/x", "");
+        let upper = compute_cache_key("GET", &normalize_host("EXAMPLE.com"), "/x", "");
+        let port  = compute_cache_key("GET", &normalize_host("example.com:443"), "/x", "");
+        assert_eq!(lower, upper);
+        assert_eq!(lower, port);
     }
 
     // ── parse_cache_control ──────────────────────────────────────

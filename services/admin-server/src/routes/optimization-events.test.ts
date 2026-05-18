@@ -44,6 +44,29 @@ describe('POST /internal/events/batch', () => {
     expect(res.json()).toEqual({ inserted: 2 });
   });
 
+  // 이슈 #405 — proxy 가 raw Host 헤더(mixed case·port·trailing dot)를 그대로 보내도
+  // 인입 단계에서 정규화하여 lowercase·port 제거 형태로 저장. diagnoseAggregate 의
+  // lowercase WHERE 매치에서 누락되지 않도록 한다 (silent under-count 방지).
+  it('host 가 mixed-case·port·trailing dot 이어도 lowercase·정규화로 저장 (#405)', async () => {
+    const { app, db } = mkApp();
+    const res = await app.inject({
+      method: 'POST', url: '/internal/events/batch',
+      headers: { 'content-type': 'application/json' },
+      payload: { events: [
+        sampleEvent({ host: 'Webdt.EDUNET.net' }),
+        sampleEvent({ host: 'webdt.edunet.net:443' }),
+        sampleEvent({ host: 'webdt.edunet.net.' }),
+      ]},
+    });
+    expect(res.statusCode).toBe(200);
+    const rows = db.prepare('SELECT host FROM optimization_events').all() as { host: string }[];
+    expect(rows.map(r => r.host)).toEqual([
+      'webdt.edunet.net',
+      'webdt.edunet.net',
+      'webdt.edunet.net',
+    ]);
+  });
+
   it('events 필드가 배열이 아니면 400', async () => {
     const { app } = mkApp();
     const res = await app.inject({

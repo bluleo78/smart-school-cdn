@@ -68,10 +68,18 @@ function normalizeHostQuery(input: string | undefined): string | undefined {
  *  - orig_size/out_size: 음수 거부, null·undefined 허용 (bypass 케이스 보존)
  *  - elapsed_ms: 음수 거부 (better-sqlite3는 -1도 INSERT 허용하므로 런타임에서 차단)
  */
+// 이슈 #405 — 인입 host 정규화. proxy 측이 raw Host 헤더(mixed case, port, trailing dot)를
+// 보내도 admin 저장 시점에 lowercase·port 제거·trailing dot 제거를 거쳐 diagnoseAggregate 의
+// lowercase WHERE 매치에서 누락되지 않게 한다. proxy/lib.rs `normalize_host` 와 동일 규칙.
+function normalizeEventHost(raw: string): string {
+  const noPort = raw.split(':')[0] ?? raw;
+  return noPort.replace(/\.+$/, '').toLowerCase();
+}
+
 const eventInputSchema = z.object({
   ts:           z.string().optional(),
   event_type:   z.enum(['media_cache', 'image_optimize', 'text_compress']),
-  host:         z.string().min(1),
+  host:         z.string().min(1).transform(normalizeEventHost),
   url:          z.string().min(1),
   decision:     z.string().refine((d) => ALLOWED_DECISIONS.has(d), {
     message: 'invalid decision',

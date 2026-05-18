@@ -139,6 +139,33 @@ describe('GET /api/domains/:host/diagnose (#387)', () => {
     expect(r.statusCode).toBe(400);
   });
 
+  // 이슈 #403 — proxy 가 저장하는 event url 은 path+query 만 (origin-form),
+  // admin 도 같은 표현으로 lookup 해야 sample/range/hit_ratio 가 0 이 아닌 실제 값으로 잡힌다.
+  it('events lookup 은 path+query 표현으로 매치된다 (#403)', async () => {
+    const app = buildApp({ domains: ['httpbin.org'] });
+    // proxy 가 emit 한 형태(path-only url)로 직접 이벤트 1건 삽입 — repo 가 url_hash 까지 채움
+    const repo = (app as unknown as { optimizationEventsRepo: OptimizationEventsRepository })
+      .optimizationEventsRepo;
+    repo.insertBatch([{
+      ts: new Date().toISOString(),
+      event_type: 'media_cache',
+      host: 'httpbin.org',
+      url: '/images/logo.png',
+      decision: 'served_200',
+      orig_size: 100, out_size: 100,
+      range_header: null,
+      content_type: 'image/png',
+      elapsed_ms: 20,
+    }]);
+    const r = await app.inject({
+      method: 'GET',
+      url: '/api/domains/httpbin.org/diagnose?path=/images/logo.png&range=1h',
+    });
+    expect(r.statusCode).toBe(200);
+    // 이전 구현은 fullUrl=https://... 로 hash 미스 → sample_count=0 이었다.
+    expect(r.json().sample_count).toBe(1);
+  });
+
   it('proxy 호출 실패 시 cdn 필드는 null 이고 200 을 유지한다', async () => {
     vi.mocked(axios.get).mockRejectedValueOnce(new Error('offline'));
     const app = buildApp({ domains: ['x.test'] });

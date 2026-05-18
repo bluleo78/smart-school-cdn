@@ -95,7 +95,10 @@ export async function diagnoseRoutes(app: FastifyInstance) {
     }
 
     const key = cacheKey(host, path, query);
-    const fullUrl = `https://${host}${path}${query ? `?${query}` : ''}`;
+    // 이슈 #403 — events lookup URL 은 proxy 의 emit 표현과 동일하게 path+query (origin-form).
+    // proxy 는 axum 핸들러의 `uri.to_string()` 결과(스킴/호스트 없이 path+query 만)를 그대로 저장하므로
+    // 여기도 같은 형태로 hash 해야 url_hash 가 매치되어 sample/range/hit_ratio 가 0 이 아닌 실측치를 반환한다.
+    const eventUrl = `${path}${query ? `?${query}` : ''}`;
     const periodSec = PERIOD_SEC[range];
 
     // proxy /diagnose 호출 (부분 실패 허용 — cdn 필드만 null 처리)
@@ -121,7 +124,7 @@ export async function diagnoseRoutes(app: FastifyInstance) {
     }
 
     // optimization_events 집계 — 로컬 DB이므로 항상 성공 (실패 시 0 값 집계 반환)
-    const agg = app.optimizationEventsRepo.diagnoseAggregate({ host, url: fullUrl, periodSec });
+    const agg = app.optimizationEventsRepo.diagnoseAggregate({ host, url: eventUrl, periodSec });
 
     return reply.send({
       cdn: cdnPayload,
