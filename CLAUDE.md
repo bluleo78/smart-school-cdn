@@ -44,6 +44,7 @@ pnpm ship:admin          # Admin Server + Admin Web만 재배포
 - **커밋/배포 금지**: 사용자 명시적 승인 후에만 실행.
 - **테스트 필수**: Rust → 단위/통합 테스트, Admin API → Vitest, Dashboard → Playwright E2E.
 - **포트 충돌 주의**: smart-fire-hub과 동시 실행 시 포트 할당표 참조 (`docs/architecture.md` §9).
+- **Timestamp 단일 형식**: 신규 DB 컬럼은 반드시 `INTEGER` unix-sec, API 응답도 `INTEGER` unix-sec. ISO TEXT 컬럼 추가 금지. 자세한 규약은 `docs/architecture.md` §6-2 Timestamp 규약 (#342 / #377).
 
 ## Tech Stack
 

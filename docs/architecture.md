@@ -241,6 +241,21 @@ iPad → Proxy Service: GET https://textbook.com/images/diagram.png
 | gRPC 클라이언트 | @grpc/grpc-js | Rust 서비스와 통신 |
 | 검증 | Zod v4 | 요청/응답 스키마 검증 |
 
+#### Timestamp 규약 (이슈 #342 / #377)
+
+| 레이어 | 형식 | 비고 |
+|--------|------|------|
+| **DB 컬럼 (신규)** | `INTEGER` unix-sec | `domains`, `domain_stats`, `dns_metrics_minute`, `optimization_events.ts` (#377 이후) 가 따른다 |
+| **API 응답** | `INTEGER` unix-sec (`number`) | `last_login_at`, `created_at`, `updated_at`, `disabled_at` 등 — #342 에서 통일 |
+| **API 입력 (since 등)** | ISO 8601 문자열 또는 `INTEGER` unix-sec | 입력 boundary 에서만 두 형식 허용, 내부는 unix-sec 로 변환 |
+| **proxy → admin 이벤트 push (`ts`)** | ISO 8601 문자열 (proxy 호환) | admin 인입 시 `Math.floor(Date.parse(ts)/1000)` 로 변환 후 저장 |
+
+**원칙**:
+- 신규 DB 컬럼은 **반드시 `INTEGER` unix-sec**. ISO TEXT 컬럼 추가 금지.
+- 기존 `users.*_at` (TEXT) 와 같이 잔존 컬럼은 sub-issue 로 점진 마이그레이션.
+- repo/route 레이어의 retention pruner, since 필터, 집계 윈도우 계산은 단일 형식(unix-sec)으로 통일.
+
+
 ### 6-3. Dashboard (React)
 
 | 영역 | 기술 | 비고 |

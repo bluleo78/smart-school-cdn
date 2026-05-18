@@ -70,10 +70,13 @@ describe('OptimizationEventsPruner', () => {
     const removed = pruner.tick();
 
     expect(removed).toBe(2);
+    // #377 이후 ts 는 INTEGER unix-sec. 남은 행을 unix-sec 로 비교한다 (29/1 day-ago).
     const rows = db
       .prepare('SELECT ts FROM optimization_events ORDER BY ts ASC')
-      .all() as Array<{ ts: string }>;
-    expect(rows.map((r) => r.ts)).toEqual([isoMinusDays(29), isoMinusDays(1)]);
+      .all() as Array<{ ts: number }>;
+    const expected29 = Math.floor((NOW - 29 * DAY_MS) / 1000);
+    const expected1  = Math.floor((NOW -  1 * DAY_MS) / 1000);
+    expect(rows.map((r) => r.ts)).toEqual([expected29, expected1]);
   });
 
   it('retentionDays 옵션이 환경변수보다 우선한다', () => {

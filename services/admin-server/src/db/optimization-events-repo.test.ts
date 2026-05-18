@@ -42,12 +42,25 @@ describe('OptimizationEventsRepository', () => {
       expect(rows[0].host).toBe('webdt.edunet.net');
     });
 
+    // 이슈 #377 — DB 컬럼은 INTEGER unix-sec. proxy 가 ISO 8601 로 push 해도 정수로 저장된다.
+    it('insert 시 ts (ISO) 가 DB 에는 INTEGER unix-sec 로 저장된다 (#377)', () => {
+      repo.insert(sample({ ts: '2026-04-19T10:00:00Z' }));
+      const row = db.prepare('SELECT typeof(ts) as t, ts FROM optimization_events').get() as { t: string; ts: number };
+      expect(row.t).toBe('integer');
+      expect(row.ts).toBe(Math.floor(Date.parse('2026-04-19T10:00:00Z') / 1000));
+    });
+
     it('ts 미지정 시 현재 시각(ISO8601)으로 채운다', () => {
-      const before = new Date().toISOString();
+      // #377 이후 DB 컬럼은 INTEGER unix-sec, repo 응답은 여전히 ISO 8601 문자열로 변환되어 반환된다.
+      // ms 정밀도는 저장 단계에서 잘리므로 second 단위 윈도우(전/후 1초 여유)로 비교한다.
+      const beforeSec = Math.floor(Date.now() / 1000);
       repo.insert(sample({ ts: undefined }));
-      const after = new Date().toISOString();
-      const ts = repo.query()[0].ts;
-      expect(ts >= before && ts <= after).toBe(true);
+      const afterSec = Math.floor(Date.now() / 1000);
+      const tsMs = Date.parse(repo.query()[0].ts);
+      expect(Number.isFinite(tsMs)).toBe(true);
+      const tsSec = Math.floor(tsMs / 1000);
+      expect(tsSec).toBeGreaterThanOrEqual(beforeSec);
+      expect(tsSec).toBeLessThanOrEqual(afterSec);
     });
 
     it('url_hash는 SHA-256 앞 16자 hex로 저장된다', () => {

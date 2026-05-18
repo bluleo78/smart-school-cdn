@@ -123,6 +123,55 @@ db.exec(DNS_METRICS_SCHEMA);
 // 최적화 이벤트 테이블 생성 — Phase 13/14/15 공용 관찰 인프라
 db.exec(OPTIMIZATION_EVENTS_SCHEMA);
 
+// optimization_events.ts 컬럼 형식 마이그레이션 — 이슈 #377
+// 무엇을: 기존 DB 의 ts 컬럼이 TEXT (ISO 8601) 면 INTEGER unix-sec 로 재생성하며 모든 행을 변환한다.
+// 왜: docs/architecture.md §6-2 Timestamp 규약(DB 컬럼 = INTEGER unix-sec 단일 형식)에 맞추기 위함.
+//    repo I/O 는 여전히 ISO 8601 을 수용/반환(proxy/응답 호환). 변환은 repo 내부에서 수행.
+// 안전성: 단일 트랜잭션으로 신규 테이블 INSERT → DROP/RENAME 수행. 인덱스도 함께 재생성.
+//        strftime('%s', ts) 가 NULL 을 반환하는 비정상 행은 0(epoch) 으로 폴백되어 prune 대상이 된다.
+{
+  type ColInfo = { name: string; type: string };
+  const cols = db.pragma('table_info(optimization_events)') as ColInfo[];
+  const tsCol = cols.find((c) => c.name === 'ts');
+  if (tsCol && tsCol.type.toUpperCase() === 'TEXT') {
+    const tx = db.transaction(() => {
+      db.exec(`
+        CREATE TABLE optimization_events_new (
+          id           INTEGER PRIMARY KEY AUTOINCREMENT,
+          ts           INTEGER NOT NULL,
+          event_type   TEXT NOT NULL,
+          host         TEXT NOT NULL,
+          url_hash     TEXT NOT NULL,
+          url          TEXT NOT NULL,
+          decision     TEXT NOT NULL,
+          orig_size    INTEGER,
+          out_size     INTEGER,
+          range_header TEXT,
+          content_type TEXT,
+          elapsed_ms   INTEGER NOT NULL
+        );
+        INSERT INTO optimization_events_new
+          (id, ts, event_type, host, url_hash, url, decision, orig_size, out_size, range_header, content_type, elapsed_ms)
+        SELECT id,
+               COALESCE(CAST(strftime('%s', ts) AS INTEGER), 0),
+               event_type, host, url_hash, url, decision, orig_size, out_size, range_header, content_type, elapsed_ms
+        FROM optimization_events;
+        DROP INDEX IF EXISTS idx_opt_events_host_ts;
+        DROP INDEX IF EXISTS idx_opt_events_type_decision;
+        DROP INDEX IF EXISTS idx_opt_events_ts;
+        DROP INDEX IF EXISTS idx_opt_events_type_ts;
+        DROP TABLE optimization_events;
+        ALTER TABLE optimization_events_new RENAME TO optimization_events;
+        CREATE INDEX IF NOT EXISTS idx_opt_events_host_ts       ON optimization_events(host, ts);
+        CREATE INDEX IF NOT EXISTS idx_opt_events_type_decision ON optimization_events(event_type, decision);
+        CREATE INDEX IF NOT EXISTS idx_opt_events_ts            ON optimization_events(ts);
+        CREATE INDEX IF NOT EXISTS idx_opt_events_type_ts       ON optimization_events(event_type, ts);
+      `);
+    });
+    tx();
+  }
+}
+
 // 관리자 사용자 테이블 생성 — Task 1/6 인증 인프라
 db.exec(USER_SCHEMA);
 

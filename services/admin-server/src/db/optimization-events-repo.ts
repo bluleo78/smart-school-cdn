@@ -7,6 +7,8 @@ import { clampInt, clampOffset } from './pagination.js';
  * Phase 13(미디어 Range) / Phase 14(이미지 Optimizer) / Phase 15(텍스트 압축)가
  * 공용으로 사용하며, event_type 컬럼으로 세 Phase를 구분한다.
  *
+ * - ts: INTEGER unix-sec (#377). 이전 TEXT ISO8601 컬럼은 부팅 마이그레이션이 강제 변환한다.
+ *   API 입출력은 ISO 8601 문자열로 유지하여 proxy 인입 / UI 응답 호환을 보장한다 — 변환은 repo 가 담당.
  * - url_hash: SHA-256 앞 16자 — 동일 URL 그룹핑·인덱스 정렬 효율용 (insert 시 자동 계산)
  * - decision: 처리 결과 분류 문자열. Phase별로 의미가 다르지만 고정 집합으로 운영한다.
  *   · media_cache:   'served_200','served_206','stored_new','invalid_range_416'
@@ -18,7 +20,7 @@ import { clampInt, clampOffset } from './pagination.js';
 export const OPTIMIZATION_EVENTS_SCHEMA = `
   CREATE TABLE IF NOT EXISTS optimization_events (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    ts           TEXT NOT NULL,
+    ts           INTEGER NOT NULL,
     event_type   TEXT NOT NULL,
     host         TEXT NOT NULL,
     url_hash     TEXT NOT NULL,
@@ -39,6 +41,28 @@ export const OPTIMIZATION_EVENTS_SCHEMA = `
   -- 인덱스 스캔만으로 응답하도록 한다. idempotent 하므로 기존 DB 에도 안전 적용.
   CREATE INDEX IF NOT EXISTS idx_opt_events_type_ts       ON optimization_events(event_type, ts);
 `;
+
+/**
+ * ISO 8601 / unix-sec(number) 입력을 INTEGER unix-sec 로 정규화 (#377).
+ * 무엇을: ISO 8601 문자열은 `Math.floor(Date.parse / 1000)`, number 는 그대로 정수화.
+ *        파싱 실패 시 0 (epoch) 으로 폴백 — silent NaN 저장 방지.
+ * 왜: proxy 가 ISO 문자열로 push 하던 기존 인입 경로를 깨지 않으면서 DB 컬럼만 INTEGER 로 통일.
+ *    `since` 필터/`prune` 파라미터도 같은 helper 를 거쳐 단일 형식으로 처리한다.
+ */
+function toUnixSecInput(input: string | number | undefined): number {
+  if (input === undefined) return Math.floor(Date.now() / 1000);
+  if (typeof input === 'number') return Number.isFinite(input) ? Math.floor(input) : 0;
+  const ms = Date.parse(input);
+  return Number.isFinite(ms) ? Math.floor(ms / 1000) : 0;
+}
+
+/**
+ * INTEGER unix-sec → ISO 8601 문자열 — query/응답 호환을 위한 표시 변환.
+ * Z (UTC) 표기 유지.
+ */
+function unixSecToIso(sec: number): string {
+  return new Date(sec * 1000).toISOString();
+}
 
 /** 허용 event_type — 라우트/repo 양쪽에서 검증에 사용 */
 export type OptimizationEventType = 'media_cache' | 'image_optimize' | 'text_compress';
@@ -135,7 +159,8 @@ function escapeLike(s: string): string {
 export class OptimizationEventsRepository {
   constructor(private readonly db: Database.Database) {}
 
-  /** 단일 이벤트 insert — ts 미지정 시 현재 시각, size/range/ct 미지정 시 null로 저장 */
+  /** 단일 이벤트 insert — ts 미지정 시 현재 시각, size/range/ct 미지정 시 null로 저장.
+   *  ts (ISO 8601 문자열) 는 INTEGER unix-sec 로 변환 후 저장 (#377). */
   insert(ev: OptimizationEventInput): void {
     this.db
       .prepare(
@@ -145,7 +170,7 @@ export class OptimizationEventsRepository {
            (@ts, @event_type, @host, @url_hash, @url, @decision, @orig_size, @out_size, @range_header, @content_type, @elapsed_ms)`,
       )
       .run({
-        ts:           ev.ts ?? new Date().toISOString(),
+        ts:           toUnixSecInput(ev.ts),
         event_type:   ev.event_type,
         host:         ev.host,
         url_hash:     hashUrl(ev.url),
@@ -162,6 +187,7 @@ export class OptimizationEventsRepository {
   /**
    * 배치 insert — 단일 트랜잭션으로 감싸 성능·원자성을 확보한다.
    * 반환값: 성공적으로 처리된 이벤트 개수.
+   * ts (ISO 8601 문자열) 는 INTEGER unix-sec 로 변환 후 저장 (#377).
    */
   insertBatch(events: OptimizationEventInput[]): number {
     if (events.length === 0) return 0;
@@ -174,7 +200,7 @@ export class OptimizationEventsRepository {
     const insertAll = this.db.transaction((batch: OptimizationEventInput[]) => {
       for (const ev of batch) {
         stmt.run({
-          ts:           ev.ts ?? new Date().toISOString(),
+          ts:           toUnixSecInput(ev.ts),
           event_type:   ev.event_type,
           host:         ev.host,
           url_hash:     hashUrl(ev.url),
@@ -202,7 +228,8 @@ export class OptimizationEventsRepository {
     if (q.event_type) { where.push('event_type = @event_type'); params.event_type = q.event_type; }
     if (q.host)       { where.push('host = @host');             params.host       = q.host; }
     if (q.decision)   { where.push('decision = @decision');     params.decision   = q.decision; }
-    if (q.since)      { where.push('ts >= @since');             params.since      = q.since; }
+    // since (ISO 8601) → INTEGER unix-sec 로 변환 후 비교 (#377). ts 컬럼이 INTEGER 라 같은 형식 매칭.
+    if (q.since)      { where.push('ts >= @since');             params.since      = toUnixSecInput(q.since); }
 
     // limit는 1~1000 정수로 강제 — 비정수 입력(예: 1.7)이 SQL `LIMIT`에 그대로 주입되어
     // SQLITE_MISMATCH로 500이 되는 회귀(#293)를 차단하기 위해 clampInt로 정수화한다.
@@ -215,7 +242,9 @@ export class OptimizationEventsRepository {
       ORDER BY ts DESC
       LIMIT ${limit}
     `;
-    return this.db.prepare(sql).all(params) as OptimizationEventRow[];
+    // ts 는 DB 에서 INTEGER 로 가져온 뒤 ISO 8601 문자열로 변환 — 응답 호환 유지 (#377).
+    const rows = this.db.prepare(sql).all(params) as Array<Omit<OptimizationEventRow, 'ts'> & { ts: number }>;
+    return rows.map((r) => ({ ...r, ts: unixSecToIso(r.ts) }));
   }
 
   /**
@@ -224,10 +253,11 @@ export class OptimizationEventsRepository {
    */
   statsByDecision(q: StatsQuery = {}): DecisionStatsRow[] {
     const periodSec = q.period_sec ?? 86400;
-    const since = new Date(Date.now() - periodSec * 1000).toISOString();
+    // ts INTEGER 컬럼과 매칭되도록 since 를 unix-sec 로 계산 (#377).
+    const since = Math.floor(Date.now() / 1000) - periodSec;
 
     const where: string[] = ['ts >= @since'];
-    const params: Record<string, string> = { since };
+    const params: Record<string, string | number> = { since };
     if (q.event_type) { where.push('event_type = @event_type'); params.event_type = q.event_type; }
     if (q.host)       { where.push('host = @host');             params.host       = q.host; }
 
@@ -255,9 +285,11 @@ export class OptimizationEventsRepository {
     }));
   }
 
-  /** 기준 시각(ISO8601) 이전 이벤트 삭제. 삭제된 행 수 반환 */
+  /** 기준 시각(ISO8601) 이전 이벤트 삭제. 삭제된 행 수 반환.
+   *  ts 컬럼이 INTEGER 라 입력 ISO 를 unix-sec 로 변환 후 비교 (#377). */
   prune(beforeIso: string): number {
-    return this.db.prepare(`DELETE FROM optimization_events WHERE ts < ?`).run(beforeIso).changes;
+    const beforeSec = toUnixSecInput(beforeIso);
+    return this.db.prepare(`DELETE FROM optimization_events WHERE ts < ?`).run(beforeSec).changes;
   }
 
   /**
@@ -314,7 +346,8 @@ export class OptimizationEventsRepository {
    *  - 콤마 포함 (멀티-range)                 → multi
    */
   diagnoseAggregate(q: { host: string; url: string; periodSec: number }): DiagnoseAggregateRow {
-    const sinceIso = new Date(Date.now() - q.periodSec * 1000).toISOString();
+    // ts INTEGER 컬럼과 매칭되도록 since 를 unix-sec 로 계산 (#377).
+    const sinceSec = Math.floor(Date.now() / 1000) - q.periodSec;
     const urlHash = hashUrl(q.url);
 
     const row = this.db.prepare(`
@@ -330,8 +363,8 @@ export class OptimizationEventsRepository {
         SUM(CASE WHEN range_header GLOB 'bytes=*[0-9]-*[0-9]' AND range_header NOT LIKE '%,%' THEN 1 ELSE 0 END) AS range_single_count,
         SUM(CASE WHEN range_header LIKE '%,%'                                          THEN 1 ELSE 0 END) AS range_multi_count
       FROM optimization_events
-      WHERE host = @host AND url_hash = @urlHash AND ts >= @sinceIso
-    `).get({ host: q.host, urlHash, sinceIso }) as {
+      WHERE host = @host AND url_hash = @urlHash AND ts >= @sinceSec
+    `).get({ host: q.host, urlHash, sinceSec }) as {
       hit_count: number | null; miss_count: number | null; bypass_count: number | null;
       error_5xx: number | null; timeout_count: number | null;
       origin_sample_count: number | null; avg_origin_rtt_ms: number | null;
@@ -379,9 +412,10 @@ export class OptimizationEventsRepository {
     }>;
   } {
     const periodSec = q.period_sec ?? 86400;
-    const since = new Date(Date.now() - periodSec * 1000).toISOString();
+    // ts INTEGER 컬럼과 매칭되도록 since 를 unix-sec 로 계산 (#377).
+    const since = Math.floor(Date.now() / 1000) - periodSec;
     const where: string[] = ['host = @host', 'ts >= @since'];
-    const params: Record<string, string> = { host: q.host, since };
+    const params: Record<string, string | number> = { host: q.host, since };
     if (q.decision) { where.push('decision = @decision'); params.decision = q.decision; }
     // LIKE 특수문자(%, _, \)를 이스케이프하여 리터럴 검색을 보장한다
     if (q.search)   { where.push(`url LIKE @q ESCAPE '\\'`); params.q = `%${escapeLike(q.search)}%`; }
