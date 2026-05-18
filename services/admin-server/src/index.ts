@@ -280,21 +280,27 @@ db.exec(USER_SCHEMA);
         }
 
         // 2) 새 스키마로 테이블 재생성 후 데이터 복사. 컬럼 구성은 USER_SCHEMA 와 동일하게 유지.
+        //    #377 — *_at 은 INTEGER unix-sec. 기존 TEXT ISO 값은 strftime('%s', ...) 로 변환한다.
         db.exec(`
           CREATE TABLE users_new (
             id             INTEGER PRIMARY KEY AUTOINCREMENT,
             username       TEXT    NOT NULL UNIQUE COLLATE NOCASE,
             password_hash  TEXT    NOT NULL,
-            created_at     TEXT    NOT NULL,
-            updated_at     TEXT    NOT NULL,
-            disabled_at    TEXT,
-            last_login_at  TEXT,
+            created_at     INTEGER NOT NULL,
+            updated_at     INTEGER NOT NULL,
+            disabled_at    INTEGER,
+            last_login_at  INTEGER,
             token_version  INTEGER NOT NULL DEFAULT 0
           );
         `);
         db.exec(`
           INSERT INTO users_new (id, username, password_hash, created_at, updated_at, disabled_at, last_login_at)
-          SELECT id, username, password_hash, created_at, updated_at, disabled_at, last_login_at FROM users;
+          SELECT id, username, password_hash,
+                 COALESCE(CAST(strftime('%s', created_at) AS INTEGER), 0),
+                 COALESCE(CAST(strftime('%s', updated_at) AS INTEGER), 0),
+                 CASE WHEN disabled_at IS NULL THEN NULL ELSE CAST(strftime('%s', disabled_at) AS INTEGER) END,
+                 CASE WHEN last_login_at IS NULL THEN NULL ELSE CAST(strftime('%s', last_login_at) AS INTEGER) END
+          FROM users;
         `);
         db.exec('DROP INDEX IF EXISTS idx_users_username');
         db.exec('DROP TABLE users');
@@ -320,6 +326,48 @@ db.exec(USER_SCHEMA);
   const cols = db.pragma('table_info(users)') as ColInfo[];
   if (!cols.some((c) => c.name === 'token_version')) {
     db.exec('ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0');
+  }
+}
+
+// users.*_at 타임스탬프 형식 마이그레이션 — 이슈 #377
+// 무엇을: created_at/updated_at/disabled_at/last_login_at 컬럼이 TEXT 라면 INTEGER unix-sec 로 재생성.
+// 왜: docs/architecture.md §6-2 Timestamp 규약 (DB = INTEGER unix-sec 단일 형식).
+//    NOCASE 재생성(#340) 이후 신규 DB 는 INTEGER 로 만들어지지만, 이미 NOCASE 가 적용된
+//    기존 운영 DB 는 *_at 만 TEXT 로 남는 케이스가 있어 별도 detect 후 강제 변환한다.
+//    token_version ADD COLUMN(#330/#331) 이 먼저 수행되어 SELECT token_version 이 안전하다.
+// 안전성: TEXT → INTEGER 단일 트랜잭션. strftime 변환 실패 행은 0(epoch) 으로 폴백.
+{
+  type ColInfoT = { name: string; type: string };
+  const cols377 = db.pragma('table_info(users)') as ColInfoT[];
+  const createdAtCol = cols377.find((c) => c.name === 'created_at');
+  if (createdAtCol && createdAtCol.type.toUpperCase() === 'TEXT') {
+    const tx = db.transaction(() => {
+      db.exec(`
+        CREATE TABLE users_new (
+          id             INTEGER PRIMARY KEY AUTOINCREMENT,
+          username       TEXT    NOT NULL UNIQUE COLLATE NOCASE,
+          password_hash  TEXT    NOT NULL,
+          created_at     INTEGER NOT NULL,
+          updated_at     INTEGER NOT NULL,
+          disabled_at    INTEGER,
+          last_login_at  INTEGER,
+          token_version  INTEGER NOT NULL DEFAULT 0
+        );
+        INSERT INTO users_new (id, username, password_hash, created_at, updated_at, disabled_at, last_login_at, token_version)
+        SELECT id, username, password_hash,
+               COALESCE(CAST(strftime('%s', created_at) AS INTEGER), 0),
+               COALESCE(CAST(strftime('%s', updated_at) AS INTEGER), 0),
+               CASE WHEN disabled_at IS NULL THEN NULL ELSE CAST(strftime('%s', disabled_at) AS INTEGER) END,
+               CASE WHEN last_login_at IS NULL THEN NULL ELSE CAST(strftime('%s', last_login_at) AS INTEGER) END,
+               token_version
+        FROM users;
+        DROP INDEX IF EXISTS idx_users_username;
+        DROP TABLE users;
+        ALTER TABLE users_new RENAME TO users;
+        CREATE INDEX IF NOT EXISTS idx_users_username ON users(username COLLATE NOCASE);
+      `);
+    });
+    tx();
   }
 }
 

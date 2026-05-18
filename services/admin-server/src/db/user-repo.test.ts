@@ -16,6 +16,19 @@ describe('UserRepository', () => {
     expect(repo.count()).toBe(0);
   });
 
+  // 이슈 #377 — *_at 컬럼은 INTEGER unix-sec 로 저장되며 응답에도 number 로 반환된다.
+  it('create 시 *_at 은 INTEGER unix-sec 로 저장된다 (#377)', () => {
+    const u = repo.create('a@b.c', 'h');
+    expect(typeof u.created_at).toBe('number');
+    expect(typeof u.updated_at).toBe('number');
+    const row = db.prepare("SELECT typeof(created_at) AS t FROM users WHERE id = ?").get(u.id) as { t: string };
+    expect(row.t).toBe('integer');
+    // 현재 시각 ±5초 범위
+    const nowSec = Math.floor(Date.now() / 1000);
+    expect(u.created_at).toBeGreaterThanOrEqual(nowSec - 5);
+    expect(u.created_at).toBeLessThanOrEqual(nowSec + 5);
+  });
+
   it('create 후 findByUsername 로 조회된다', () => {
     const user = repo.create('admin@school.local', 'hash1');
     expect(user.id).toBeGreaterThan(0);
@@ -89,8 +102,9 @@ describe('UserRepository', () => {
   it('updateLastLogin 은 updated_at 도 함께 갱신한다 (#343)', async () => {
     const u = repo.create('a@b.c', 'h');
     const before = repo.findById(u.id)!;
-    // ISO 문자열 비교를 확실히 하기 위해 짧게 대기 (now() 가 같은 ms 일 수 있음)
-    await new Promise((r) => setTimeout(r, 5));
+    // #377 이후 *_at 은 INTEGER unix-sec(초 단위). 같은 초 안에서는 갱신 전후 값이 동일하므로
+    // 두 갱신 사이에 1초 이상 대기해 second 경계를 넘긴다.
+    await new Promise((r) => setTimeout(r, 1100));
     repo.updateLastLogin(u.id);
     const after = repo.findById(u.id)!;
     expect(after.last_login_at).not.toBeNull();
@@ -191,7 +205,8 @@ describe('UserRepository', () => {
     it('bumpTokenVersion 호출 시 1씩 증가하고 updated_at 도 갱신', async () => {
       const u = repo.create('a@b.c', 'h');
       const before = repo.findById(u.id)!;
-      await new Promise((r) => setTimeout(r, 5));
+      // #377 이후 updated_at 은 INTEGER unix-sec. 갱신 차이를 검증하려면 second 경계 통과 필요.
+      await new Promise((r) => setTimeout(r, 1100));
       repo.bumpTokenVersion(u.id);
       const after = repo.findById(u.id)!;
       expect(after.token_version).toBe(1);

@@ -5,15 +5,17 @@ import type Database from 'better-sqlite3';
 // 직접 INSERT(테스트 헬퍼·향후 internal API·sqlite3 CLI 등)에서도 동일 invariant 가
 // DB 레벨에서 강제되도록 한다. 인덱스도 NOCASE 로 두어 case-insensitive 조회 시
 // 인덱스 활용 가능.
+// 이슈 #377 — 모든 *_at 컬럼은 INTEGER unix-sec 단일 형식 (docs/architecture.md §6-2 Timestamp 규약).
+// 기존 TEXT ISO8601 스키마 DB 는 index.ts 부팅 마이그레이션이 강제 변환한다.
 export const USER_SCHEMA = `
   CREATE TABLE IF NOT EXISTS users (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     username       TEXT    NOT NULL UNIQUE COLLATE NOCASE,
     password_hash  TEXT    NOT NULL,
-    created_at     TEXT    NOT NULL,
-    updated_at     TEXT    NOT NULL,
-    disabled_at    TEXT,
-    last_login_at  TEXT,
+    created_at     INTEGER NOT NULL,
+    updated_at     INTEGER NOT NULL,
+    disabled_at    INTEGER,
+    last_login_at  INTEGER,
     -- 이슈 #330/#331 — JWT 세션 무효화를 위한 카운터.
     -- 비활성화/비밀번호 변경 시 +1 하여 기존 stateless JWT(tv claim) 를 즉시 무효화한다.
     token_version  INTEGER NOT NULL DEFAULT 0
@@ -21,15 +23,21 @@ export const USER_SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_users_username ON users(username COLLATE NOCASE);
 `;
 
+// 이슈 #377 — *_at 은 INTEGER unix-sec. 응답 직렬화는 그대로 통과 (#342).
 export interface UserRow {
   id: number;
   username: string;
   password_hash: string;
-  created_at: string;
-  updated_at: string;
-  disabled_at: string | null;
-  last_login_at: string | null;
+  created_at: number;
+  updated_at: number;
+  disabled_at: number | null;
+  last_login_at: number | null;
   token_version: number;
+}
+
+/** 현재 시각 → unix-sec (#377). */
+function nowSec(): number {
+  return Math.floor(Date.now() / 1000);
 }
 
 /** list() 정렬 옵션 — 라우트에서 화이트리스트 검증 후 전달 (#344) */
@@ -65,7 +73,7 @@ export class UserRepository {
   }
 
   create(username: string, passwordHash: string): UserRow {
-    const now = new Date().toISOString();
+    const now = nowSec();
     const info = this.db.prepare(
       'INSERT INTO users (username, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?)'
     ).run(username, passwordHash, now, now);
@@ -109,7 +117,9 @@ export class UserRepository {
     const nullsClause = sortCol === 'last_login_at'
       ? (sortDir === 'DESC' ? `${sortCol} IS NULL, ` : '')
       : '';
-    const orderBy = `ORDER BY ${nullsClause}${sortCol} ${sortDir}, id ASC`;
+    // 이슈 #377 — *_at 가 unix-sec(초 단위) 라 같은 초에 만들어진 행은 created_at 이 동일하다.
+    // 보조 정렬은 id 를 primary 방향과 같은 방향으로 적용해 "최신 = 더 큰 id 가 먼저" 의미를 보존.
+    const orderBy = `ORDER BY ${nullsClause}${sortCol} ${sortDir}, id ${sortDir}`;
     // 이슈 #376 — 중복 마이그레이션(#190/#340)이 보존을 위해 남긴 `__dup_<id>__` prefix 행은
     // archive 성격이므로 사용자 목록 응답에서 제외한다. 운영 데이터 무결성/UX 혼동 방지.
     // LIKE 의 `_` 와이드카드를 리터럴로 매칭하기 위해 ESCAPE 절 사용.
@@ -119,7 +129,7 @@ export class UserRepository {
   }
 
   updatePassword(id: number, passwordHash: string): void {
-    const now = new Date().toISOString();
+    const now = nowSec();
     this.db.prepare('UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?').run(passwordHash, now, id);
   }
 
@@ -127,12 +137,12 @@ export class UserRepository {
   // 동일하게 updated_at 도 함께 갱신하여 "행이 마지막으로 수정된 시점" 의미를 일관되게 유지.
   // disable/enable/updatePassword 와 동일 패턴.
   updateLastLogin(id: number): void {
-    const now = new Date().toISOString();
+    const now = nowSec();
     this.db.prepare('UPDATE users SET last_login_at = ?, updated_at = ? WHERE id = ?').run(now, now, id);
   }
 
   disable(id: number): void {
-    const now = new Date().toISOString();
+    const now = nowSec();
     this.db.prepare('UPDATE users SET disabled_at = ?, updated_at = ? WHERE id = ?').run(now, now, id);
   }
 
@@ -143,13 +153,13 @@ export class UserRepository {
    * 호출 위치: disable, updatePassword. updated_at 도 동일 시점으로 갱신해 mutation 일관성 유지.
    */
   bumpTokenVersion(id: number): void {
-    const now = new Date().toISOString();
+    const now = nowSec();
     this.db.prepare('UPDATE users SET token_version = token_version + 1, updated_at = ? WHERE id = ?').run(now, id);
   }
 
   /** 비활성화된 사용자를 재활성화한다 — disabled_at 을 NULL 로 초기화 */
   enable(id: number): void {
-    const now = new Date().toISOString();
+    const now = nowSec();
     this.db.prepare('UPDATE users SET disabled_at = NULL, updated_at = ? WHERE id = ?').run(now, id);
   }
 }
