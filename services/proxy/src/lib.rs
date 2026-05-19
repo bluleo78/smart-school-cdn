@@ -43,6 +43,27 @@ pub struct MemoryCacheEntry {
 /// 런타임에 교체 가능한 도메인→원본서버 맵
 pub type DomainMap = Arc<RwLock<HashMap<String, String>>>;
 
+/// 이슈 #429 — 도메인별 stale-if-error 윈도우(초) 정책 맵.
+/// 값 의미: 미등록 host=글로벌 폴백 / Some(0)=비활성 / Some(n>0)=명시 윈도우.
+/// admin-server `syncToProxy` 가 POST /admin/domains 페이로드에 host 별 값을 동봉하면 update_domains_handler 가 갱신한다.
+/// 프록시-전역 단일 OnceLock 으로 보관해 ProxyState/AdminState 시그니처 변경을 피한다.
+static DOMAIN_STALE_POLICIES: std::sync::OnceLock<RwLock<HashMap<String, i64>>> = std::sync::OnceLock::new();
+
+/// stale_if_error 정책 맵 접근자. 최초 호출 시 빈 맵 초기화.
+fn domain_stale_policies() -> &'static RwLock<HashMap<String, i64>> {
+    DOMAIN_STALE_POLICIES.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+/// 이슈 #429 — host 의 stale-if-error 윈도우(초)를 반환. 미등록이면 글로벌 폴백 사용.
+async fn stale_if_error_window_for_host(host: &str) -> i64 {
+    let map = domain_stale_policies().read().await;
+    if let Some(&v) = map.get(host) {
+        return v;
+    }
+    drop(map);
+    stale_if_error_window_secs()
+}
+
 /// 도메인별 요청 통계 카운터 (lock-free atomic 연산)
 /// L1/L2 히트, 4종 bypass, miss를 개별 집계한다
 pub struct DomainCounter {
@@ -230,6 +251,7 @@ fn stale_if_error_window_secs() -> i64 {
 /// 반환: 사용 가능 stale 사본이면 Some(CoalescedResponse), 없거나 window 초과면 None.
 async fn try_serve_stale(
     ps: &ProxyState,
+    host: &str,
     key: &str,
 ) -> Option<coalescer::CoalescedResponse> {
     let mut storage = ps.storage.lock().await;
@@ -238,14 +260,15 @@ async fn try_serve_stale(
     drop(storage);
     // SIE window 검증 — expires_at=0 (만료 없음) 이면 사실 정상 HIT 이므로 그대로 사용.
     // 만료 사본이면 now <= expires_at + SIE_WINDOW 만 허용.
+    // 이슈 #429 — 도메인별 정책이 있으면 우선 적용, 없으면 글로벌 폴백. window=0 이면 폴백 비활성.
     if is_stale {
         let now = chrono::Utc::now().timestamp();
-        let window = stale_if_error_window_secs();
-        if expires_at <= 0 || now > expires_at + window {
-            tracing::info!(key=%key, expires_at, now, window, "stale 사본이 SIE window 초과 — 폴백 불가");
+        let window = stale_if_error_window_for_host(host).await;
+        if window <= 0 || expires_at <= 0 || now > expires_at + window {
+            tracing::info!(key=%key, host=%host, expires_at, now, window, "stale 사본이 SIE window 초과 — 폴백 불가");
             return None;
         }
-        tracing::info!(key=%key, expires_at, "stale-if-error 폴백 — 만료 사본 서빙 (#388)");
+        tracing::info!(key=%key, host=%host, expires_at, window, "stale-if-error 폴백 — 만료 사본 서빙 (#388, #429)");
     }
     // Warning + X-Cache-Stale 헤더를 passthrough_headers 로 부착 (응답 빌더가 그대로 전달).
     let mut passthrough = vec![
@@ -1040,7 +1063,7 @@ async fn proxy_handler(
                 Err(err) => {
                     tracing::error!(error=%err, url=%origin_url, "원본 서버 연결 실패 — stale-if-error 시도 (#388)");
                     // #388 stale-if-error — origin 연결 실패. 만료 사본이 SIE window 내라면 일시 서빙.
-                    if let Some(stale) = try_serve_stale(&ps_c, &key_for_put).await {
+                    if let Some(stale) = try_serve_stale(&ps_c, &host_c, &key_for_put).await {
                         return Ok(stale);
                     }
                     return Err(());
@@ -1054,7 +1077,7 @@ async fn proxy_handler(
             // 4xx 는 origin 의 의도된 클라이언트 에러라 폴백 부적절(예: 403/404 가 stale 200 으로 가려지면 안됨).
             if status.is_server_error() {
                 tracing::warn!(status=%status.as_u16(), url=%origin_url, "원본 5xx — stale-if-error 시도 (#388)");
-                if let Some(stale) = try_serve_stale(&ps_c, &key_for_put).await {
+                if let Some(stale) = try_serve_stale(&ps_c, &host_c, &key_for_put).await {
                     return Ok(stale);
                 }
                 // stale 없으면 원본 5xx 그대로 진행 (기존 동작)
@@ -1857,6 +1880,10 @@ struct DomainEntry {
     /// 도메인 활성화 여부 (0=비활성, 1=활성, 기본값 1)
     #[serde(default = "default_enabled")]
     enabled: i32,
+    /// 이슈 #429 — 도메인별 stale-if-error 윈도우(초).
+    /// null/미지정: 글로벌 폴백 / 0: 비활성 / >0: 명시 윈도우.
+    #[serde(default)]
+    stale_if_error_secs: Option<i64>,
 }
 
 /// enabled 필드 기본값 — 명시하지 않으면 활성 상태
@@ -1884,6 +1911,17 @@ async fn update_domains_handler(
             }
         }
         tracing::info!(count = map.len(), "도메인 맵 갱신");
+    }
+    // 이슈 #429 — stale_if_error_secs 정책 맵 전체 교체. null/미지정은 글로벌 폴백 의미라 entry 자체를 만들지 않는다.
+    {
+        let mut policies = domain_stale_policies().write().await;
+        policies.clear();
+        for entry in &payload.domains {
+            if let Some(v) = entry.stale_if_error_secs {
+                policies.insert(entry.host.clone(), v);
+            }
+        }
+        tracing::info!(count = policies.len(), "stale-if-error 정책 맵 갱신 (#429)");
     }
     // 각 도메인 인증서 사전 발급 (SNI 핸들러 로컬 캐시 갱신)
     let mut tls = admin.tls_client.lock().await;

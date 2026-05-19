@@ -40,7 +40,8 @@ export async function addDomain(host: string, origin: string): Promise<Domain> {
 /** 도메인 편집 */
 export async function updateDomain(
   host: string,
-  body: Partial<Pick<Domain, 'origin' | 'enabled' | 'description'>>,
+  // 이슈 #429 — stale_if_error_secs 도 partial update 대상 (null = 글로벌 폴백).
+  body: Partial<Pick<Domain, 'origin' | 'enabled' | 'description' | 'stale_if_error_secs'>>,
 ): Promise<Domain> {
   const res = await axios.put<Domain>(`/api/domains/${encodeURIComponent(host)}`, body);
   return res.data;

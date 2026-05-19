@@ -15,6 +15,7 @@ function makeMockRepo(domains: Array<{ host: string; origin: string }>): DomainR
     description: '',
     created_at: 0,
     updated_at: 0,
+    stale_if_error_secs: null,
   }));
   return {
     findAll: vi.fn(() => rows),

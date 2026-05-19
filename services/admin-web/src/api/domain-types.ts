@@ -8,6 +8,11 @@ export interface Domain {
   description: string;
   created_at: number;
   updated_at: number;
+  /**
+   * 이슈 #429 — 도메인별 stale-if-error 윈도우(초).
+   * null/undefined=글로벌 폴백 / 0=비활성 / >0=명시 윈도우. (E2E mock 응답이 필드 누락 가능해 optional 처리)
+   */
+  stale_if_error_secs?: number | null;
 }
 
 /** 도메인 요약 통계 */

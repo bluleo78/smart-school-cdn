@@ -11,12 +11,14 @@ import type { Database } from 'better-sqlite3';
  */
 export const DOMAIN_SCHEMA = `
   CREATE TABLE IF NOT EXISTS domains (
-    host        TEXT PRIMARY KEY,
-    origin      TEXT NOT NULL,
-    enabled     INTEGER NOT NULL DEFAULT 1,
-    description TEXT NOT NULL DEFAULT '',
-    created_at  INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
-    updated_at  INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+    host                  TEXT PRIMARY KEY,
+    origin                TEXT NOT NULL,
+    enabled               INTEGER NOT NULL DEFAULT 1,
+    description           TEXT NOT NULL DEFAULT '',
+    created_at            INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+    updated_at            INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+    -- 이슈 #429 — 도메인별 stale-if-error 윈도우(초). NULL=글로벌 폴백, 0=비활성, >0=명시 윈도우.
+    stale_if_error_secs   INTEGER
   );
 `;
 
@@ -28,6 +30,11 @@ export interface Domain {
   description: string;
   created_at: number;
   updated_at: number;
+  /**
+   * 이슈 #429 — 도메인별 stale-if-error 윈도우(초).
+   * null: 글로벌 PROXY_STALE_IF_ERROR_SECS 사용 / 0: 비활성 / >0: 해당 도메인 전용 윈도우.
+   */
+  stale_if_error_secs: number | null;
 }
 
 /** findAll 검색/필터 옵션 */
@@ -112,7 +119,7 @@ export class DomainRepository {
   findByHost(host: string): Domain | undefined {
     return this.db
       .prepare(
-        `SELECT host, origin, enabled, description, created_at, updated_at
+        `SELECT host, origin, enabled, description, created_at, updated_at, stale_if_error_secs
          FROM domains WHERE host = ?`,
       )
       .get(host) as Domain | undefined;
@@ -168,7 +175,7 @@ export class DomainRepository {
 
     return this.db
       .prepare(
-        `SELECT host, origin, enabled, description, created_at, updated_at
+        `SELECT host, origin, enabled, description, created_at, updated_at, stale_if_error_secs
          FROM domains ${where} ${orderBy} ${pagination}`,
       )
       .all(...params) as Domain[];
@@ -181,10 +188,16 @@ export class DomainRepository {
    */
   update(
     host: string,
-    data: { origin?: string; enabled?: number; description?: string },
+    data: {
+      origin?: string;
+      enabled?: number;
+      description?: string;
+      /** 이슈 #429 — null 명시 시 글로벌 폴백으로 복귀. undefined 는 변경 없음. */
+      stale_if_error_secs?: number | null;
+    },
   ): Domain | undefined {
     const sets: string[] = [];
-    const params: (string | number)[] = [];
+    const params: (string | number | null)[] = [];
 
     if (data.origin !== undefined) {
       sets.push('origin = ?');
@@ -197,6 +210,10 @@ export class DomainRepository {
     if (data.description !== undefined) {
       sets.push('description = ?');
       params.push(data.description);
+    }
+    if (data.stale_if_error_secs !== undefined) {
+      sets.push('stale_if_error_secs = ?');
+      params.push(data.stale_if_error_secs);
     }
 
     if (sets.length === 0) return this.findByHost(host);

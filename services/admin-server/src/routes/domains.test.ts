@@ -404,7 +404,7 @@ describe('POST /api/domains', () => {
 
     expect(postSpy).toHaveBeenCalledWith(
       expect.stringContaining('/domains'),
-      { domains: [{ host: 'textbook.com', origin: 'https://textbook.com' }] },
+      { domains: [{ host: 'textbook.com', origin: 'https://textbook.com', stale_if_error_secs: null }] },
       expect.any(Object),
     );
   });
@@ -819,6 +819,50 @@ describe('POST /api/domains/bulk', () => {
 });
 
 describe('PUT /api/domains/:host', () => {
+  // ── #429 stale_if_error_secs ─────────────────────────────────────
+  it('이슈 #429 — stale_if_error_secs 를 유효 정수로 PUT 하면 200 + DB 반영', async () => {
+    const repo = makeRepo();
+    repo.upsert('h.test', 'https://h.test');
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/domains/h.test',
+      payload: { stale_if_error_secs: 1800 },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body).stale_if_error_secs).toBe(1800);
+    expect(repo.findByHost('h.test')?.stale_if_error_secs).toBe(1800);
+  });
+
+  it('이슈 #429 — stale_if_error_secs = null 로 글로벌 폴백 복귀', async () => {
+    const repo = makeRepo();
+    repo.upsert('h.test', 'https://h.test');
+    repo.update('h.test', { stale_if_error_secs: 600 });
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/api/domains/h.test',
+      payload: { stale_if_error_secs: null },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body).stale_if_error_secs).toBeNull();
+  });
+
+  it('이슈 #429 — stale_if_error_secs 가 범위 밖이면 400 (음수/7일 초과/비정수)', async () => {
+    const repo = makeRepo();
+    repo.upsert('h.test', 'https://h.test');
+    const app = buildApp(repo);
+    for (const bad of [-1, 604801, 1.5, 'oops' as unknown as number]) {
+      const res = await app.inject({
+        method: 'PUT',
+        url: '/api/domains/h.test',
+        payload: { stale_if_error_secs: bad },
+      });
+      expect(res.statusCode, `bad=${String(bad)}`).toBe(400);
+    }
+    expect(repo.findByHost('h.test')?.stale_if_error_secs).toBeNull();
+  });
+
   it('origin을 정상 값으로 업데이트하면 200 반환한다', async () => {
     const repo = makeRepo();
     repo.upsert('httpbin.org', 'https://httpbin.org');

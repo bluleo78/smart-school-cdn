@@ -36,7 +36,10 @@ export function DomainSettingsTab({ domain }: Props) {
       {/* 3. 최적화 프로파일 */}
       <DomainOptimizerSection host={domain.host} />
 
-      {/* 4. TLS / 인증서 */}
+      {/* 4. 고가용성 (stale-if-error 도메인별 정책, #429) */}
+      <StaleIfErrorSection domain={domain} />
+
+      {/* 5. TLS / 인증서 */}
       <TlsSection host={domain.host} />
 
       {/* 3. 위험 영역 */}
@@ -289,6 +292,88 @@ function OriginSection({ domain }: { domain: Domain }) {
           </div>
         </AlertDialogContent>
       </AlertDialog>
+    </Card>
+  );
+}
+
+/**
+ * 고가용성 (stale-if-error) 카드 — 이슈 #429.
+ * 무엇을: 도메인별 stale-if-error 윈도우 설정. null=글로벌 폴백 / 0=비활성 / >0=명시 윈도우(초).
+ * 왜: origin 5xx/timeout 시 만료 사본을 일시 서빙해 가용성을 높이되, 도메인 특성(예: 결제·인증 vs 정적 콘텐츠)에
+ *    따라 윈도우를 다르게 가져갈 필요가 있다. 운영자가 토글로 빠르게 비활성화하거나 시간을 조정한다.
+ */
+function StaleIfErrorSection({ domain }: { domain: Domain }) {
+  const updateMutation = useUpdateDomain();
+  // null/undefined = 글로벌 폴백 / 숫자 = 도메인 전용 윈도우. 토글로 두 상태를 전환한다.
+  // E2E mock 응답이 필드 자체를 누락한 경우도 글로벌 폴백으로 취급(loose equality).
+  const isOverride = domain.stale_if_error_secs != null;
+  // 입력 필드는 초 단위. 글로벌 폴백 상태에서는 placeholder 로 안내.
+  const [secs, setSecs] = useState(domain.stale_if_error_secs ?? 3600);
+  const isEnabled = isOverride && (domain.stale_if_error_secs ?? 0) > 0;
+
+  function applyOverride(newSecs: number) {
+    // 0~604800(7일) 클램프 — 서버 검증과 동일 (#429 라우트).
+    const clamped = Math.max(0, Math.min(604800, Math.floor(newSecs)));
+    setSecs(clamped);
+    updateMutation.mutate({ host: domain.host, body: { stale_if_error_secs: clamped } });
+  }
+
+  function clearOverride() {
+    updateMutation.mutate({ host: domain.host, body: { stale_if_error_secs: null } });
+  }
+
+  return (
+    <Card data-testid="stale-if-error-section">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm">고가용성 (stale-if-error)</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-xs text-muted-foreground">
+          오리진 장애 시 만료된 캐시 사본을 일시적으로 서빙해 가용성을 높입니다. 도메인별로 윈도우를 다르게 설정할 수 있습니다.
+        </p>
+        <div className="flex items-center gap-3">
+          <Label className="text-xs text-muted-foreground w-28">현재 정책</Label>
+          <span className="text-sm font-medium" data-testid="sie-current-policy">
+            {!isOverride
+              ? '글로벌 폴백 (PROXY_STALE_IF_ERROR_SECS)'
+              : isEnabled
+                ? `명시 윈도우 ${secs}초`
+                : '비활성 (도메인 전용)'}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <Input
+            type="number"
+            min={0}
+            max={604800}
+            step={60}
+            value={secs}
+            onChange={(e) => setSecs(Number(e.target.value))}
+            className="h-8 w-32 text-sm"
+            data-testid="sie-secs-input"
+          />
+          <Button
+            size="xs"
+            onClick={() => applyOverride(secs)}
+            disabled={updateMutation.isPending}
+            data-testid="sie-apply-btn"
+          >
+            적용
+          </Button>
+          <Button
+            size="xs"
+            variant="outline"
+            onClick={clearOverride}
+            disabled={updateMutation.isPending || !isOverride}
+            data-testid="sie-clear-btn"
+          >
+            글로벌로 복귀
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          0 = 이 도메인에서만 stale-if-error 비활성. 최대 604800초(7일).
+        </p>
+      </CardContent>
     </Card>
   );
 }

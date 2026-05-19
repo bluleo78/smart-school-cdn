@@ -203,6 +203,23 @@ describe('DomainRepository', () => {
     it('존재하지 않는 도메인은 undefined를 반환한다', () => {
       expect(repo.update('nonexistent.host', { origin: 'https://x.com' })).toBeUndefined();
     });
+
+    // ── #429: stale_if_error_secs 부분 업데이트 ─────────────────────────
+    it('stale_if_error_secs 를 양수로 설정/조회할 수 있다 (#429)', () => {
+      const updated = repo.update('update.test', { stale_if_error_secs: 1800 });
+      expect(updated?.stale_if_error_secs).toBe(1800);
+    });
+
+    it('stale_if_error_secs = null 로 글로벌 폴백 상태로 되돌릴 수 있다 (#429)', () => {
+      repo.update('update.test', { stale_if_error_secs: 600 });
+      const cleared = repo.update('update.test', { stale_if_error_secs: null });
+      expect(cleared?.stale_if_error_secs).toBeNull();
+    });
+
+    it('새로 upsert 한 도메인의 stale_if_error_secs 기본값은 null (#429)', () => {
+      repo.upsert('fresh.test', 'https://fresh.test');
+      expect(repo.findByHost('fresh.test')?.stale_if_error_secs).toBeNull();
+    });
   });
 
   describe('toggleEnabled', () => {
