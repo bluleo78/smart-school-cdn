@@ -4,6 +4,7 @@ import {
   LayoutDashboard,
   Globe,
   Settings,
+  ScrollText,
   Network,
   Users as UsersIcon,
   Menu as MenuIcon,
@@ -17,12 +18,14 @@ import { TooltipProvider } from '../ui/tooltip';
 // 본문 영역 한정 ErrorBoundary — 한 페이지의 렌더 예외가 사이드바/헤더까지 죽이지 않도록 격리 (#372)
 import { ErrorBoundary } from '../error/ErrorBoundary';
 
-/** 사이드바 네비게이션 항목 — 대시보드/도메인/DNS/사용자/시스템 */
+/** 사이드바 네비게이션 항목 — 대시보드/도메인/DNS/사용자/감사 로그/시스템 */
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: '대시보드' },
   { to: '/domains', icon: Globe, label: '도메인' },
   { to: '/dns', icon: Network, label: 'DNS' },
   { to: '/users', icon: UsersIcon, label: '사용자' },
+  // 이슈 #351 — 관리자 액션 감사 로그 조회 페이지
+  { to: '/audit', icon: ScrollText, label: '감사 로그' },
   { to: '/system', icon: Settings, label: '시스템' },
 ];
 
@@ -112,6 +115,7 @@ export function AppLayout() {
     '/optimizer',
     '/dns',
     '/users',
+    '/audit',
     '/system',
     // DEV 전용 ErrorBoundary E2E 라우트 — App.tsx와 동일하게 DEV 빌드에서만 known 처리
     ...(import.meta.env.DEV ? ['/__e2e/throw'] : []),

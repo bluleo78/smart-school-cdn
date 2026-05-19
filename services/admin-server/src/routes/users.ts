@@ -171,6 +171,15 @@ export const usersRoutes: FastifyPluginAsync<{ userRepo: UserRepository }> = asy
     // 및 상태 코드 일관성 깨짐을 방지).
     try {
       const u = userRepo.create(parsed.data.username, hash);
+      // 이슈 #351 — 감사 로그
+      app.auditRepo?.insert({
+        actor_user_id: req.user?.sub ? Number(req.user.sub) : null,
+        actor_ip: req.ip,
+        action: 'user.create',
+        target_type: 'user',
+        target_id: String(u.id),
+        after: { username: u.username },
+      });
       return reply.code(201).send(publicUser(u));
     } catch (err) {
       if (isUniqueConstraintError(err)) {
@@ -224,6 +233,15 @@ export const usersRoutes: FastifyPluginAsync<{ userRepo: UserRepository }> = asy
       });
       reply.setCookie(SESSION_COOKIE_NAME, newToken, buildSessionCookieOptions());
     }
+    // 이슈 #351 — 감사 로그. 비밀번호 자체는 기록하지 않고 액션·대상·self 여부만.
+    app.auditRepo?.insert({
+      actor_user_id: req.user?.sub ? Number(req.user.sub) : null,
+      actor_ip: req.ip,
+      action: 'user.password_reset',
+      target_type: 'user',
+      target_id: String(id),
+      after: { self: !!isSelf, target_username: targetUser.username },
+    });
     return { ok: true };
   });
 
@@ -262,6 +280,16 @@ export const usersRoutes: FastifyPluginAsync<{ userRepo: UserRepository }> = asy
     userRepo.disable(id);
     // 이슈 #330 — 비활성화된 사용자의 기존 JWT 세션도 즉시 무효화한다.
     userRepo.bumpTokenVersion(id);
+    // 이슈 #351 — 감사 로그
+    app.auditRepo?.insert({
+      actor_user_id: req.user?.sub ? Number(req.user.sub) : null,
+      actor_ip: req.ip,
+      action: 'user.disable',
+      target_type: 'user',
+      target_id: String(id),
+      before: { username: target.username, disabled_at: null },
+      after: { username: target.username, disabled: true },
+    });
     return { ok: true };
   });
 };

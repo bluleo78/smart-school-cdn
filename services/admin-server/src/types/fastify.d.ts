@@ -7,6 +7,7 @@ import type { OptimizerClient } from '../grpc/optimizer_client.js';
 import type { HealthMonitor } from '../health-monitor.js';
 import type { DnsMetricsRepository } from '../db/dns-metrics-repo.js';
 import type { OptimizationEventsRepository } from '../db/optimization-events-repo.js';
+import type { AuditRepository } from '../db/audit-repo.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -19,5 +20,6 @@ declare module 'fastify' {
     healthMonitor:           HealthMonitor;
     dnsMetricsRepo:          DnsMetricsRepository;
     optimizationEventsRepo:  OptimizationEventsRepository;
+    auditRepo:               AuditRepository;
   }
 }

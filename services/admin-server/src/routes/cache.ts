@@ -323,12 +323,19 @@ export async function cacheRoutes(app: FastifyInstance) {
       } else {
         res = await app.storageClient.purgeAll();
       }
+      const purgedCount = Number(res.purged_files);
+      const freedBytes = Number(res.freed_bytes);
+      // 이슈 #351 — 감사 로그. 캐시 퍼지는 적중률에 영향이 큰 운영 액션.
+      app.auditRepo?.insert({
+        actor_user_id: request.user?.sub ? Number(request.user.sub) : null,
+        actor_ip: request.ip,
+        action: `cache.purge_${body.type}`,
+        target_type: 'cache',
+        target_id: body.type === 'all' ? '*' : body.target,
+        after: { purged_count: purgedCount, freed_bytes: freedBytes },
+      });
       // gRPC 응답 필드명(purged_files)을 클라이언트 계약(purged_count)으로 정규화한다 (#182).
-      // storage-service의 .proto는 purged_files를 사용하지만 admin-web은 purged_count를 기대한다.
-      // 또한 .proto의 uint64 필드는 @grpc/grpc-js가 정밀도 보존을 위해 string으로 역직렬화하므로
-      // admin-web의 number 계약에 맞춰 Number 변환한다 (#208 — string "0" 이 ===0 비교를 빠져나가
-      // "0건 삭제" 성공 토스트를 띄우는 회귀를 차단).
-      return { purged_count: Number(res.purged_files), freed_bytes: Number(res.freed_bytes) };
+      return { purged_count: purgedCount, freed_bytes: freedBytes };
     } catch {
       // 표준 envelope (#327)
       return reply.status(502).send({

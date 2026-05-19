@@ -748,6 +748,15 @@ export async function domainRoutes(
       } catch (err) {
         app.log.warn({ err }, `[optimizer] 기본 프로파일 생성 실패: ${host}`);
       }
+      // 이슈 #351 — 감사 로그
+      app.auditRepo?.insert({
+        actor_user_id: request.user?.sub ? Number(request.user.sub) : null,
+        actor_ip: request.ip,
+        action: 'domain.create',
+        target_type: 'domain',
+        target_id: host,
+        after: { host, origin: normalizedOrigin },
+      });
       return reply.status(201).send(domainRepo.findByHost(host));
     },
   );
@@ -1374,6 +1383,14 @@ export async function domainRoutes(
     } catch (err) {
       app.log.warn({ err }, `[optimizer] profile 정리 실패: ${host}`);
     }
+    // 이슈 #351 — 감사 로그
+    app.auditRepo?.insert({
+      actor_user_id: request.user?.sub ? Number(request.user.sub) : null,
+      actor_ip: request.ip,
+      action: 'domain.delete',
+      target_type: 'domain',
+      target_id: host,
+    });
     return reply.status(204).send();
     });
   });

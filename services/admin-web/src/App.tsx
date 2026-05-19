@@ -17,6 +17,7 @@ const DomainDetailPage = lazy(() => import('./pages/DomainDetailPage').then(m =>
 const DnsPage          = lazy(() => import('./pages/DnsPage').then(m => ({ default: m.DnsPage })));
 const SystemPage       = lazy(() => import('./pages/SystemPage').then(m => ({ default: m.SystemPage })));
 const UsersPage        = lazy(() => import('./pages/UsersPage').then(m => ({ default: m.UsersPage })));
+const AuditPage        = lazy(() => import('./pages/AuditPage').then(m => ({ default: m.AuditPage })));
 
 /**
  * E2E 테스트 전용 컴포넌트 — 렌더 시 즉시 예외를 throw한다.
@@ -87,6 +88,8 @@ export function App() {
             <Route path="optimizer" element={<Navigate to="/domains" replace />} />
             <Route path="dns" element={<DnsPage />} />
             <Route path="users" element={<UsersPage />} />
+            {/* 이슈 #351 — 감사 로그 페이지 */}
+            <Route path="audit" element={<AuditPage />} />
             <Route path="system" element={<SystemPage />} />
             {/* DEV 전용 라우트 — ErrorBoundary E2E 테스트에서 강제 렌더 오류를 발생시키는 용도 */}
             {import.meta.env.DEV && (

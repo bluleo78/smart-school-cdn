@@ -13,6 +13,8 @@ import { DomainRepository, DOMAIN_SCHEMA } from './db/domain-repo.js';
 import { DomainStatsRepository } from './db/domain-stats-repo.js';
 import { DnsMetricsRepository, DNS_METRICS_SCHEMA } from './db/dns-metrics-repo.js';
 import { OPTIMIZATION_EVENTS_SCHEMA, OptimizationEventsRepository } from './db/optimization-events-repo.js';
+import { AUDIT_LOGS_SCHEMA, AuditRepository } from './db/audit-repo.js';
+import { auditRoutes } from './routes/audit.js';
 import { USER_SCHEMA, UserRepository } from './db/user-repo.js';
 import { startStatsCollector } from './stats-collector.js';
 import { startDnsMetricsCollector } from './dns-metrics-collector.js';
@@ -133,6 +135,9 @@ db.exec(OPTIMIZATION_EVENTS_SCHEMA);
 
 // 이슈 #367 — TLS 인증서 만료 임박 단발 알림 추적 테이블 (domain, threshold_day) PK
 db.exec(TLS_EXPIRY_ALERTS_SCHEMA);
+
+// 이슈 #351 — 감사 로그 테이블
+db.exec(AUDIT_LOGS_SCHEMA);
 
 // optimization_events.ts 컬럼 형식 마이그레이션 — 이슈 #377
 // 무엇을: 기존 DB 의 ts 컬럼이 TEXT (ISO 8601) 면 INTEGER unix-sec 로 재생성하며 모든 행을 변환한다.
@@ -520,6 +525,8 @@ app.decorate('dnsClient', dnsClient);
 app.decorate('optimizerClient', optimizerClient);
 app.decorate('dnsMetricsRepo', dnsMetricsRepo);
 app.decorate('optimizationEventsRepo', new OptimizationEventsRepository(db));
+const auditRepo = new AuditRepository(db);
+app.decorate('auditRepo', auditRepo);
 app.decorate('proxyAdminUrl', proxyAdminUrl);
 app.decorate('healthMonitor', new HealthMonitor({
   proxyAdminUrl,
@@ -626,6 +633,9 @@ await app.register(usersRoutes, { userRepo });
 
 /** 서비스간 내부 호출 라우트 — requireInternalToken 보호 */
 await app.register(internalRoutes, { domainRepo });
+
+/** 이슈 #351 — GET /api/audit (필터 + 페이지) */
+await app.register(auditRoutes({ auditRepo }));
 
 const port = Number(process.env.PORT) || 4001;
 
