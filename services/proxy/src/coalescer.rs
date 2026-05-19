@@ -66,9 +66,7 @@ impl Coalescer {
         self.lagged_count.load(Ordering::Relaxed)
     }
 
-    /// cache miss 발생 시 호출.
-    /// - in_flight에 key 없음 → 첫 번째 요청자: fetch_fn 실행 후 결과 broadcast
-    /// - in_flight에 key 있음 → 구독자: 첫 번째 결과를 rx.recv()로 수신
+    /// 기본 capacity 로 fetch — 글로벌 정책만 적용되는 경로.
     pub async fn get_or_fetch<F, Fut>(
         &self,
         key: String,
@@ -78,6 +76,27 @@ impl Coalescer {
         F: FnOnce() -> Fut,
         Fut: std::future::Future<Output = Result<CoalescedResponse, ()>>,
     {
+        self.get_or_fetch_with_capacity(key, self.capacity, fetch_fn).await
+    }
+
+    /// cache miss 발생 시 호출.
+    /// - in_flight에 key 없음 → 첫 번째 요청자: fetch_fn 실행 후 결과 broadcast
+    /// - in_flight에 key 있음 → 구독자: 첫 번째 결과를 rx.recv()로 수신
+    ///
+    /// 이슈 #426 — capacity 를 호출자가 명시할 수 있게 한다.
+    /// 같은 키의 후속 구독자는 이미 생성된 채널의 capacity 를 재사용 (변경하지 않음).
+    /// 첫 요청자가 만든 채널만 capacity 적용 — 같은 host 의 다른 URL 은 각자 채널이므로 결국 모든 첫 요청에 반영된다.
+    pub async fn get_or_fetch_with_capacity<F, Fut>(
+        &self,
+        key: String,
+        capacity: usize,
+        fetch_fn: F,
+    ) -> Result<CoalescedResponse, ()>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = Result<CoalescedResponse, ()>>,
+    {
+        let cap = capacity.max(1);
         // in_flight 맵에서 기존 sender 조회, 없으면 신규 채널 생성
         // std::sync::Mutex 사용: .await 없이 짧은 임계 구간만 잠금
         let maybe_rx = {
@@ -86,8 +105,8 @@ impl Coalescer {
                 // 이미 in-flight — 구독자로 등록
                 Some(sender.subscribe())
             } else {
-                // 첫 번째 miss — broadcast 채널 삽입 (env 로 조정 가능한 capacity #390)
-                let (tx, _) = broadcast::channel(self.capacity);
+                // 첫 번째 miss — broadcast 채널 삽입 (호출자 지정 capacity #426)
+                let (tx, _) = broadcast::channel(cap);
                 map.insert(key.clone(), tx);
                 None
             }
@@ -223,6 +242,55 @@ mod tests {
         assert!(r.is_ok());
         // 정상 흐름에서는 Lagged 발생 없음
         assert_eq!(arc.lagged_count(), 0);
+    }
+
+    // #426 — get_or_fetch_with_capacity 가 호출자 지정 capacity 로 채널을 만들고 결과를 정상 broadcast.
+    #[tokio::test]
+    async fn per_call_capacity_path_succeeds_and_broadcasts_result() {
+        let coalescer = Arc::new(Coalescer::new());
+        let call_count = Arc::new(AtomicUsize::new(0));
+
+        let c1 = coalescer.clone();
+        let cnt1 = call_count.clone();
+        let task_a: tokio::task::JoinHandle<Result<CoalescedResponse, ()>> = tokio::spawn(async move {
+            c1.get_or_fetch_with_capacity("k426".to_string(), 4096, || async move {
+                cnt1.fetch_add(1, Ordering::SeqCst);
+                sleep(Duration::from_millis(30)).await;
+                Ok(Arc::new((
+                    Bytes::from("v"), None, StatusCode::OK,
+                    CacheOutcome::Miss, vec![], vec![],
+                )))
+            }).await
+        });
+        sleep(Duration::from_millis(5)).await;
+
+        // 두 번째 구독자 — capacity 인자는 무시되고 첫 채널 결과를 그대로 받는다
+        let c2 = coalescer.clone();
+        let cnt2 = call_count.clone();
+        let task_b: tokio::task::JoinHandle<Result<CoalescedResponse, ()>> = tokio::spawn(async move {
+            c2.get_or_fetch_with_capacity("k426".to_string(), 1, || async move {
+                cnt2.fetch_add(1, Ordering::SeqCst); // 호출되어선 안 됨
+                Err(())
+            }).await
+        });
+
+        let (a, b) = tokio::join!(task_a, task_b);
+        assert!(a.unwrap().is_ok());
+        assert!(b.unwrap().is_ok());
+        assert_eq!(call_count.load(Ordering::SeqCst), 1);
+    }
+
+    // #426 — capacity=0 도 1 로 클램프되어 panic 없이 동작 (broadcast::channel 은 0 일 때 panic).
+    #[tokio::test]
+    async fn per_call_capacity_zero_is_clamped_to_one() {
+        let coalescer = Arc::new(Coalescer::new());
+        let r = coalescer.get_or_fetch_with_capacity("k".to_string(), 0, || async {
+            Ok(Arc::new((
+                Bytes::from("v"), None, StatusCode::OK,
+                CacheOutcome::Miss, vec![], vec![],
+            )))
+        }).await;
+        assert!(r.is_ok());
     }
 
     #[tokio::test]

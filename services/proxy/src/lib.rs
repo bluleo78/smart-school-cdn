@@ -64,6 +64,34 @@ async fn stale_if_error_window_for_host(host: &str) -> i64 {
     stale_if_error_window_secs()
 }
 
+/// 이슈 #426 — 도메인별 coalescer broadcast capacity. 미등록이면 글로벌 폴백.
+/// 첫 요청자가 새 broadcast 채널을 만들 때만 적용 — 진행 중 in-flight 채널은 영향 없음.
+static DOMAIN_COALESCE_CAPACITY: std::sync::OnceLock<RwLock<HashMap<String, usize>>> =
+    std::sync::OnceLock::new();
+
+fn domain_coalesce_capacity_map() -> &'static RwLock<HashMap<String, usize>> {
+    DOMAIN_COALESCE_CAPACITY.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+/// 글로벌 coalescer broadcast capacity (PROXY_COALESCE_CHANNEL_CAPACITY env). 기본 1024.
+fn global_coalesce_capacity() -> usize {
+    std::env::var("PROXY_COALESCE_CHANNEL_CAPACITY")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(1024)
+}
+
+/// host 의 coalescer capacity 를 반환. 미등록이면 글로벌 폴백.
+async fn coalesce_capacity_for_host(host: &str) -> usize {
+    let map = domain_coalesce_capacity_map().read().await;
+    if let Some(&v) = map.get(host) {
+        return v;
+    }
+    drop(map);
+    global_coalesce_capacity()
+}
+
 /// 도메인별 요청 통계 카운터 (lock-free atomic 연산)
 /// L1/L2 히트, 4종 bypass, miss를 개별 집계한다
 pub struct DomainCounter {
@@ -1019,7 +1047,9 @@ async fn proxy_handler(
         let ps_c         = ps.clone();
         let state_c      = state.clone();
 
-        let coalesced = ps.coalescer.get_or_fetch(key.clone(), move || async move {
+        // 이슈 #426 — host 별 capacity 조회 후 명시 capacity 로 fetch. 미등록 host 는 글로벌 폴백.
+        let coalesce_cap = coalesce_capacity_for_host(&host).await;
+        let coalesced = ps.coalescer.get_or_fetch_with_capacity(key.clone(), coalesce_cap, move || async move {
             let key_for_put = key_c;
             // 이슈 #391 — 동시 origin fetch 한도 (Semaphore). 5s 까지 대기, 초과 시 503 폴백.
             // coalescer fetch_fn 안에서 acquire 하므로 같은 키 후속 요청은 broadcast 로 결과 공유 → permit 낭비 없음.
@@ -1884,6 +1914,10 @@ struct DomainEntry {
     /// null/미지정: 글로벌 폴백 / 0: 비활성 / >0: 명시 윈도우.
     #[serde(default)]
     stale_if_error_secs: Option<i64>,
+    /// 이슈 #426 — 도메인별 coalescer broadcast capacity.
+    /// null/미지정: 글로벌 폴백 / >=1: 해당 도메인 전용 capacity.
+    #[serde(default)]
+    coalesce_capacity: Option<usize>,
 }
 
 /// enabled 필드 기본값 — 명시하지 않으면 활성 상태
@@ -1922,6 +1956,17 @@ async fn update_domains_handler(
             }
         }
         tracing::info!(count = policies.len(), "stale-if-error 정책 맵 갱신 (#429)");
+    }
+    // 이슈 #426 — coalesce_capacity 정책 맵 전체 교체. null/미지정은 글로벌 폴백.
+    {
+        let mut caps = domain_coalesce_capacity_map().write().await;
+        caps.clear();
+        for entry in &payload.domains {
+            if let Some(v) = entry.coalesce_capacity.filter(|n| *n >= 1) {
+                caps.insert(entry.host.clone(), v);
+            }
+        }
+        tracing::info!(count = caps.len(), "coalesce_capacity 정책 맵 갱신 (#426)");
     }
     // 각 도메인 인증서 사전 발급 (SNI 핸들러 로컬 캐시 갱신)
     let mut tls = admin.tls_client.lock().await;

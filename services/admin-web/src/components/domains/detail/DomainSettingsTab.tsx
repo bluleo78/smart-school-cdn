@@ -39,7 +39,10 @@ export function DomainSettingsTab({ domain }: Props) {
       {/* 4. 고가용성 (stale-if-error 도메인별 정책, #429) */}
       <StaleIfErrorSection domain={domain} />
 
-      {/* 5. TLS / 인증서 */}
+      {/* 5. Coalescer capacity (#426) */}
+      <CoalesceCapacitySection domain={domain} />
+
+      {/* 6. TLS / 인증서 */}
       <TlsSection host={domain.host} />
 
       {/* 3. 위험 영역 */}
@@ -372,6 +375,82 @@ function StaleIfErrorSection({ domain }: { domain: Domain }) {
         </div>
         <p className="text-xs text-muted-foreground">
           0 = 이 도메인에서만 stale-if-error 비활성. 최대 604800초(7일).
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * Coalescer capacity 카드 — 이슈 #426.
+ * 무엇을: 도메인별 coalescer broadcast 채널 capacity 설정. null=글로벌 폴백, >=1=명시값.
+ * 왜: 대량 동시 MISS 가 예상되는 도메인(예: 시험 안내 PDF)은 capacity 상향으로 Lagged 회피.
+ *    일반 도메인은 글로벌 폴백으로 메모리 절약.
+ */
+function CoalesceCapacitySection({ domain }: { domain: Domain }) {
+  const updateMutation = useUpdateDomain();
+  const isOverride = domain.coalesce_capacity != null;
+  const [cap, setCap] = useState(domain.coalesce_capacity ?? 1024);
+
+  function applyOverride(newCap: number) {
+    // 1~65536 클램프 — 서버 검증과 동일 (#426).
+    const clamped = Math.max(1, Math.min(65536, Math.floor(newCap)));
+    setCap(clamped);
+    updateMutation.mutate({ host: domain.host, body: { coalesce_capacity: clamped } });
+  }
+
+  function clearOverride() {
+    updateMutation.mutate({ host: domain.host, body: { coalesce_capacity: null } });
+  }
+
+  return (
+    <Card data-testid="coalesce-capacity-section">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm">Coalescer 채널 용량</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-xs text-muted-foreground">
+          동시 MISS 요청을 1회 origin fetch 로 묶을 때 사용하는 broadcast 채널 용량입니다. 일제 접속 burst 가 큰 도메인은 상향하면 Lagged 발생을 줄일 수 있습니다.
+        </p>
+        <div className="flex items-center gap-3">
+          <Label className="text-xs text-muted-foreground w-28">현재 정책</Label>
+          <span className="text-sm font-medium" data-testid="coalesce-cap-current">
+            {!isOverride
+              ? '글로벌 폴백 (PROXY_COALESCE_CHANNEL_CAPACITY)'
+              : `명시 capacity ${cap}`}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <Input
+            type="number"
+            min={1}
+            max={65536}
+            step={64}
+            value={cap}
+            onChange={(e) => setCap(Number(e.target.value))}
+            className="h-8 w-32 text-sm"
+            data-testid="coalesce-cap-input"
+          />
+          <Button
+            size="xs"
+            onClick={() => applyOverride(cap)}
+            disabled={updateMutation.isPending}
+            data-testid="coalesce-cap-apply-btn"
+          >
+            적용
+          </Button>
+          <Button
+            size="xs"
+            variant="outline"
+            onClick={clearOverride}
+            disabled={updateMutation.isPending || !isOverride}
+            data-testid="coalesce-cap-clear-btn"
+          >
+            글로벌로 복귀
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          최대 65536. 변경은 새로 시작되는 in-flight 채널에만 적용됩니다.
         </p>
       </CardContent>
     </Card>

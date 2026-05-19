@@ -78,6 +78,8 @@ if (!existingCols.includes('description')) db.exec("ALTER TABLE domains ADD COLU
 if (!existingCols.includes('updated_at')) db.exec('ALTER TABLE domains ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0');
 // 이슈 #429 — 도메인별 stale-if-error 윈도우(초). NULL=글로벌 폴백, 0=비활성, >0=명시 윈도우.
 if (!existingCols.includes('stale_if_error_secs')) db.exec('ALTER TABLE domains ADD COLUMN stale_if_error_secs INTEGER');
+// 이슈 #426 — 도메인별 coalescer broadcast capacity. NULL=글로벌 폴백, >=1=명시값.
+if (!existingCols.includes('coalesce_capacity')) db.exec('ALTER TABLE domains ADD COLUMN coalesce_capacity INTEGER');
 
 // origin 정규화 마이그레이션 — 이슈 #191
 // 기존에 trailing slash / 대문자 호스트 / path 가 포함된 채 저장된 origin 들을

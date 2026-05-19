@@ -404,7 +404,7 @@ describe('POST /api/domains', () => {
 
     expect(postSpy).toHaveBeenCalledWith(
       expect.stringContaining('/domains'),
-      { domains: [{ host: 'textbook.com', origin: 'https://textbook.com', stale_if_error_secs: null }] },
+      { domains: [{ host: 'textbook.com', origin: 'https://textbook.com', stale_if_error_secs: null, coalesce_capacity: null }] },
       expect.any(Object),
     );
   });
@@ -846,6 +846,32 @@ describe('PUT /api/domains/:host', () => {
     });
     expect(res.statusCode).toBe(200);
     expect(JSON.parse(res.body).stale_if_error_secs).toBeNull();
+  });
+
+  it('이슈 #426 — coalesce_capacity 를 유효 정수로 PUT 하면 200 + DB 반영', async () => {
+    const repo = makeRepo();
+    repo.upsert('h.test', 'https://h.test');
+    const app = buildApp(repo);
+    const res = await app.inject({
+      method: 'PUT', url: '/api/domains/h.test',
+      payload: { coalesce_capacity: 2048 },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body).coalesce_capacity).toBe(2048);
+    expect(repo.findByHost('h.test')?.coalesce_capacity).toBe(2048);
+  });
+
+  it('이슈 #426 — coalesce_capacity 가 범위 밖이면 400 (0/65537/비정수)', async () => {
+    const repo = makeRepo();
+    repo.upsert('h.test', 'https://h.test');
+    const app = buildApp(repo);
+    for (const bad of [0, 65537, 1.5, 'oops' as unknown as number]) {
+      const res = await app.inject({
+        method: 'PUT', url: '/api/domains/h.test',
+        payload: { coalesce_capacity: bad },
+      });
+      expect(res.statusCode, `bad=${String(bad)}`).toBe(400);
+    }
   });
 
   it('이슈 #429 — stale_if_error_secs 가 범위 밖이면 400 (음수/7일 초과/비정수)', async () => {

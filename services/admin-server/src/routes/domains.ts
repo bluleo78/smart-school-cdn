@@ -102,9 +102,11 @@ async function fetchProxyLogs(filters: ProxyLogFilters): Promise<DomainLogRow[]>
 /** 현재 활성 도메인 목록을 Proxy admin API에 push (실패 시 false 반환) */
 export async function syncToProxy(domainRepo: DomainRepository): Promise<boolean> {
   try {
-    // 이슈 #429 — stale_if_error_secs 도 함께 전송. 값이 NULL 이면 proxy 가 글로벌 환경변수로 폴백.
+    // 이슈 #429/#426 — 도메인별 정책(stale_if_error_secs, coalesce_capacity)도 함께 전송.
+    // NULL 이면 proxy 가 글로벌 환경변수로 폴백.
     const domains = domainRepo.findAll({ enabled: true })
-      .map(({ host, origin, stale_if_error_secs }) => ({ host, origin, stale_if_error_secs }));
+      .map(({ host, origin, stale_if_error_secs, coalesce_capacity }) =>
+        ({ host, origin, stale_if_error_secs, coalesce_capacity }));
     await axios.post(`${PROXY_ADMIN_URL}/domains`, { domains }, { timeout: 3000 });
     console.log(`[sync] Proxy에 도메인 ${domains.length}건 동기화 완료`);
     return true;
@@ -825,12 +827,14 @@ export async function domainRoutes(
       description?: string;
       /** 이슈 #429 — null 명시 시 글로벌 폴백, 0 이상 정수: 도메인 전용 stale-if-error 윈도우(초). undefined: 변경 없음. */
       stale_if_error_secs?: number | null;
+      /** 이슈 #426 — null 명시 시 글로벌 폴백, 1 이상 정수: 도메인 전용 coalescer broadcast capacity. */
+      coalesce_capacity?: number | null;
     };
   }>('/api/domains/:host', { config: writeRateLimit() }, async (request, reply) => {
     const host = normalizeHost(decodeURIComponent(request.params.host));
     // (#192) host 단위 락으로 toggle과 직렬화 — PUT 중 toggle이 끼어들어 일관성이 깨지는 것을 방지
     return withHostLock(host, async () => {
-    const { origin, enabled, description, stale_if_error_secs } = request.body ?? {};
+    const { origin, enabled, description, stale_if_error_secs, coalesce_capacity } = request.body ?? {};
     // origin이 전달되었는데 빈 문자열이면 400 — POST와 동일한 필수값 보장
     if (origin !== undefined && origin.trim() === '') {
       // 표준 envelope (#329)
@@ -858,6 +862,16 @@ export async function domainRoutes(
         message: 'description은 500자 이하여야 합니다.',
       });
     }
+    // 이슈 #426 — coalesce_capacity: null(글로벌 폴백) 또는 [1, 65536] 정수.
+    // 65536 상한은 broadcast 채널 메모리(~capacity * Arc 포인터)를 운영자 실수로 폭주시키지 않기 위한 안전선.
+    if (coalesce_capacity !== undefined && coalesce_capacity !== null) {
+      if (!Number.isInteger(coalesce_capacity) || coalesce_capacity < 1 || coalesce_capacity > 65536) {
+        return reply.status(400).send({
+          error: 'invalid_input',
+          message: 'coalesce_capacity는 1~65536 범위의 정수이거나 null이어야 합니다.',
+        });
+      }
+    }
     // 이슈 #429 — stale_if_error_secs: null(글로벌 폴백) 또는 [0, 7 days] 정수.
     // 7일 상한은 디스크 사본이 의미 있게 신선할 수 있는 실용 상한 — 운영자 실수로 무한 윈도우가 설정되는 것을 차단.
     if (stale_if_error_secs !== undefined && stale_if_error_secs !== null) {
@@ -873,7 +887,7 @@ export async function domainRoutes(
     if (!original) {
       return reply.status(404).send({ error: 'domain_not_found', message: '도메인을 찾을 수 없습니다.' });
     }
-    const updated = domainRepo.update(host, { origin: normalizedOrigin, enabled, description, stale_if_error_secs });
+    const updated = domainRepo.update(host, { origin: normalizedOrigin, enabled, description, stale_if_error_secs, coalesce_capacity });
     if (!updated) {
       return reply.status(404).send({ error: 'domain_not_found', message: '도메인을 찾을 수 없습니다.' });
     }
@@ -885,6 +899,7 @@ export async function domainRoutes(
         enabled: original.enabled,
         description: original.description,
         stale_if_error_secs: original.stale_if_error_secs,
+        coalesce_capacity: original.coalesce_capacity,
       });
       // 표준 envelope (#329)
       return reply.status(502).send({ error: 'proxy_sync_failed', message: 'Proxy 동기화 실패' });

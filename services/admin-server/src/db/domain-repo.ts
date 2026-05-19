@@ -18,7 +18,9 @@ export const DOMAIN_SCHEMA = `
     created_at            INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
     updated_at            INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
     -- 이슈 #429 — 도메인별 stale-if-error 윈도우(초). NULL=글로벌 폴백, 0=비활성, >0=명시 윈도우.
-    stale_if_error_secs   INTEGER
+    stale_if_error_secs   INTEGER,
+    -- 이슈 #426 — 도메인별 coalescer broadcast 채널 capacity. NULL=글로벌(PROXY_COALESCE_CHANNEL_CAPACITY), >=1=명시값.
+    coalesce_capacity     INTEGER
   );
 `;
 
@@ -35,6 +37,12 @@ export interface Domain {
    * null: 글로벌 PROXY_STALE_IF_ERROR_SECS 사용 / 0: 비활성 / >0: 해당 도메인 전용 윈도우.
    */
   stale_if_error_secs: number | null;
+  /**
+   * 이슈 #426 — 도메인별 coalescer broadcast 채널 capacity.
+   * null: 글로벌 PROXY_COALESCE_CHANNEL_CAPACITY 폴백 / >=1: 해당 도메인 전용 capacity.
+   * 학교별 트래픽 burst 특성(예: 시험 안내 페이지 vs 일반 교과서)에 따라 다르게 설정한다.
+   */
+  coalesce_capacity: number | null;
 }
 
 /** findAll 검색/필터 옵션 */
@@ -119,7 +127,7 @@ export class DomainRepository {
   findByHost(host: string): Domain | undefined {
     return this.db
       .prepare(
-        `SELECT host, origin, enabled, description, created_at, updated_at, stale_if_error_secs
+        `SELECT host, origin, enabled, description, created_at, updated_at, stale_if_error_secs, coalesce_capacity
          FROM domains WHERE host = ?`,
       )
       .get(host) as Domain | undefined;
@@ -175,7 +183,7 @@ export class DomainRepository {
 
     return this.db
       .prepare(
-        `SELECT host, origin, enabled, description, created_at, updated_at, stale_if_error_secs
+        `SELECT host, origin, enabled, description, created_at, updated_at, stale_if_error_secs, coalesce_capacity
          FROM domains ${where} ${orderBy} ${pagination}`,
       )
       .all(...params) as Domain[];
@@ -194,6 +202,8 @@ export class DomainRepository {
       description?: string;
       /** 이슈 #429 — null 명시 시 글로벌 폴백으로 복귀. undefined 는 변경 없음. */
       stale_if_error_secs?: number | null;
+      /** 이슈 #426 — null 명시 시 글로벌 폴백으로 복귀. undefined 는 변경 없음. */
+      coalesce_capacity?: number | null;
     },
   ): Domain | undefined {
     const sets: string[] = [];
@@ -214,6 +224,10 @@ export class DomainRepository {
     if (data.stale_if_error_secs !== undefined) {
       sets.push('stale_if_error_secs = ?');
       params.push(data.stale_if_error_secs);
+    }
+    if (data.coalesce_capacity !== undefined) {
+      sets.push('coalesce_capacity = ?');
+      params.push(data.coalesce_capacity);
     }
 
     if (sets.length === 0) return this.findByHost(host);

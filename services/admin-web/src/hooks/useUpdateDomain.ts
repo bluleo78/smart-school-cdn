@@ -5,7 +5,7 @@ import { updateDomain, type Domain } from '../api/domains';
 
 interface UpdateDomainVars {
   host: string;
-  body: Partial<Pick<Domain, 'origin' | 'enabled' | 'description' | 'stale_if_error_secs'>>;
+  body: Partial<Pick<Domain, 'origin' | 'enabled' | 'description' | 'stale_if_error_secs' | 'coalesce_capacity'>>;
 }
 
 export function useUpdateDomain() {
