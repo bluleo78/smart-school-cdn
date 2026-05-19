@@ -5,7 +5,8 @@ import { toast } from 'sonner';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { listUsers, createUser, updatePassword, disableUser, enableUser, type UserItem } from '../api/users';
+import { listUsers, createUser, updatePassword, disableUser, enableUser, type UserItem, type UserListPage } from '../api/users';
+import { useSearchParams } from 'react-router';
 import { formatDate, formatDateTime } from '../lib/format';
 // 충돌 정리(#190) loser 행의 `__dup_N__` sentinel 접두사를 표시 단계에서 제거 (#252)
 import { formatUsername } from '../lib/users/format-username';
@@ -68,8 +69,62 @@ export function UsersPage() {
   const { state } = useAuth();
   const myId = state.status === 'authenticated' ? state.user.id : null;
 
+  // 이슈 #348 — q/enabled/limit/offset URL searchParams 동기화. 도메인 페이지 패턴 준용.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const q = searchParams.get('q') ?? '';
+  const enabledRaw = searchParams.get('enabled');
+  const enabledFilter: boolean | undefined =
+    enabledRaw === 'true' ? true : enabledRaw === 'false' ? false : undefined;
+  const PAGE_SIZE = 20;
+  const pageParam = Number(searchParams.get('page'));
+  const page = Number.isFinite(pageParam) && pageParam > 0 ? Math.floor(pageParam) : 1;
+  const offset = (page - 1) * PAGE_SIZE;
+
   // isLoading: 데이터 로딩 중 스켈레톤 표시, isError: API 실패 시 에러 메시지 표시
-  const { data: users, isLoading, isError } = useQuery({ queryKey: ['users'], queryFn: listUsers });
+  // 기본 상태(필터/page 없음) 에서는 querystring 없이 호출 — 기존 E2E mock(`**/api/users`) 호환.
+  // 필터/페이지 적극 사용 시에만 limit/offset 추가하여 {users, total} 페이지 응답 수신.
+  const hasFilter = !!q || enabledFilter !== undefined || page > 1;
+  const { data, isLoading, isError } = useQuery<UserListPage>({
+    queryKey: ['users', q, enabledFilter, page],
+    queryFn: async () => {
+      const r = await listUsers(hasFilter ? {
+        q: q || undefined,
+        enabled: enabledFilter,
+        limit: PAGE_SIZE,
+        offset,
+      } : undefined);
+      // listUsers 의 union 반환을 페이지 형태로 정규화
+      return Array.isArray(r) ? { users: r, total: r.length } : r;
+    },
+  });
+  const users = data?.users;
+  const total = data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  /** URL searchParams 업데이트 헬퍼 — q/enabled/page 변경 시 사용 */
+  function updateSearch(next: { q?: string; enabled?: boolean | undefined; page?: number }) {
+    setSearchParams((prev) => {
+      const params = new URLSearchParams(prev);
+      if ('q' in next) {
+        if (next.q && next.q.length > 0) params.set('q', next.q);
+        else params.delete('q');
+      }
+      if ('enabled' in next) {
+        if (next.enabled === true) params.set('enabled', 'true');
+        else if (next.enabled === false) params.set('enabled', 'false');
+        else params.delete('enabled');
+      }
+      if ('page' in next) {
+        if (next.page && next.page > 1) params.set('page', String(next.page));
+        else params.delete('page');
+      }
+      // 필터 변경 시 page 리셋 (q/enabled 변경 → page=1)
+      if (('q' in next || 'enabled' in next) && !('page' in next)) {
+        params.delete('page');
+      }
+      return params;
+    }, { replace: true });
+  }
 
   const createMut = useMutation({
     mutationFn: (d: CreateFormData) => createUser(d.username, d.password),
@@ -189,6 +244,46 @@ export function UsersPage() {
         <Button className="whitespace-nowrap self-start md:self-auto" onClick={() => { createForm.reset(); setCreateOpen(true); }}>+ 사용자 추가</Button>
       </div>
 
+      {/* 이슈 #348 — 검색/상태 필터 툴바. 도메인 페이지(#68)와 동일 패턴.
+       *  - q: 부분 일치 검색 (debounce 없이 즉시 적용)
+       *  - enabled: 전체/활성/비활성 토글 (radio 형태)
+       *  - 입력 변경 시 page 자동 리셋 */}
+      <div className="flex flex-col md:flex-row gap-2 md:items-center">
+        <Input
+          type="search"
+          value={q}
+          onChange={(e) => updateSearch({ q: e.target.value })}
+          placeholder="이메일 검색"
+          className="md:max-w-xs"
+          data-testid="users-search-input"
+        />
+        <div className="flex gap-1" role="radiogroup" aria-label="상태 필터">
+          {([
+            { v: undefined, label: '전체' },
+            { v: true,      label: '활성' },
+            { v: false,     label: '비활성' },
+          ] as const).map(({ v, label }) => {
+            const active = enabledFilter === v;
+            return (
+              <Button
+                key={String(v)}
+                variant={active ? 'default' : 'outline'}
+                size="sm"
+                role="radio"
+                aria-checked={active}
+                onClick={() => updateSearch({ enabled: v })}
+                data-testid={`users-filter-${v === undefined ? 'all' : v ? 'active' : 'inactive'}`}
+              >
+                {label}
+              </Button>
+            );
+          })}
+        </div>
+        <div className="md:ml-auto text-xs text-muted-foreground">
+          총 <span data-testid="users-total">{total}</span>건
+        </div>
+      </div>
+
       {/* 로딩 상태 — 스켈레톤으로 레이아웃 시프트 방지 */}
       {isLoading && <Skeleton className="h-40 w-full" />}
 
@@ -291,6 +386,31 @@ export function UsersPage() {
             })}
           </TableBody>
         </Table>
+        </div>
+      )}
+
+      {/* 이슈 #348 — 페이지네이션 컨트롤. totalPages > 1 일 때만 노출 */}
+      {!isLoading && !isError && totalPages > 1 && (
+        <div className="flex items-center justify-end gap-2 text-sm">
+          <Button
+            variant="outline" size="sm"
+            disabled={page <= 1}
+            onClick={() => updateSearch({ page: page - 1 })}
+            data-testid="users-page-prev"
+          >
+            이전
+          </Button>
+          <span className="text-muted-foreground" data-testid="users-page-indicator">
+            {page} / {totalPages}
+          </span>
+          <Button
+            variant="outline" size="sm"
+            disabled={page >= totalPages}
+            onClick={() => updateSearch({ page: page + 1 })}
+            data-testid="users-page-next"
+          >
+            다음
+          </Button>
         </div>
       )}
 

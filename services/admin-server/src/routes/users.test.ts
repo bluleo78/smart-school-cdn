@@ -105,6 +105,48 @@ describe('usersRoutes', () => {
     expect(r.json().error).toBe('invalid_input');
   });
 
+  // 이슈 #348 — q (username partial match)
+  it('GET /api/users?q=foo — username 부분 일치 검색 (case-insensitive) (#348)', async () => {
+    ctx.userRepo.create('alice@school.local', await hashPassword('p'));
+    ctx.userRepo.create('bob@example.org', await hashPassword('p'));
+    const r = await ctx.app.inject({ method: 'GET', url: '/api/users?q=ALICE', cookies: ctx.cookies });
+    expect(r.statusCode).toBe(200);
+    const users = r.json();
+    expect(users.map((u: { username: string }) => u.username)).toEqual(['alice@school.local']);
+  });
+
+  // 이슈 #348 — enabled filter
+  it('GET /api/users?enabled=false — 비활성 사용자만 반환 (#348)', async () => {
+    const a = ctx.userRepo.create('active@example.org', await hashPassword('p'));
+    const d = ctx.userRepo.create('inactive@example.org', await hashPassword('p'));
+    ctx.userRepo.disable(d.id);
+    const r = await ctx.app.inject({ method: 'GET', url: '/api/users?enabled=false', cookies: ctx.cookies });
+    expect(r.statusCode).toBe(200);
+    const usernames = r.json().map((u: { username: string }) => u.username);
+    expect(usernames).toContain('inactive@example.org');
+    expect(usernames).not.toContain('active@example.org');
+    expect(a).toBeDefined();
+  });
+
+  it('GET /api/users?enabled=garbage — 400 invalid_input (#348)', async () => {
+    const r = await ctx.app.inject({ method: 'GET', url: '/api/users?enabled=garbage', cookies: ctx.cookies });
+    expect(r.statusCode).toBe(400);
+    expect(r.json().error).toBe('invalid_input');
+  });
+
+  // 이슈 #348 — pagination. limit/offset 둘 중 하나라도 있으면 {users, total} 형태로 응답.
+  it('GET /api/users?limit=2 — 페이지 응답 {users, total} (#348)', async () => {
+    ctx.userRepo.create('a@x.y', await hashPassword('p'));
+    ctx.userRepo.create('b@x.y', await hashPassword('p'));
+    ctx.userRepo.create('c@x.y', await hashPassword('p'));
+    const r = await ctx.app.inject({ method: 'GET', url: '/api/users?limit=2&offset=0', cookies: ctx.cookies });
+    expect(r.statusCode).toBe(200);
+    const body = r.json();
+    expect(Array.isArray(body)).toBe(false);
+    expect(body.users).toHaveLength(2);
+    expect(body.total).toBeGreaterThanOrEqual(4);  // admin + a/b/c
+  });
+
   it('POST /api/users — 정상 생성', async () => {
     const r = await ctx.app.inject({
       method: 'POST', url: '/api/users',

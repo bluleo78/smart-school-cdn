@@ -15,8 +15,37 @@ export interface UserItem {
   last_login_at: number | null;
 }
 
-export async function listUsers(): Promise<UserItem[]> {
-  return (await api.get<UserItem[]>('/users')).data;
+/** listUsers 옵션 — 이슈 #348. 모든 필드 optional, 기본 동작은 종전과 동일. */
+export interface ListUsersOptions {
+  q?: string;
+  enabled?: boolean;
+  limit?: number;
+  offset?: number;
+  sort?: string;
+  order?: 'asc' | 'desc';
+}
+
+/** 페이지네이션 응답 — limit/offset 전달 시 서버가 {users, total} 로 응답 */
+export interface UserListPage {
+  users: UserItem[];
+  total: number;
+}
+
+/**
+ * 사용자 목록 조회 — 이슈 #348.
+ * - limit/offset 둘 다 미지정: 종전과 동일하게 평탄 배열 반환
+ * - limit/offset 중 하나라도 지정: 페이지 응답 {users, total} 반환
+ */
+export async function listUsers(opts?: ListUsersOptions): Promise<UserItem[] | UserListPage> {
+  const params: Record<string, string> = {};
+  if (opts?.q && opts.q.length > 0) params.q = opts.q;
+  if (opts?.enabled !== undefined) params.enabled = String(opts.enabled);
+  if (opts?.sort) params.sort = opts.sort;
+  if (opts?.order) params.order = opts.order;
+  if (opts?.limit !== undefined) params.limit = String(opts.limit);
+  if (opts?.offset !== undefined) params.offset = String(opts.offset);
+  const r = await api.get<UserItem[] | UserListPage>('/users', { params });
+  return r.data;
 }
 
 export async function createUser(username: string, password: string): Promise<UserItem> {

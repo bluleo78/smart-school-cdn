@@ -40,12 +40,25 @@ function nowSec(): number {
   return Math.floor(Date.now() / 1000);
 }
 
-/** list() 정렬 옵션 — 라우트에서 화이트리스트 검증 후 전달 (#344) */
+/** list() 정렬·필터·페이지네이션 옵션 (#344, #348) */
 export interface UserListOptions {
   /** 정렬 컬럼 (기본 created_at) */
   sort?: string;
   /** 정렬 방향 — 'asc' | 'desc' (기본 desc) */
   order?: string;
+  /** 이슈 #348 — username partial match (case-insensitive). 빈 문자열은 무시. */
+  q?: string;
+  /** 이슈 #348 — true=활성(disabled_at IS NULL), false=비활성, undefined=전체 */
+  enabled?: boolean;
+  /** 이슈 #348 — 페이지네이션. 미지정 시 전체 반환 (admin-web 호환). */
+  limit?: number;
+  offset?: number;
+}
+
+/** list/count 결과를 함께 반환하는 페이지네이션 응답 (#348) */
+export interface UserListResult {
+  rows: UserRow[];
+  total: number;  // 필터 적용 후 총 건수 (페이지네이션 무관)
 }
 
 /**
@@ -108,24 +121,59 @@ export class UserRepository {
    * 동순위 안정성 보장을 위해 보조 정렬 키로 id ASC 를 항상 추가한다.
    */
   list(options?: UserListOptions): UserRow[] {
+    return this.listWithTotal(options).rows;
+  }
+
+  /**
+   * 이슈 #348 — 검색/필터/페이지네이션 추가. 응답에 rows + total 포함.
+   * 무엇을: q (username LIKE)·enabled·limit·offset 옵션을 받아 필터/정렬/페이징 후 반환.
+   *        total 은 페이지네이션 무관 필터 적용 후 전체 건수 (도메인 페이지 페이저 패턴).
+   * 왜: 운영 사용자 수가 늘면 평탄 노출이 가독성·성능 모두 부담. 도메인 라우트와 일관된 페이저 UX.
+   */
+  listWithTotal(options?: UserListOptions): UserListResult {
     const sortCol = options?.sort && USER_SORT_WHITELIST.has(options.sort) ? options.sort : 'created_at';
     const sortDir = options?.order && USER_ORDER_WHITELIST.has(options.order.toLowerCase())
       ? options.order.toUpperCase()
       : 'DESC';
-    // last_login_at 은 NULL 가능 컬럼이므로 DESC 정렬 시 NULL 을 마지막으로 밀어내
-    // "최근 로그인 순" 상단에 미로그인 사용자가 끼는 부자연스러움을 방지.
     const nullsClause = sortCol === 'last_login_at'
       ? (sortDir === 'DESC' ? `${sortCol} IS NULL, ` : '')
       : '';
-    // 이슈 #377 — *_at 가 unix-sec(초 단위) 라 같은 초에 만들어진 행은 created_at 이 동일하다.
-    // 보조 정렬은 id 를 primary 방향과 같은 방향으로 적용해 "최신 = 더 큰 id 가 먼저" 의미를 보존.
     const orderBy = `ORDER BY ${nullsClause}${sortCol} ${sortDir}, id ${sortDir}`;
-    // 이슈 #376 — 중복 마이그레이션(#190/#340)이 보존을 위해 남긴 `__dup_<id>__` prefix 행은
-    // archive 성격이므로 사용자 목록 응답에서 제외한다. 운영 데이터 무결성/UX 혼동 방지.
-    // LIKE 의 `_` 와이드카드를 리터럴로 매칭하기 위해 ESCAPE 절 사용.
-    return this.db
-      .prepare(`SELECT * FROM users WHERE username NOT LIKE '\\_\\_dup\\_%' ESCAPE '\\' ${orderBy}`)
-      .all() as UserRow[];
+
+    // WHERE 절 조립 — __dup_ 제외는 항상 적용. q/enabled 는 옵션.
+    const where: string[] = ["username NOT LIKE '\\_\\_dup\\_%' ESCAPE '\\'"];
+    const params: Record<string, string | number> = {};
+    const q = options?.q?.trim();
+    if (q && q.length > 0) {
+      // LIKE 와일드카드 이스케이프 후 양쪽 % 부착. COLLATE NOCASE 컬럼이라 대소문자 무시 자동.
+      const escaped = q.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+      where.push("username LIKE @q ESCAPE '\\'");
+      params.q = `%${escaped}%`;
+    }
+    if (options?.enabled === true) {
+      where.push('disabled_at IS NULL');
+    } else if (options?.enabled === false) {
+      where.push('disabled_at IS NOT NULL');
+    }
+
+    // total — 페이지네이션 무관 필터 적용 후 전체 건수
+    const total = (this.db
+      .prepare(`SELECT COUNT(*) AS c FROM users WHERE ${where.join(' AND ')}`)
+      .get(params) as { c: number }).c;
+
+    // limit/offset — NaN/음수 silent ignore (도메인 라우트와 동일 가드)
+    const safeLimit = Number.isFinite(options?.limit) && (options?.limit as number) > 0
+      ? Math.min(1000, Math.floor(options!.limit!))
+      : null;
+    const safeOffset = Number.isFinite(options?.offset) && (options?.offset as number) >= 0
+      ? Math.floor(options!.offset!)
+      : 0;
+    const limitClause = safeLimit !== null ? `LIMIT ${safeLimit} OFFSET ${safeOffset}` : '';
+
+    const rows = this.db
+      .prepare(`SELECT * FROM users WHERE ${where.join(' AND ')} ${orderBy} ${limitClause}`)
+      .all(params) as UserRow[];
+    return { rows, total };
   }
 
   updatePassword(id: number, passwordHash: string): void {

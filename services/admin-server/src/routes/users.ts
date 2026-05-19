@@ -108,24 +108,51 @@ export const usersRoutes: FastifyPluginAsync<{ userRepo: UserRepository }> = asy
   const { userRepo } = opts;
 
   // GET /api/users — 기본 정렬은 created_at DESC (도메인·이벤트와 일관, #344).
-  // 명시적 sort/order 쿼리가 있으면 화이트리스트 검증 후 그것을 우선 사용.
-  app.get<{ Querystring: { sort?: string; order?: string } }>('/api/users', async (req, reply) => {
-    const { sort, order } = req.query;
-    if (sort !== undefined && !SORT_ALLOWED.has(sort)) {
-      // 표준 envelope (#329) — 도메인 라우트와 동일한 메시지 패턴
-      return reply.code(400).send({
-        error: 'invalid_input',
-        message: `sort는 id|username|created_at|updated_at|last_login_at 중 하나여야 합니다 (받은 값: "${sort}").`,
+  // 이슈 #348 — q (username 부분 일치), enabled (true/false), limit/offset 추가.
+  //   - 기존 호환: 모든 신규 파라미터 optional. 미지정 시 종전과 동일한 평탄 응답(배열).
+  //   - 페이지네이션이 명시되면(limit/offset 둘 중 하나라도 있으면) {users, total} 페이지 응답.
+  app.get<{ Querystring: { sort?: string; order?: string; q?: string; enabled?: string; limit?: string; offset?: string } }>(
+    '/api/users',
+    async (req, reply) => {
+      const { sort, order, q, enabled, limit, offset } = req.query;
+      if (sort !== undefined && !SORT_ALLOWED.has(sort)) {
+        // 표준 envelope (#329) — 도메인 라우트와 동일한 메시지 패턴
+        return reply.code(400).send({
+          error: 'invalid_input',
+          message: `sort는 id|username|created_at|updated_at|last_login_at 중 하나여야 합니다 (받은 값: "${sort}").`,
+        });
+      }
+      if (order !== undefined && !ORDER_ALLOWED.has(order.toLowerCase())) {
+        return reply.code(400).send({
+          error: 'invalid_input',
+          message: `order는 asc|desc 중 하나여야 합니다 (받은 값: "${order}").`,
+        });
+      }
+      // enabled 검증 — 'true'/'false' 만 허용. 그 외는 invalid_input. 도메인 라우트(#242) 패턴.
+      let enabledFlag: boolean | undefined;
+      if (enabled !== undefined && enabled !== '') {
+        if (enabled === 'true') enabledFlag = true;
+        else if (enabled === 'false') enabledFlag = false;
+        else return reply.code(400).send({
+          error: 'invalid_input',
+          message: `enabled는 true|false 중 하나여야 합니다 (받은 값: "${enabled}").`,
+        });
+      }
+      const limitN  = limit  !== undefined ? Number(limit)  : undefined;
+      const offsetN = offset !== undefined ? Number(offset) : undefined;
+      const result = userRepo.listWithTotal({
+        sort, order,
+        q: q && q.length > 0 ? q : undefined,
+        enabled: enabledFlag,
+        limit:  limitN,
+        offset: offsetN,
       });
-    }
-    if (order !== undefined && !ORDER_ALLOWED.has(order.toLowerCase())) {
-      return reply.code(400).send({
-        error: 'invalid_input',
-        message: `order는 asc|desc 중 하나여야 합니다 (받은 값: "${order}").`,
-      });
-    }
-    return userRepo.list({ sort, order }).map(publicUser);
-  });
+      const users = result.rows.map(publicUser);
+      // limit/offset 둘 다 미지정 시 기존 응답 형태 (평탄 배열) 유지 — 호환성 보장.
+      if (limit === undefined && offset === undefined) return users;
+      return { users, total: result.total };
+    },
+  );
 
   app.post('/api/users', { config: writeRateLimit() }, async (req, reply) => {  // #370 throttle
     const parsed = createSchema.safeParse(req.body);
