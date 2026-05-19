@@ -18,6 +18,11 @@ import { startStatsCollector } from './stats-collector.js';
 import { startDnsMetricsCollector } from './dns-metrics-collector.js';
 import { startOptimizationEventsPruner } from './optimization-events-pruner.js';
 import { startDomainStatsPruner } from './domain-stats-pruner.js';
+import {
+  TLS_EXPIRY_ALERTS_SCHEMA,
+  startTlsExpiryScanner,
+  createSinksFromEnv,
+} from './tls-expiry-scanner.js';
 import { createStorageClient } from './grpc/storage_client.js';
 import { createTlsClient } from './grpc/tls_client.js';
 import { createDnsClient } from './grpc/dns_client.js';
@@ -122,6 +127,9 @@ db.exec(DNS_METRICS_SCHEMA);
 
 // 최적화 이벤트 테이블 생성 — Phase 13/14/15 공용 관찰 인프라
 db.exec(OPTIMIZATION_EVENTS_SCHEMA);
+
+// 이슈 #367 — TLS 인증서 만료 임박 단발 알림 추적 테이블 (domain, threshold_day) PK
+db.exec(TLS_EXPIRY_ALERTS_SCHEMA);
 
 // optimization_events.ts 컬럼 형식 마이그레이션 — 이슈 #377
 // 무엇을: 기존 DB 의 ts 컬럼이 TEXT (ISO 8601) 면 INTEGER unix-sec 로 재생성하며 모든 행을 변환한다.
@@ -598,6 +606,14 @@ try {
   // optimization_events retention 프루너 시작 — 1시간마다 30일 이전 이벤트 삭제 (#337)
   startOptimizationEventsPruner({
     repo: new OptimizationEventsRepository(db),
+    log: app.log,
+  });
+  // 이슈 #367 — TLS 인증서 만료 임박 사전 알림 스캐너. 기본 6시간 (TLS_SCAN_INTERVAL_MS).
+  // sink: LogSink 기본, TLS_ALERT_WEBHOOK_URL 설정 시 WebhookSink 추가.
+  startTlsExpiryScanner({
+    db,
+    tlsClient,
+    sinks: createSinksFromEnv(app.log),
     log: app.log,
   });
 } catch (err) {

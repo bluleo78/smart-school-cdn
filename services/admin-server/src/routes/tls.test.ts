@@ -104,10 +104,11 @@ describe('TLS 라우트', () => {
   // ─── GET /api/tls/certificates ───────────────────
 
   describe('GET /api/tls/certificates', () => {
-    it('tls-service가 인증서 배열을 반환할 때 200과 목록을 응답한다', async () => {
+    it('tls-service가 인증서 배열을 반환할 때 200과 목록을 응답한다 — days_until_expiry/severity 파생 필드 포함 (#367)', async () => {
+      // 만료 기준점 자유 — severity 분류만 검증 (실제 days 는 now 의존)
       const certs = [
-        { domain: 'textbook.co.kr', issued_at: '2025-01-01T00:00:00Z', expires_at: '2026-01-01T00:00:00Z' },
-        { domain: 'cdn.edunet.net', issued_at: '2025-01-01T00:00:00Z', expires_at: '2025-02-01T00:00:00Z' },
+        { domain: 'textbook.co.kr', issued_at: '2025-01-01T00:00:00Z', expires_at: '2099-01-01T00:00:00Z' }, // 안전
+        { domain: 'cdn.edunet.net', issued_at: '2025-01-01T00:00:00Z', expires_at: '2025-02-01T00:00:00Z' }, // 이미 만료
       ];
       mockTlsClient.listCertificates.mockResolvedValueOnce({ certs });
 
@@ -115,7 +116,13 @@ describe('TLS 라우트', () => {
       const res = await app.inject({ method: 'GET', url: '/api/tls/certificates' });
 
       expect(res.statusCode).toBe(200);
-      expect(res.json()).toEqual(certs);
+      const body = res.json() as Array<{ domain: string; severity: string; days_until_expiry: number }>;
+      expect(body).toHaveLength(2);
+      const byDomain = Object.fromEntries(body.map((c) => [c.domain, c]));
+      expect(byDomain['textbook.co.kr'].severity).toBe('none');
+      expect(byDomain['textbook.co.kr'].days_until_expiry).toBeGreaterThan(30);
+      expect(byDomain['cdn.edunet.net'].severity).toBe('critical');
+      expect(byDomain['cdn.edunet.net'].days_until_expiry).toBeLessThan(0);
     });
 
     it('tls-service가 빈 배열을 반환할 때 200과 빈 배열을 응답한다', async () => {

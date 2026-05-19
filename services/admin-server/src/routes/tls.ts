@@ -60,11 +60,27 @@ export async function tlsRoutes(app: FastifyInstance, opts: TlsRouteOptions = {}
     }
   });
 
-  /** 발급된 도메인 인증서 목록 — tls-service gRPC로 조회 */
+  /** 발급된 도메인 인증서 목록 — tls-service gRPC로 조회.
+   *  이슈 #367 — 응답에 `days_until_expiry`(정수) + `severity`(none/warn/danger/critical)
+   *  파생 필드를 서버에서 계산해 함께 반환. admin-web 의 임계값 판단을 한 곳으로 통일. */
   app.get('/api/tls/certificates', async (_req, reply) => {
     try {
       const res = await app.tlsClient.listCertificates();
-      return res.certs ?? [];
+      const now = Date.now();
+      const certs = (res.certs ?? []).map((c) => {
+        const expiresMs = Date.parse(c.expires_at);
+        const days = Number.isFinite(expiresMs)
+          ? Math.floor((expiresMs - now) / 86_400_000)
+          : 0;
+        // 임계 매핑 — TlsExpiryScanner 의 THRESHOLDS 와 정합
+        const severity = days < 0       ? 'critical'   // 이미 만료
+                       : days <= 7      ? 'critical'
+                       : days <= 14     ? 'danger'
+                       : days <= 30     ? 'warn'
+                       :                  'none';
+        return { ...c, days_until_expiry: days, severity };
+      });
+      return certs;
     } catch {
       // 표준 envelope (#327)
       return reply.status(502).send({
