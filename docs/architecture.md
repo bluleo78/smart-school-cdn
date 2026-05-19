@@ -231,6 +231,11 @@ iPad → Proxy Service: GET https://textbook.com/images/diagram.png
 | 서비스간 통신 | gRPC (tonic) |
 | 인터페이스 정의 | Protocol Buffers (.proto) |
 
+### 6-1.1. Proxy 멀티 인스턴스 (#393)
+
+학생 1000명+ / 다수 학교 통합 운영 등 트리거 도래 시 **Sticky routing (consistent hash by URL)** 채택 권장.
+즉시 채택 단계는 아님. 결정 사전 기록은 [docs/architecture-multi-instance.md](./architecture-multi-instance.md) 참조.
+
 ### 6-2. Admin Service (Node.js)
 
 | 영역 | 기술 | 비고 |
