@@ -19,6 +19,10 @@ interface DomainToolbarProps {
   onAddClick: () => void;
   onBulkAddClick: () => void;
   onBulkDeleteClick: () => void;
+  /** 이슈 #349 — 선택된 도메인 일괄 활성화/비활성화/캐시 퍼지 */
+  onBulkEnableClick?: () => void;
+  onBulkDisableClick?: () => void;
+  onBulkPurgeClick?: () => void;
 }
 
 export function DomainToolbar({
@@ -28,6 +32,9 @@ export function DomainToolbar({
   onAddClick,
   onBulkAddClick,
   onBulkDeleteClick,
+  onBulkEnableClick,
+  onBulkDisableClick,
+  onBulkPurgeClick,
 }: DomainToolbarProps) {
   // debounce 중인지 추적 — debounce 중이면 로컬 입력값 사용, 아니면 filter.q 사용
   const [localInput, setLocalInput] = useState<string | null>(null);
@@ -165,6 +172,40 @@ export function DomainToolbar({
         >
           일괄 삭제{selectedCount > 0 && ` (${selectedCount})`}
         </Button>
+        {/* 이슈 #349 — 일괄 활성화/비활성화/캐시 퍼지. 선택 시에만 활성화. */}
+        {onBulkEnableClick && (
+          <Button
+            variant="outline"
+            onClick={onBulkEnableClick}
+            disabled={selectedCount === 0}
+            data-testid="toolbar-bulk-enable-btn"
+            className="whitespace-nowrap"
+          >
+            일괄 활성화{selectedCount > 0 && ` (${selectedCount})`}
+          </Button>
+        )}
+        {onBulkDisableClick && (
+          <Button
+            variant="outline"
+            onClick={onBulkDisableClick}
+            disabled={selectedCount === 0}
+            data-testid="toolbar-bulk-disable-btn"
+            className="whitespace-nowrap"
+          >
+            일괄 비활성화{selectedCount > 0 && ` (${selectedCount})`}
+          </Button>
+        )}
+        {onBulkPurgeClick && (
+          <Button
+            variant="outline"
+            onClick={onBulkPurgeClick}
+            disabled={selectedCount === 0}
+            data-testid="toolbar-bulk-purge-btn"
+            className="whitespace-nowrap text-destructive hover:text-destructive"
+          >
+            일괄 캐시 퍼지{selectedCount > 0 && ` (${selectedCount})`}
+          </Button>
+        )}
       </div>
 
       {/* 오른쪽: 검색 + 필터 — 모바일에선 가용 너비, 데스크톱에선 고정 폭 */}

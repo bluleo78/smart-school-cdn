@@ -601,6 +601,97 @@ export async function domainRoutes(
     },
   );
 
+  /**
+   * 이슈 #349 — 일괄 활성화/비활성화. body: { hosts: string[], enabled: boolean }.
+   * 응답: { ok: string[], failed: { host, error }[] } — 부분 실패 분리.
+   * 각 호스트별 update + syncToProxy 1회 호출 후 fanOutGrpc.
+   */
+  app.post<{ Body: { hosts?: string[]; enabled?: boolean } }>(
+    '/api/domains/bulk-toggle',
+    { config: writeRateLimit() },
+    async (request, reply) => {
+      const body = request.body ?? {};
+      const rawHosts = body.hosts;
+      const enabledVal = body.enabled;
+      if (!Array.isArray(rawHosts) || rawHosts.length === 0) {
+        return reply.status(400).send({ error: 'invalid_input', message: 'hosts 배열은 필수 항목입니다.' });
+      }
+      if (typeof enabledVal !== 'boolean') {
+        return reply.status(400).send({ error: 'invalid_input', message: 'enabled 는 boolean 이어야 합니다.' });
+      }
+      if (rawHosts.some((h) => typeof h !== 'string')) {
+        return reply.status(400).send({ error: 'invalid_input', message: 'hosts 배열에는 문자열 host만 허용됩니다.' });
+      }
+      const hosts = (rawHosts as string[]).map((h) => normalizeHost(h));
+      const enabledInt: 0 | 1 = enabledVal ? 1 : 0;
+      const ok: string[] = [];
+      const failed: Array<{ host: string; error: string }> = [];
+      for (const host of hosts) {
+        const exists = domainRepo.findByHost(host);
+        if (!exists) {
+          failed.push({ host, error: 'domain_not_found' });
+          continue;
+        }
+        const updated = domainRepo.update(host, { enabled: enabledInt });
+        if (updated) ok.push(host);
+        else failed.push({ host, error: 'update_failed' });
+      }
+      // 모든 update 후 한 번만 sync — 개별 호출의 N배 비용 절약.
+      const synced = await syncToProxy(domainRepo);
+      if (!synced) {
+        // sync 실패 — 도메인은 갱신됐지만 proxy 가 못 받았다. 운영자에게 노출 (#151 패턴).
+        return reply.status(502).send({
+          error: 'proxy_sync_failed',
+          message: 'Proxy 동기화 실패 (DB 는 갱신됨)',
+          ok, failed,
+        });
+      }
+      await fanOutGrpc(app, domainRepo);
+      return reply.status(200).send({ ok, failed, requested: rawHosts.length });
+    },
+  );
+
+  /**
+   * 이슈 #349 — 일괄 캐시 퍼지. body: { hosts: string[] }.
+   * 각 호스트별 proxy /domains/{host}/purge 호출. 부분 실패 분리.
+   */
+  app.post<{ Body: { hosts?: string[] } }>(
+    '/api/domains/bulk-purge',
+    { config: writeRateLimit() },
+    async (request, reply) => {
+      const rawHosts = request.body?.hosts;
+      if (!Array.isArray(rawHosts) || rawHosts.length === 0) {
+        return reply.status(400).send({ error: 'invalid_input', message: 'hosts 배열은 필수 항목입니다.' });
+      }
+      if (rawHosts.some((h) => typeof h !== 'string')) {
+        return reply.status(400).send({ error: 'invalid_input', message: 'hosts 배열에는 문자열 host만 허용됩니다.' });
+      }
+      const hosts = (rawHosts as string[]).map((h) => normalizeHost(h));
+      const ok: string[] = [];
+      const failed: Array<{ host: string; error: string }> = [];
+      // 도메인별 멤버십 검증 — 미등록 host 는 미리 failed 로 분리.
+      const validHosts = hosts.filter((h) => {
+        if (!domainRepo.findByHost(h)) {
+          failed.push({ host: h, error: 'domain_not_found' });
+          return false;
+        }
+        return true;
+      });
+      // 병렬 퍼지 — 호스트별 proxy 호출. allSettled 로 한 건 실패가 다른 건을 막지 않게.
+      const results = await Promise.allSettled(
+        validHosts.map((host) =>
+          axios.post(`${PROXY_ADMIN_URL}/domains/${encodeURIComponent(host)}/purge`, {}, { timeout: 5000 }),
+        ),
+      );
+      for (const [i, r] of results.entries()) {
+        const host = validHosts[i];
+        if (r.status === 'fulfilled') ok.push(host);
+        else failed.push({ host, error: 'proxy_purge_failed' });
+      }
+      return reply.status(200).send({ ok, failed, requested: rawHosts.length });
+    },
+  );
+
   /** 도메인 추가 (이미 있으면 origin 갱신) — 추가 성공 후 기본 최적화 프로파일 자동 생성. throttle: 분당 60회 (#370) */
   app.post<{ Body: { host?: string; origin?: string } }>(
     '/api/domains',

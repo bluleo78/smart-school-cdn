@@ -7,6 +7,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { toast } from 'sonner';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { bulkToggleDomains, bulkPurgeDomains } from '../api/domains';
 import { Dialog, DialogContent, DialogTitle } from '../components/ui/dialog';
 import { AlertDialog, AlertDialogContent, AlertDialogTitle } from '../components/ui/alert-dialog';
 import { Button } from '../components/ui/button';
@@ -426,10 +428,44 @@ export function DomainsPage() {
     setDeleteTarget(null);
   }
 
+  const qc = useQueryClient();
+
   // 일괄 삭제 성공 후 선택 초기화
   function handleBulkDeleteSuccess() {
     setSelectedHosts(new Set());
   }
+
+  // 이슈 #349 — 일괄 활성화/비활성화/캐시 퍼지 mutation
+  const bulkToggleMutation = useMutation({
+    mutationFn: ({ hosts, enabled }: { hosts: string[]; enabled: boolean }) =>
+      bulkToggleDomains(hosts, enabled),
+    onSuccess: (r, vars) => {
+      const action = vars.enabled ? '활성화' : '비활성화';
+      if (r.failed.length === 0) {
+        toast.success(`${r.ok.length}건 ${action} 완료`);
+      } else {
+        toast.warning(`${r.ok.length}건 ${action} / ${r.failed.length}건 실패`);
+      }
+      setSelectedHosts(new Set());
+      void qc.invalidateQueries({ queryKey: ['domains'] });
+      void qc.invalidateQueries({ queryKey: ['domains', 'summary'] });
+    },
+    onError: () => toast.error('일괄 작업에 실패했습니다.'),
+  });
+  const bulkPurgeMutation = useMutation({
+    mutationFn: (hosts: string[]) => bulkPurgeDomains(hosts),
+    onSuccess: (r) => {
+      if (r.failed.length === 0) {
+        toast.success(`${r.ok.length}건 캐시 퍼지 완료`);
+      } else {
+        toast.warning(`${r.ok.length}건 퍼지 / ${r.failed.length}건 실패`);
+      }
+      setSelectedHosts(new Set());
+      void qc.invalidateQueries({ queryKey: ['cache'] });
+    },
+    onError: () => toast.error('일괄 퍼지에 실패했습니다.'),
+  });
+  const [bulkPurgeConfirmOpen, setBulkPurgeConfirmOpen] = useState(false);
 
   return (
     <div className="flex flex-col gap-4 h-full">
@@ -455,7 +491,36 @@ export function DomainsPage() {
         onAddClick={() => setShowAddDialog(true)}
         onBulkAddClick={() => setShowBulkAddDialog(true)}
         onBulkDeleteClick={() => setShowBulkDeleteDialog(true)}
+        onBulkEnableClick={() => bulkToggleMutation.mutate({ hosts: Array.from(selectedHosts), enabled: true })}
+        onBulkDisableClick={() => bulkToggleMutation.mutate({ hosts: Array.from(selectedHosts), enabled: false })}
+        onBulkPurgeClick={() => setBulkPurgeConfirmOpen(true)}
       />
+
+      {/* 이슈 #349 — 일괄 캐시 퍼지 확인 다이얼로그. 캐시 퍼지는 비파괴이지만 적중률 영향 큼 → 명시적 확인. */}
+      <AlertDialog open={bulkPurgeConfirmOpen} onClose={() => { if (!bulkPurgeMutation.isPending) setBulkPurgeConfirmOpen(false); }}>
+        <AlertDialogContent className="max-w-sm" data-testid="bulk-purge-dialog" disableClose={bulkPurgeMutation.isPending}>
+          <AlertDialogTitle>일괄 캐시 퍼지</AlertDialogTitle>
+          <p className="text-sm text-muted-foreground">
+            선택한 {selectedHosts.size}개 도메인의 캐시를 즉시 삭제합니다. 적중률이 일시적으로 떨어집니다.
+          </p>
+          <div className="flex justify-end gap-2 mt-4">
+            <Button variant="outline" onClick={() => setBulkPurgeConfirmOpen(false)} disabled={bulkPurgeMutation.isPending}>
+              취소
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={bulkPurgeMutation.isPending}
+              onClick={() => {
+                bulkPurgeMutation.mutate(Array.from(selectedHosts), {
+                  onSettled: () => setBulkPurgeConfirmOpen(false),
+                });
+              }}
+            >
+              {bulkPurgeMutation.isPending ? '퍼지 중…' : '퍼지 실행'}
+            </Button>
+          </div>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* 도메인 테이블 */}
       <Card className="flex-1 overflow-auto">

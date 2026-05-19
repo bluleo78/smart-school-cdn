@@ -89,6 +89,25 @@ export async function bulkDeleteDomains(hosts: string[]): Promise<BulkDeleteResu
   return res.data;
 }
 
+/** 일괄 액션 응답 — 이슈 #349 bulk-toggle/bulk-purge 공용. 부분 실패 분리. */
+export interface BulkActionResult {
+  ok: string[];
+  failed: Array<{ host: string; error: string }>;
+  requested: number;
+}
+
+/** 이슈 #349 — 일괄 활성화/비활성화. enabled=true 면 활성화, false 면 비활성화 */
+export async function bulkToggleDomains(hosts: string[], enabled: boolean): Promise<BulkActionResult> {
+  const res = await axios.post<BulkActionResult>('/api/domains/bulk-toggle', { hosts, enabled });
+  return res.data;
+}
+
+/** 이슈 #349 — 일괄 캐시 퍼지 */
+export async function bulkPurgeDomains(hosts: string[]): Promise<BulkActionResult> {
+  const res = await axios.post<BulkActionResult>('/api/domains/bulk-purge', { hosts });
+  return res.data;
+}
+
 /** 단일 도메인 요약 통계 조회 — L1/Edge/Bypass 비율 포함 */
 export async function fetchDomainHostSummary(host: string): Promise<DomainHostSummary> {
   const res = await axios.get<DomainHostSummary>(
