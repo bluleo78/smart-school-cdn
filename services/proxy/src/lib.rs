@@ -1352,11 +1352,35 @@ async fn proxy_handler(
                     cache="MISS", "프록시 요청 처리 완료"
                 );
                 record_domain_outcome(&ps.counters, &host, *outcome, total, elapsed_ms);
-                emit_media_cache_event(
-                    &ps.events, &host, &uri, &decision,
-                    Some(total), Some(out_bytes),
-                    &headers, ct.as_deref(), elapsed_ms,
-                );
+                // 이슈 #431 — stale-if-error 폴백 응답은 try_serve_stale 가 passthrough 에 'x-cache-stale: true' 를 부착했다.
+                // 미디어/비미디어 무관하게 운영 알림(#430)에 노출돼야 하므로, media gate 를 우회하여 직접 emit.
+                let is_stale_served = passthrough_out
+                    .iter()
+                    .any(|(n, v)| n == "x-cache-stale" && v == "true");
+                if is_stale_served {
+                    if let Some(sender) = &ps.events {
+                        sender.emit(events::EventRecord {
+                            event_type: "media_cache",
+                            host: host.to_string(),
+                            url: uri.to_string(),
+                            decision: "served_stale_if_error".to_string(),
+                            orig_size: Some(total),
+                            out_size: Some(out_bytes),
+                            range_header: headers
+                                .get(axum::http::header::RANGE)
+                                .and_then(|v| v.to_str().ok())
+                                .map(str::to_string),
+                            content_type: ct.clone(),
+                            elapsed_ms,
+                        });
+                    }
+                } else {
+                    emit_media_cache_event(
+                        &ps.events, &host, &uri, &decision,
+                        Some(total), Some(out_bytes),
+                        &headers, ct.as_deref(), elapsed_ms,
+                    );
+                }
                 let mut response = Response::builder()
                     .status(resp_status)
                     .header("Accept-Ranges", "bytes");

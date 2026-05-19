@@ -32,9 +32,10 @@ export interface DomainSummary {
  *  - disk_high (#432)            : 시스템 단위 — host 없음. usage_ratio 는 0~100 백분율(서버에서 0.1% 단위 반올림)
  */
 export type DomainAlert =
-  | { type: 'tls_expiring'; host: string; expiresAt?: string }
-  | { type: 'sync_failed';  host: string; lastError?: string }
-  | { type: 'disk_high';    usage_ratio: number; used_bytes: number; total_bytes: number };
+  | { type: 'tls_expiring';  host: string; expiresAt?: string }
+  | { type: 'sync_failed';   host: string; lastError?: string }
+  | { type: 'stale_serving'; host: string } // #430 — 최근 10분 내 stale 사본 서빙 이력 존재
+  | { type: 'disk_high';     usage_ratio: number; used_bytes: number; total_bytes: number };
 
 /** 단일 도메인 요약 통계 — L1/Edge/Bypass 비율 포함 (Overview 카드용) */
 export interface DomainHostSummary {

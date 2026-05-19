@@ -11,7 +11,7 @@ import { clampInt, clampOffset } from './pagination.js';
  *   API 입출력은 ISO 8601 문자열로 유지하여 proxy 인입 / UI 응답 호환을 보장한다 — 변환은 repo 가 담당.
  * - url_hash: SHA-256 앞 16자 — 동일 URL 그룹핑·인덱스 정렬 효율용 (insert 시 자동 계산)
  * - decision: 처리 결과 분류 문자열. Phase별로 의미가 다르지만 고정 집합으로 운영한다.
- *   · media_cache:   'served_200','served_206','stored_new','invalid_range_416'
+ *   · media_cache:   'served_200','served_206','stored_new','invalid_range_416','served_stale_if_error'(#431)
  *   · image_optimize:'converted','rejected_size','skipped_small','skipped_type','error'
  *   · text_compress: 'compressed_br','compressed_gzip','skipped_small','skipped_type','error'
  *   · (공통 bypass): 'bypass_nocache','bypass_size','bypass_method','bypass_other'
@@ -328,6 +328,21 @@ export class OptimizationEventsRepository {
     return this.db
       .prepare(`DELETE FROM optimization_events WHERE host IN (${placeholders})`)
       .run(...hosts).changes;
+  }
+
+  /**
+   * 이슈 #430 — 최근 N초 이내 특정 decision 의 이벤트가 발생한 host 목록.
+   * 무엇을: ts >= since 이고 decision 일치하는 row 의 DISTINCT host 를 리턴.
+   * 왜: 도메인 요약 알림에서 'stale 사본 서빙 중' 같은 일시적 운영 상태를
+   *    decision 단위로 빠르게 집계하기 위함. host 별 알림이 아니라 시스템-와이드
+   *    배너이므로 ORDER BY 는 host 가나다순(결정적 응답).
+   */
+  findHostsWithRecentDecision(decision: string, sinceUnixSec: number): string[] {
+    const rows = this.db
+      .prepare(`SELECT DISTINCT host FROM optimization_events
+                WHERE decision = ? AND ts >= ? ORDER BY host`)
+      .all(decision, sinceUnixSec) as { host: string }[];
+    return rows.map(r => r.host);
   }
 
   /**

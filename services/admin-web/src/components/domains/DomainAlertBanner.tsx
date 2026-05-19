@@ -44,14 +44,17 @@ export function DomainAlertBanner() {
   if (!data?.alerts || data.alerts.length === 0) return null;
 
   // 타입별 분리 — host 단위 알림은 도메인 링크, system 알림(disk_high)은 별도 처리
-  const tlsHosts  = data.alerts.flatMap((a) => (a.type === 'tls_expiring' ? [a.host] : []));
-  const syncHosts = data.alerts.flatMap((a) => (a.type === 'sync_failed'  ? [a.host] : []));
+  const tlsHosts   = data.alerts.flatMap((a) => (a.type === 'tls_expiring'  ? [a.host] : []));
+  const syncHosts  = data.alerts.flatMap((a) => (a.type === 'sync_failed'   ? [a.host] : []));
+  // 이슈 #430 — origin 5xx/timeout 시 stale 사본을 서빙 중인 호스트. 다건 가능.
+  const staleHosts = data.alerts.flatMap((a) => (a.type === 'stale_serving' ? [a.host] : []));
   // 이슈 #432 — storage 디스크 사용률 80% 초과 알림. 다건 emit 되지 않으므로 첫 건만 사용.
-  const diskAlert = data.alerts.find((a) => a.type === 'disk_high');
+  const diskAlert  = data.alerts.find((a) => a.type === 'disk_high');
 
   const parts: string[] = [];
-  if (tlsHosts.length > 0)  parts.push(`TLS 만료 임박 ${tlsHosts.length}건`);
-  if (syncHosts.length > 0) parts.push(`동기화 실패 ${syncHosts.length}건`);
+  if (tlsHosts.length > 0)   parts.push(`TLS 만료 임박 ${tlsHosts.length}건`);
+  if (syncHosts.length > 0)  parts.push(`동기화 실패 ${syncHosts.length}건`);
+  if (staleHosts.length > 0) parts.push(`stale 사본 서빙 중 ${staleHosts.length}건`);
   if (diskAlert && diskAlert.type === 'disk_high') {
     parts.push(`디스크 사용률 ${diskAlert.usage_ratio}%`);
   }
@@ -71,13 +74,16 @@ export function DomainAlertBanner() {
         <span className="font-medium">주의 · {parts.join(' · ')}</span>
       </div>
       {/* 둘째 줄: 도메인 링크 (보조 정보, 작은 글씨) */}
-      {(tlsHosts.length > 0 || syncHosts.length > 0 || diskAlert) && (
+      {(tlsHosts.length > 0 || syncHosts.length > 0 || staleHosts.length > 0 || diskAlert) && (
         <div className="mt-1 pl-6 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs opacity-70">
           {tlsHosts.length > 0 && (
             <span><AlertLinks hosts={tlsHosts} /></span>
           )}
           {syncHosts.length > 0 && (
             <span><AlertLinks hosts={syncHosts} /></span>
+          )}
+          {staleHosts.length > 0 && (
+            <span><AlertLinks hosts={staleHosts} /></span>
           )}
           {diskAlert && diskAlert.type === 'disk_high' && (
             <Link

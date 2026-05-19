@@ -339,6 +339,24 @@ export async function domainRoutes(
       app.log.warn({ err }, '[summary] tls-service listCertificates 실패 — alerts 빈 배열로 대체');
     }
 
+    // 이슈 #430 — 최근 10분 이내 'served_stale_if_error' 이벤트가 있는 호스트는 stale_serving alert 발행.
+    // proxy 가 origin 5xx/timeout 시 만료 사본을 서빙한 상태가 지속되고 있음을 운영자에게 노출 (#431 emit).
+    // origin 복구 후에는 이벤트가 멈춰 윈도우 밖으로 빠지며 자연 사라진다.
+    type StaleAlert = { type: 'stale_serving'; host: string };
+    let staleAlerts: StaleAlert[] = [];
+    try {
+      // optimizationEventsRepo 미장착 테스트 환경에서도 안전하도록 옵셔널 체이닝.
+      const repo = app.optimizationEventsRepo;
+      if (repo) {
+        const STALE_WINDOW_SEC = 600; // 10분
+        const since = Math.floor(Date.now() / 1000) - STALE_WINDOW_SEC;
+        const hosts = repo.findHostsWithRecentDecision('served_stale_if_error', since);
+        staleAlerts = hosts.map((host) => ({ type: 'stale_serving' as const, host }));
+      }
+    } catch (err) {
+      app.log.warn({ err }, '[summary] stale_serving 집계 실패 — 빈 배열로 대체');
+    }
+
     // 이슈 #432 — 디스크 사용률 80% 도달 시 disk_high alert 발행.
     // HealthMonitor 가 5초 주기로 storage.stats() 폴링한 캐시 사용 (downstream 부담 없음).
     type DiskAlert = { type: 'disk_high'; usage_ratio: number; used_bytes: number; total_bytes: number };
@@ -366,7 +384,7 @@ export async function domainRoutes(
       hourlyRequests,
       hourlyCacheHitRate,
       hourlyBandwidth,
-      alerts: [...tlsAlerts, ...diskAlerts],
+      alerts: [...tlsAlerts, ...staleAlerts, ...diskAlerts],
     };
   });
 

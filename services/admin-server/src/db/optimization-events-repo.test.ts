@@ -438,6 +438,27 @@ describe('OptimizationEventsRepository', () => {
     });
   });
 
+  // ─── findHostsWithRecentDecision (#430) ─────────────────────────────────
+  describe('findHostsWithRecentDecision', () => {
+    it('지정 윈도우 이내 + 일치 decision 의 호스트만 DISTINCT 반환', () => {
+      const now = Math.floor(Date.now() / 1000);
+      repo.insert(sample({ host: 'a.test', decision: 'served_stale_if_error', ts: new Date((now - 60)  * 1000).toISOString() }));
+      repo.insert(sample({ host: 'a.test', decision: 'served_stale_if_error', ts: new Date((now - 120) * 1000).toISOString() }));
+      repo.insert(sample({ host: 'b.test', decision: 'served_stale_if_error', ts: new Date((now - 300) * 1000).toISOString() }));
+      // 다른 decision 은 제외
+      repo.insert(sample({ host: 'c.test', decision: 'served_200',            ts: new Date((now - 30)  * 1000).toISOString() }));
+      // 윈도우 밖
+      repo.insert(sample({ host: 'd.test', decision: 'served_stale_if_error', ts: new Date((now - 9999) * 1000).toISOString() }));
+
+      const hosts = repo.findHostsWithRecentDecision('served_stale_if_error', now - 600);
+      expect(hosts).toEqual(['a.test', 'b.test']); // 가나다순, DISTINCT
+    });
+
+    it('일치 이벤트 없으면 빈 배열', () => {
+      expect(repo.findHostsWithRecentDecision('served_stale_if_error', 0)).toEqual([]);
+    });
+  });
+
   // ─── 인덱스 회귀: (event_type, ts) — #378 ──────────────────────────────
   describe('schema 인덱스 (#378)', () => {
     /**

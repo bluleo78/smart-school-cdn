@@ -1594,6 +1594,44 @@ describe('GET /api/domains/summary — TLS 만료 임박 alerts', () => {
     expect(JSON.parse(res.body).alerts).toHaveLength(0);
   });
 
+  it('이슈 #430 — 최근 10분 내 served_stale_if_error 이벤트가 있으면 stale_serving alert 포함', async () => {
+    const repo = makeRepo();
+    repo.upsert('s.test', 'https://s.test');
+    repo.upsert('t.test', 'https://t.test');
+    const eventsRepo = new OptimizationEventsRepository(repo.database);
+    const nowSec = Math.floor(Date.now() / 1000);
+    eventsRepo.insert({
+      event_type: 'media_cache', host: 's.test', url: 'https://s.test/a.mp4',
+      decision: 'served_stale_if_error', elapsed_ms: 1,
+      ts: new Date((nowSec - 60) * 1000).toISOString(),
+    });
+    // 윈도우 밖 — 알림에 포함되지 않아야 한다
+    eventsRepo.insert({
+      event_type: 'media_cache', host: 'old.test', url: 'https://old.test/b.mp4',
+      decision: 'served_stale_if_error', elapsed_ms: 1,
+      ts: new Date((nowSec - 99999) * 1000).toISOString(),
+    });
+
+    // optimizationEventsRepo 데코레이터 주입
+    const app = Fastify({ logger: false });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    app.decorate('tlsClient', mockTlsClient as any);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    app.decorate('dnsClient', mockDnsClient as any);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    app.decorate('optimizerClient', mockOptimizerClient as any);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    app.decorate('optimizationEventsRepo', eventsRepo as any);
+    app.register(domainRoutes, { domainRepo: repo });
+
+    const res = await app.inject({ method: 'GET', url: '/api/domains/summary' });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    const stale = body.alerts.filter((a: { type: string }) => a.type === 'stale_serving');
+    expect(stale).toHaveLength(1);
+    expect(stale[0]).toEqual({ type: 'stale_serving', host: 's.test' });
+  });
+
   it('이슈 #432 — disk.usage_ratio ≥ 0.8 이면 disk_high alert를 포함한다 (백분율 노출)', async () => {
     const repo = makeRepo();
     const app = Fastify({ logger: false });

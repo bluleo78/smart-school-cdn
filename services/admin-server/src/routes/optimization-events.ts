@@ -29,6 +29,8 @@ const ALLOWED_EVENT_TYPES: ReadonlySet<OptimizationEventType> = new Set([
 export const ALLOWED_DECISIONS: ReadonlySet<string> = new Set([
   // media_cache
   'served_200', 'served_206', 'stored_new', 'invalid_range_416',
+  // #431 — origin 5xx/timeout 시 만료 사본 stale-if-error 폴백 (이슈 #388)
+  'served_stale_if_error',
   // image_optimize (optimizer-service의 OptimizeDecision::as_str)
   'optimized', 'passthrough_larger', 'passthrough_error', 'passthrough_unsupported',
   // image_optimize 추가 분류 (rejected/skipped/error)
