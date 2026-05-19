@@ -179,14 +179,16 @@ export function DomainOptimizerSection({ host }: Props) {
               </p>
             </div>
 
-            {/* enabled Switch */}
+            {/* enabled Switch — htmlFor/id 연결 + aria-label 로 SR/키보드 흐름 확보 (#406) */}
             <div className="flex items-center gap-2">
               <Switch
+                id="optimizer-enabled"
                 checked={enabled}
                 onCheckedChange={setEnabled}
+                aria-label="최적화 활성화"
                 data-testid="optimizer-enabled-switch"
               />
-              <Label className="text-sm">활성화</Label>
+              <Label htmlFor="optimizer-enabled" className="text-sm cursor-pointer">활성화</Label>
             </div>
 
             <Button

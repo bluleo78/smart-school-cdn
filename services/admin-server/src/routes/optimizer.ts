@@ -1,5 +1,6 @@
 // 최적화 프로파일 + 절감 통계 API 라우트
 import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
 import type { OptimizerClient } from '../grpc/optimizer_client.js';
 import type { DomainRepository } from '../db/domain-repo.js';
 
@@ -23,17 +24,14 @@ function normalizeHost(input: string): string {
  */
 const DOMAIN_RE = /^(\*\.)?[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/i;
 
-/** PUT /api/optimizer/profiles/:domain 요청 바디 스키마 */
-const profileBodySchema = {
-  type: 'object',
-  required: ['quality', 'max_width', 'enabled'],
-  properties: {
-    quality:   { type: 'integer', minimum: 1, maximum: 100 },
-    max_width: { type: 'integer', minimum: 0, maximum: 65535 },
-    enabled:   { type: 'boolean' },
-  },
-  additionalProperties: false,
-};
+/** PUT /api/optimizer/profiles/:domain 요청 바디 스키마 — zod 로 변경 (#361).
+ *  Fastify JSON-Schema 검증은 표준 envelope(#327) 매핑이 적용되지 않아 raw FST_ERR_VALIDATION 응답이
+ *  노출됐다. 다른 라우트와 동일하게 zod safeParse 패턴으로 통일. */
+const profileBodySchema = z.object({
+  quality:   z.number().int().min(1).max(100),
+  max_width: z.number().int().min(0).max(65535),
+  enabled:   z.boolean(),
+}).strict();
 
 /** 라우트 옵션 — domainRepo가 있으면 멤버십(등록 도메인) 검증에 사용 (#309) */
 interface OptimizerRouteOptions {
@@ -65,8 +63,7 @@ export async function optimizerRoutes(app: FastifyInstance, opts: OptimizerRoute
    */
   app.put<{
     Params: { domain: string };
-    Body: { quality: number; max_width: number; enabled: boolean };
-  }>('/api/optimizer/profiles/:domain', { schema: { body: profileBodySchema } }, async (req, reply) => {
+  }>('/api/optimizer/profiles/:domain', async (req, reply) => {
     const domain = normalizeHost(decodeURIComponent(req.params.domain));
     // 형식 검증 — 빈 문자열/메타문자/traversal 거부 (도메인 추가와 동일 메시지)
     if (!domain || !DOMAIN_RE.test(domain)) {
@@ -74,6 +71,15 @@ export async function optimizerRoutes(app: FastifyInstance, opts: OptimizerRoute
       return reply.status(400).send({
         error: 'invalid_domain',
         message: '유효하지 않은 도메인 형식입니다.',
+      });
+    }
+    // body 검증 (#361) — zod safeParse 로 표준 envelope 매핑
+    const parsed = profileBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.status(400).send({
+        error: 'invalid_input',
+        message: parsed.error.issues[0]?.message ?? '잘못된 입력입니다.',
+        issues: parsed.error.issues,
       });
     }
     // 멤버십 검증 — domainRepo가 주입된 경우에만 활성화 (테스트 호환성 유지)
@@ -87,7 +93,7 @@ export async function optimizerRoutes(app: FastifyInstance, opts: OptimizerRoute
         });
       }
     }
-    const { quality, max_width, enabled } = req.body;
+    const { quality, max_width, enabled } = parsed.data;
     await app.optimizerClient.setProfile({ domain, quality, max_width, enabled });
     return reply.status(204).send();
   });

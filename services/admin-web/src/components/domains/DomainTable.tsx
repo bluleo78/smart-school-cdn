@@ -237,10 +237,20 @@ export function DomainTable({
               aria-label="전체 선택"
             />
           </TableHead>
-          {/* 도메인 컬럼 — host 기준 정렬 지원. 클릭 시 asc/desc 토글, aria-sort로 현재 방향 표현 */}
+          {/* 도메인 컬럼 — host 기준 정렬 지원. 클릭 시 asc/desc 토글, aria-sort로 현재 방향 표현.
+           *  이슈 #224 — 키보드 접근: role=button + tabIndex + Enter/Space 핸들러로 마우스 없이 정렬 가능.
+           *  cursor-pointer 만으로는 키보드 흐름에서 발견 불가. */}
           <TableHead
-            className={onSortChange ? 'cursor-pointer select-none hover:text-foreground' : ''}
+            className={onSortChange ? 'cursor-pointer select-none hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring' : ''}
+            role={onSortChange ? 'button' : undefined}
+            tabIndex={onSortChange ? 0 : undefined}
             onClick={() => handleSort('host')}
+            onKeyDown={onSortChange ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                handleSort('host');
+              }
+            } : undefined}
             aria-sort={
               sortKey === 'host'
                 ? sortDir === 'asc'
