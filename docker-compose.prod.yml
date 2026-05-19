@@ -113,6 +113,8 @@ services:
       - INTERNAL_API_TOKEN=${INTERNAL_API_TOKEN}
       # 이슈 #391 — 동시 origin fetch 한도 (Semaphore). 한도 초과 시 503 Retry-After.
       - PROXY_MAX_CONCURRENT_ORIGIN_FETCH=64
+      # 이슈 #390 — coalescer broadcast 채널 capacity. 학교 규모에 맞춰 조정 (큰 학교 2048 권장).
+      - PROXY_COALESCE_CHANNEL_CAPACITY=1024
     # 이슈 #391 — proxy 컨테이너 메모리 한도. 대용량 in-flight 버퍼 폭주 시 컨테이너 자체가 격리되어
     # docker OOM-kill → restart unless-stopped 으로 자가 복구. host 영향 차단.
     mem_limit: 2g

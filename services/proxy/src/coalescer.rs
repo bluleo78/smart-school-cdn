@@ -1,12 +1,24 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
 use bytes::Bytes;
 use axum::http::StatusCode;
 use tokio::sync::broadcast;
 
-/// broadcast 채널 용량 — 동시 구독자가 이 수를 초과하면 Lagged 에러 발생
-/// CDN 캐시 미스 버스트 시나리오를 고려하여 256으로 설정
-const COALESCE_CHANNEL_CAPACITY: usize = 256;
+/// broadcast 채널 기본 용량 — 채널이 동시에 보관할 수 있는 미수신 메시지 최대 수.
+/// 정확하게는 "구독자 수" 한도가 아니라 "동시 in-flight 메시지" 한도이며, 현재 fetcher 가 단일 send 만
+/// 하므로 정상 흐름에서는 Lagged 가 발생하지 않는다. 다만 향후 multi-send 변경 또는 panic/재시도 경로가
+/// 추가될 경우 capacity 가 영향을 주므로, 학교 1교시 일제 시작 같은 burst 시나리오 대응 마진으로
+/// 256 → 1024 로 상향한다 (#390). 환경변수 PROXY_COALESCE_CHANNEL_CAPACITY 로 학교 규모에 맞춰 조정.
+const DEFAULT_COALESCE_CHANNEL_CAPACITY: usize = 1024;
+
+fn coalesce_channel_capacity() -> usize {
+    std::env::var("PROXY_COALESCE_CHANNEL_CAPACITY")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(DEFAULT_COALESCE_CHANNEL_CAPACITY)
+}
 
 use crate::CacheOutcome;
 
@@ -26,11 +38,32 @@ pub type CoalescedResponse = Arc<(
 /// 첫 번째 miss 요청이 Sender를 삽입하고 fetch 완료 후 결과를 broadcast
 pub struct Coalescer {
     in_flight: Mutex<HashMap<String, broadcast::Sender<Result<CoalescedResponse, ()>>>>,
+    capacity: usize,
+    /// #390 — Lagged 발생 누계. 운영자가 stats 로 폭주 빈도를 관찰해 PROXY_COALESCE_CHANNEL_CAPACITY 상향 판단에 사용.
+    lagged_count: AtomicU64,
 }
 
 impl Coalescer {
     pub fn new() -> Self {
-        Self { in_flight: Mutex::new(HashMap::new()) }
+        Self {
+            in_flight: Mutex::new(HashMap::new()),
+            capacity: coalesce_channel_capacity(),
+            lagged_count: AtomicU64::new(0),
+        }
+    }
+
+    /// 명시적 capacity 로 생성 — 테스트에서 작은 값으로 Lagged 시나리오 검증할 때 사용.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            in_flight: Mutex::new(HashMap::new()),
+            capacity: capacity.max(1),
+            lagged_count: AtomicU64::new(0),
+        }
+    }
+
+    /// Lagged 누계 (관찰용)
+    pub fn lagged_count(&self) -> u64 {
+        self.lagged_count.load(Ordering::Relaxed)
     }
 
     /// cache miss 발생 시 호출.
@@ -53,8 +86,8 @@ impl Coalescer {
                 // 이미 in-flight — 구독자로 등록
                 Some(sender.subscribe())
             } else {
-                // 첫 번째 miss — broadcast 채널 삽입
-                let (tx, _) = broadcast::channel(COALESCE_CHANNEL_CAPACITY);
+                // 첫 번째 miss — broadcast 채널 삽입 (env 로 조정 가능한 capacity #390)
+                let (tx, _) = broadcast::channel(self.capacity);
                 map.insert(key.clone(), tx);
                 None
             }
@@ -65,7 +98,9 @@ impl Coalescer {
             match rx.recv().await {
                 Ok(result) => result,
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                    tracing::warn!(key=%key, skipped=%n, "coalescer broadcast lagged — 502 반환");
+                    // #390 — Lagged 누계 카운트. 빈도가 높으면 capacity 상향 판단 근거.
+                    self.lagged_count.fetch_add(1, Ordering::Relaxed);
+                    tracing::warn!(key=%key, skipped=%n, "coalescer broadcast lagged — 502 반환 (#390: capacity 상향 검토)");
                     Err(())
                 }
                 Err(_) => Err(()), // sender drop (panic 등) → 에러 전파
@@ -166,6 +201,28 @@ mod tests {
 
         assert_eq!(call_count.load(Ordering::SeqCst), 1, "fetch_fn이 한 번만 호출되어야 한다");
         assert_eq!(res_a.0, res_b.0, "두 응답 body가 동일해야 한다");
+    }
+
+    // #390 — capacity tunability + lagged_count 관찰자 노출 검증.
+    // 실 운영에서는 fetcher 가 단일 send 만 하므로 정상 흐름에서 Lagged 가 발생하지 않는다.
+    // 하지만 향후 multi-send 변경(e.g. progress 이벤트) 또는 panic/재시도 경로 도입 시
+    // capacity 가 영향을 주므로 env 로 조정 가능한 구조 + 누적 카운터 관찰자를 유지한다.
+    #[tokio::test]
+    async fn capacity_is_configurable_and_lagged_count_starts_at_zero() {
+        let coalescer = Coalescer::with_capacity(2048);
+        assert_eq!(coalescer.lagged_count(), 0);
+        // 기본 capacity 와 다른 값으로 만들어졌는지는 직접 노출하지 않지만 broadcast 채널 동작 정상성으로 검증
+        let arc = Arc::new(coalescer);
+        let c = arc.clone();
+        let r = c.get_or_fetch("k".to_string(), || async {
+            Ok(Arc::new((
+                Bytes::from("ok"), None, StatusCode::OK,
+                CacheOutcome::Miss, vec![], vec![],
+            )))
+        }).await;
+        assert!(r.is_ok());
+        // 정상 흐름에서는 Lagged 발생 없음
+        assert_eq!(arc.lagged_count(), 0);
     }
 
     #[tokio::test]
