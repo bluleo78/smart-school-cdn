@@ -394,7 +394,47 @@ const userRepo = new UserRepository(db);
 // 덮어쓰던 회귀가 있었다. seedIfMissing 은 ON CONFLICT DO NOTHING 으로 기존 행을 보존한다.
 domainRepo.seedIfMissing('httpbin.org', 'https://httpbin.org');
 
-const app = Fastify({ logger: true });
+// 이슈 #366 — 구조화 로그.
+// - genReqId: 매 요청에 req.id 부여 (Fastify 기본 increment + crypto random fallback).
+// - requestIdHeader: 'x-request-id' 가 외부에서 들어오면 그대로 채택(트레이싱 체인), 응답에도 동일 헤더 에코.
+// - LOG_LEVEL / LOG_PRETTY 환경변수로 운영(JSON info) ↔ 개발(pretty debug) 분리.
+const logLevel = process.env.LOG_LEVEL ?? 'info';
+const useLogPretty = process.env.LOG_PRETTY === 'true';
+const app = Fastify({
+  logger: useLogPretty
+    ? { level: logLevel, transport: { target: 'pino-pretty' } }
+    : { level: logLevel },
+  // 외부 x-request-id 우선 채택. 없으면 Fastify 가 자체 ID 생성.
+  requestIdHeader: 'x-request-id',
+  // X-Request-Id 응답 헤더 노출 — 클라이언트가 같은 요청 로그를 찾을 수 있게.
+  disableRequestLogging: false,
+});
+
+// 응답 헤더에 x-request-id 에코 — 클라이언트가 trace 가능 (#366)
+app.addHook('onSend', async (req, reply) => {
+  reply.header('x-request-id', String(req.id));
+});
+
+// 표준 access log — onResponse 훅에서 단일 라인 출력 (#366).
+// url_template 은 routeOptions.url 로 path param 정규화 (/api/domains/:host 형태).
+// status/duration_ms/route_kind 라벨 표준화하여 카테고리별 집계 가능.
+app.addHook('onResponse', async (req, reply) => {
+  const url = req.url;
+  const routeKind: 'public' | 'auth' | 'internal' =
+    url.startsWith('/internal/') ? 'internal'
+    : url.startsWith('/api/auth/') ? 'auth'
+    :                                'public';
+  req.log.info({
+    req_id:        req.id,
+    method:        req.method,
+    url_template:  req.routeOptions?.url ?? url,
+    url,
+    status:        reply.statusCode,
+    duration_ms:   Math.round(reply.elapsedTime),
+    user_id:       req.user?.sub,
+    route_kind:    routeKind,
+  }, 'access');
+});
 
 // 쿠키 플러그인은 인증 훅이 req.cookies 를 읽으므로 훅 등록 이전에 register.
 await app.register(cookie);

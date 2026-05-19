@@ -29,11 +29,16 @@ export function registerErrorHandlers(app: FastifyInstance): void {
     } satisfies ApiError);
   });
 
-  // 일반 에러 핸들러 — Fastify schema validation / 미잡힌 throw 처리
+  // 일반 에러 핸들러 — Fastify schema validation / 미잡힌 throw 처리.
+  // 이슈 #366 — 모든 에러 경로에 표준 로그 필드(error_kind/route/req_id) 부여.
   app.setErrorHandler((err: FastifyError, req, reply) => {
+    const route = req.routeOptions?.url ?? req.url;
+
     // Fastify JSON Schema 검증 실패 (err.validation 배열 존재)
     if (err.validation) {
-      return reply.code(err.statusCode ?? 400).send({
+      const status = err.statusCode ?? 400;
+      req.log.warn({ error_kind: 'invalid_input', route, req_id: req.id, status }, 'validation error');
+      return reply.code(status).send({
         error: 'invalid_input',
         message: err.message,
         issues: err.validation,
@@ -42,12 +47,8 @@ export function registerErrorHandlers(app: FastifyInstance): void {
 
     // (#347) 잘못된 percent-encoding(`%`, `%2`, `%25` 등) 으로 라우트 핸들러 내부
     // decodeURIComponent 가 던진 URIError 는 클라이언트 입력 오류이므로 500이 아닌 400으로 표준화한다.
-    // Fastify 는 `%FF`/`%ZZ` 류 일부는 라우터 단계에서 FST_ERR_BAD_URL(400) 로 거부하지만,
-    // `%25`(literal `%`) 같은 값은 통과시킨 뒤 핸들러 내부 decodeURIComponent 에서
-    // URIError 가 발생한다. 모든 라우트의 decodeURIComponent 호출 지점에 try/catch 를
-    // 두는 대신 전역 핸들러에서 한 번에 표준 envelope(400 invalid_input) 로 변환한다.
-    // `err.name === 'URIError'` 도 같이 체크 — Fastify 가 에러를 래핑해도 name 은 보존된다.
     if (err instanceof URIError || err.name === 'URIError') {
+      req.log.warn({ error_kind: 'invalid_input', route, req_id: req.id, status: 400 }, 'URI decode error');
       return reply.code(400).send({
         error: 'invalid_input',
         message: '요청 경로의 인코딩이 올바르지 않습니다.',
@@ -57,18 +58,20 @@ export function registerErrorHandlers(app: FastifyInstance): void {
     // rate-limit 등 fastify 플러그인은 err.statusCode 를 명시한다.
     const status = err.statusCode ?? 500;
 
-    // 5xx — 서버 내부 오류는 로그를 남기고 메시지는 노출하되 code는 일반화
+    // 5xx — 서버 내부 오류는 error 레벨로 로그 + error_kind=internal_error
     if (status >= 500) {
-      req.log.error({ err }, 'unhandled error');
+      req.log.error({ err, error_kind: 'internal_error', route, req_id: req.id, status }, 'unhandled error');
       return reply.code(status).send({
         error: 'internal_error',
         message: err.message,
       } satisfies ApiError);
     }
 
-    // 4xx — err.code(예: FST_ERR_RATE_LIMIT)를 머신 코드로 사용, 메시지는 그대로
+    // 4xx — err.code(예: FST_ERR_RATE_LIMIT)를 머신 코드로 사용. error_kind 도 같은 값으로 통일.
+    const errorKind = err.code ?? 'request_error';
+    req.log.warn({ error_kind: errorKind, route, req_id: req.id, status }, '4xx error');
     return reply.code(status).send({
-      error: err.code ?? 'request_error',
+      error: errorKind,
       message: err.message,
     } satisfies ApiError);
   });
