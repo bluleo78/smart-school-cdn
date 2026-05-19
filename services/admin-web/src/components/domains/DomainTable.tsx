@@ -113,6 +113,37 @@ export function DomainTable({
       onSortChange(key, 'asc');
     }
   }
+
+  /**
+   * 이슈 #350 — 클라이언트 측 정렬 적용 도메인 배열.
+   * 서버는 'host' 정렬만 지원하므로 'requests'/'cache_hits'/'tls_expires' 는 여기서 재정렬.
+   * statsByHost / tlsExpiryByHost 를 lookup 해 NULL 안전 비교 (NULL 은 항상 마지막으로 보낸다).
+   */
+  const sortedDomains = (() => {
+    const base = domains ?? [];
+    if (!sortKey || sortKey === 'host') return base;  // 서버 정렬 사용
+    const dir = sortDir === 'desc' ? -1 : 1;
+    const getValue = (host: string): number | null => {
+      switch (sortKey) {
+        case 'requests':    return statsByHost?.get(host)?.requests ?? null;
+        case 'cache_hits':  return statsByHost?.get(host)?.edge_hit_rate ?? null;
+        case 'tls_expires': {
+          const iso = tlsExpiryByHost?.get(host);
+          return iso ? Date.parse(iso) : null;
+        }
+        default: return null;
+      }
+    };
+    return [...base].sort((a, b) => {
+      const va = getValue(a.host);
+      const vb = getValue(b.host);
+      // NULL 은 항상 뒤로 — 정보 없는 행을 상단에서 분리
+      if (va === null && vb === null) return 0;
+      if (va === null) return 1;
+      if (vb === null) return -1;
+      return (va - vb) * dir;
+    });
+  })();
   // 로딩 상태: 5행 스켈레톤
   if (isLoading) {
     return (
@@ -269,17 +300,21 @@ export function DomainTable({
           <TableHead>오리진</TableHead>
           <TableHead>상태</TableHead>
           {/* whitespace-nowrap — iPad portrait(810×1080) 등 좁은 viewport에서 헤더 텍스트가
-           *  음절 단위로 세로 wrap되어 헤더 높이가 폭주하는 현상 차단 (#266, #257 동일 패턴) */}
-          <TableHead className="text-right whitespace-nowrap">요청(24h)</TableHead>
-          <TableHead className="text-right whitespace-nowrap">캐시 히트</TableHead>
-          <TableHead className="whitespace-nowrap">TLS</TableHead>
+           *  음절 단위로 세로 wrap되어 헤더 높이가 폭주하는 현상 차단 (#266, #257 동일 패턴)
+           *  이슈 #350 — 요청(24h) / 캐시 히트 / TLS 정렬 가능. 클라이언트 측 정렬. */}
+          <SortableTh sortKey="requests" label="요청(24h)" align="right"
+                      currentKey={sortKey} currentDir={sortDir} onSort={handleSort} enabled={!!onSortChange} />
+          <SortableTh sortKey="cache_hits" label="캐시 히트" align="right"
+                      currentKey={sortKey} currentDir={sortDir} onSort={handleSort} enabled={!!onSortChange} />
+          <SortableTh sortKey="tls_expires" label="TLS"
+                      currentKey={sortKey} currentDir={sortDir} onSort={handleSort} enabled={!!onSortChange} />
           {/* 이슈 #290 — iPad portrait(810px) 등 좁은 viewport 에서 우측 가로 스크롤로 가려지는 문제 차단.
            *  sticky right-0 + bg-card 로 항상 노출. shadow 로 스크롤 가능 어포던스 제공. */}
           <TableHead className="text-right sticky right-0 bg-card shadow-[-4px_0_4px_-4px_rgba(0,0,0,0.1)]">액션</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
-        {domains.map((domain) => {
+        {sortedDomains.map((domain) => {
           const isEnabled = domain.enabled === 1;
           const isSelected = selectedHosts.has(domain.host);
           // 도메인별 캐시 통계 — by_domain[]에서 host 매칭. 데이터가 없으면 '—' 유지 (#346)
@@ -413,5 +448,47 @@ export function DomainTable({
         })}
       </TableBody>
     </Table>
+  );
+}
+
+/**
+ * 이슈 #350 — 정렬 가능 컬럼 헤더 (DRY).
+ * 클릭/Enter/Space 로 정렬 토글, aria-sort 표시, 키보드 포커스 링 (#224 패턴 재사용).
+ */
+function SortableTh({
+  sortKey, label, align, currentKey, currentDir, onSort, enabled,
+}: {
+  sortKey: string;
+  label: string;
+  align?: 'right';
+  currentKey?: string;
+  currentDir?: 'asc' | 'desc';
+  onSort: (key: string) => void;
+  enabled: boolean;
+}) {
+  const active = currentKey === sortKey;
+  const aria = active ? (currentDir === 'asc' ? 'ascending' : 'descending') : 'none';
+  const alignCls = align === 'right' ? 'text-right' : '';
+  const interactCls = enabled
+    ? 'cursor-pointer select-none hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+    : '';
+  return (
+    <TableHead
+      className={`whitespace-nowrap ${alignCls} ${interactCls}`}
+      role={enabled ? 'button' : undefined}
+      tabIndex={enabled ? 0 : undefined}
+      onClick={() => enabled && onSort(sortKey)}
+      onKeyDown={enabled ? (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onSort(sortKey);
+        }
+      } : undefined}
+      aria-sort={aria}
+      data-testid={`domain-col-${sortKey}`}
+    >
+      {label}{' '}
+      {active && <span aria-hidden="true">{currentDir === 'asc' ? '↑' : '↓'}</span>}
+    </TableHead>
   );
 }

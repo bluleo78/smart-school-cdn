@@ -344,11 +344,34 @@ export function DomainsPage() {
 
   /**
    * 정렬 헤더 클릭 핸들러 — DomainTable에서 컬럼/방향이 결정된 뒤 filter에 반영한다.
-   * 기존 q/enabled 필터는 그대로 유지하며 sort/order만 교체한다.
+   *
+   * 이슈 #350 — 클라이언트 측 정렬 키('requests'/'cache_hits'/'tls_expires')는 서버
+   * SORT_ALLOWED 화이트리스트에 없어 400 으로 거부된다. URL csort/corder 쿼리로 별도 보존하고
+   * filter.sort 에는 넣지 않는다. DomainTable 이 csort 기준으로 in-memory 정렬.
+   * 'host' 는 서버 정렬 유지 (filter.sort).
    */
+  const CLIENT_SORT_KEYS = new Set(['requests', 'cache_hits', 'tls_expires']);
   function handleSortChange(key: string, dir: 'asc' | 'desc') {
-    setFilter({ ...filter, sort: key, order: dir });
+    setSelectedHosts(new Set());
+    setSearchParams((prev) => {
+      const params = new URLSearchParams(prev);
+      if (CLIENT_SORT_KEYS.has(key)) {
+        // 서버 sort/order 제거 → admin-server 화이트리스트 400 방지
+        params.delete('sort'); params.delete('order');
+        params.set('csort', key); params.set('corder', dir);
+      } else {
+        params.delete('csort'); params.delete('corder');
+        params.set('sort', key); params.set('order', dir);
+      }
+      return params;
+    }, { replace: true });
   }
+
+  // 이슈 #350 — DomainTable 에 전달할 effective sort: 클라이언트 키 우선, 없으면 서버 키.
+  const csortKey = searchParams.get('csort');
+  const csortDir = searchParams.get('corder') as 'asc' | 'desc' | null;
+  const effectiveSortKey = csortKey ?? filter.sort;
+  const effectiveSortDir = (csortDir ?? filter.order) as 'asc' | 'desc' | undefined;
 
   // 선택된 호스트 (일괄 작업용)
   const [selectedHosts, setSelectedHosts] = useState<Set<string>>(new Set());
@@ -460,8 +483,8 @@ export function DomainsPage() {
               onClearSearch={() => setFilter({ ...filter, q: undefined })}
               // 필터 해제: enabled 파라미터만 제거하고 나머지 필터(q, sort, order)는 유지 (#126)
               onClearFilter={() => setFilter({ ...filter, enabled: undefined })}
-              sortKey={filter.sort}
-              sortDir={filter.order}
+              sortKey={effectiveSortKey}
+              sortDir={effectiveSortDir}
               onSortChange={handleSortChange}
               tlsExpiryByHost={tlsExpiryByHost}
               statsByHost={statsByHost}
