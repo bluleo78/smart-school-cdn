@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { UserRepository } from '../db/user-repo.js';
 import { hashPassword, verifyPassword } from '../auth/password.js';
 import { signSessionToken, SESSION_COOKIE_NAME, buildSessionCookieOptions } from '../auth/jwt.js';
+import { writeRateLimit } from '../rate-limit-config.js';
 
 // Task 4 와 동일한 permissive email 검증 — z.string().email() 의 strict 정책은
 // 단일 문자 TLD(예: a@b.c)를 거부해 내부망 호환성/테스트가 깨진다.
@@ -126,7 +127,7 @@ export const usersRoutes: FastifyPluginAsync<{ userRepo: UserRepository }> = asy
     return userRepo.list({ sort, order }).map(publicUser);
   });
 
-  app.post('/api/users', async (req, reply) => {
+  app.post('/api/users', { config: writeRateLimit() }, async (req, reply) => {  // #370 throttle
     const parsed = createSchema.safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid_input', issues: parsed.error.issues });
@@ -152,7 +153,7 @@ export const usersRoutes: FastifyPluginAsync<{ userRepo: UserRepository }> = asy
     }
   });
 
-  app.put<{ Params: { id: string } }>('/api/users/:id/password', async (req, reply) => {
+  app.put<{ Params: { id: string } }>('/api/users/:id/password', { config: writeRateLimit() }, async (req, reply) => {  // #370 throttle
     const parsed = passwordSchema.safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({ error: 'invalid_input' });
@@ -200,7 +201,7 @@ export const usersRoutes: FastifyPluginAsync<{ userRepo: UserRepository }> = asy
   });
 
   // 비활성화된 사용자를 재활성화 — disabled_at 을 NULL 로 초기화
-  app.put<{ Params: { id: string } }>('/api/users/:id/enable', async (req, reply) => {
+  app.put<{ Params: { id: string } }>('/api/users/:id/enable', { config: writeRateLimit() }, async (req, reply) => {  // #370 throttle
     const id = parseUserId(req.params.id, reply);
     if (id === null) return;
     const user = userRepo.findById(id);
@@ -215,7 +216,7 @@ export const usersRoutes: FastifyPluginAsync<{ userRepo: UserRepository }> = asy
     return { ok: true };
   });
 
-  app.delete<{ Params: { id: string } }>('/api/users/:id', async (req, reply) => {
+  app.delete<{ Params: { id: string } }>('/api/users/:id', { config: writeRateLimit() }, async (req, reply) => {  // #370 throttle
     const id = parseUserId(req.params.id, reply);
     if (id === null) return;
     // 자기 자신을 비활성화하면 즉시 시스템 락아웃 위험 → 막는다.

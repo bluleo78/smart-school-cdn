@@ -8,6 +8,7 @@ import { DomainStatsRepository } from '../db/domain-stats-repo.js';
 import type { StatsPeriod } from '../db/domain-stats-repo.js';
 import { OptimizationEventsRepository } from '../db/optimization-events-repo.js';
 import { ALLOWED_DECISIONS } from './optimization-events.js';
+import { writeRateLimit, WRITE_LIMIT_BURST_PER_MIN } from '../rate-limit-config.js';
 
 const PROXY_ADMIN_URL = process.env.PROXY_ADMIN_URL || 'http://localhost:8081';
 
@@ -430,9 +431,10 @@ export async function domainRoutes(
   /** origin 검증 실패 시 표시할 공통 에러 메시지 — POST/PUT/bulk 공유 */
   const ORIGIN_INVALID_MSG = '유효한 origin URL이 아닙니다. (예: https://example.com, 최대 2083자)';
 
-  /** 도메인 일괄 추가 — 성공한 각 도메인에 기본 최적화 프로파일 자동 생성 */
+  /** 도메인 일괄 추가 — 성공한 각 도메인에 기본 최적화 프로파일 자동 생성. throttle: 분당 30회 (#370) */
   app.post<{ Body: { domains?: Array<{ host: string; origin: string }> } }>(
     '/api/domains/bulk',
+    { config: writeRateLimit() },
     async (request, reply) => {
       const rawBody = request.body ?? {};
       const domains = Array.isArray(rawBody.domains) ? rawBody.domains : undefined;
@@ -532,6 +534,7 @@ export async function domainRoutes(
   /** 도메인 일괄 삭제 */
   app.delete<{ Body: { hosts?: string[] } }>(
     '/api/domains/bulk',
+    { config: writeRateLimit() },  // #370 throttle: 분당 30회
     async (request, reply) => {
       const rawHosts = request.body?.hosts;
       if (!Array.isArray(rawHosts) || rawHosts.length === 0) {
@@ -598,9 +601,10 @@ export async function domainRoutes(
     },
   );
 
-  /** 도메인 추가 (이미 있으면 origin 갱신) — 추가 성공 후 기본 최적화 프로파일 자동 생성 */
+  /** 도메인 추가 (이미 있으면 origin 갱신) — 추가 성공 후 기본 최적화 프로파일 자동 생성. throttle: 분당 60회 (#370) */
   app.post<{ Body: { host?: string; origin?: string } }>(
     '/api/domains',
+    { config: writeRateLimit(WRITE_LIMIT_BURST_PER_MIN) },
     async (request, reply) => {
       const rawBody = request.body ?? {};
       // host 정규화 — DNS case-insensitive 규약에 맞춰 lowercase 통일 (#201).
@@ -667,12 +671,12 @@ export async function domainRoutes(
     return domain;
   });
 
-  /** 도메인 편집 (origin, enabled, description) */
+  /** 도메인 편집 (origin, enabled, description). throttle: 분당 30회 (#370) */
   app.put<{
     Params: { host: string };
     // enabled는 0|1만 허용 — TypeScript 타입으로 좁혀 런타임 검증과 일관성 유지 (#156)
     Body: { origin?: string; enabled?: 0 | 1; description?: string };
-  }>('/api/domains/:host', async (request, reply) => {
+  }>('/api/domains/:host', { config: writeRateLimit() }, async (request, reply) => {
     const host = normalizeHost(decodeURIComponent(request.params.host));
     // (#192) host 단위 락으로 toggle과 직렬화 — PUT 중 toggle이 끼어들어 일관성이 깨지는 것을 방지
     return withHostLock(host, async () => {
@@ -739,7 +743,7 @@ export async function domainRoutes(
    * 또한 롤백을 `toggleEnabled` 재호출(invert)이 아닌 `update({enabled: original.enabled})`
    * 형태의 절대값 복원으로 변경 — 락이 없는 경계 케이스에서도 idempotent.
    */
-  app.post<{ Params: { host: string } }>('/api/domains/:host/toggle', async (request, reply) => {
+  app.post<{ Params: { host: string } }>('/api/domains/:host/toggle', { config: writeRateLimit() }, async (request, reply) => {  // #370 throttle
     const host = normalizeHost(decodeURIComponent(request.params.host));
     return withHostLock(host, async () => {
       // 롤백 시 절대값 복원을 위해 변경 전 enabled 값을 먼저 캡처
@@ -764,7 +768,7 @@ export async function domainRoutes(
   });
 
   /** 도메인 강제 동기화 — Proxy + TLS + DNS 서비스에 전체 목록 재전송 */
-  app.post<{ Params: { host: string } }>('/api/domains/:host/sync', async (request, reply) => {
+  app.post<{ Params: { host: string } }>('/api/domains/:host/sync', { config: writeRateLimit() }, async (request, reply) => {  // #370 throttle
     const host = normalizeHost(decodeURIComponent(request.params.host));
     const domain = domainRepo.findByHost(host);
     if (!domain) {
@@ -790,7 +794,7 @@ export async function domainRoutes(
   });
 
   /** 도메인 캐시 퍼지 — Proxy에 POST 요청 */
-  app.post<{ Params: { host: string } }>('/api/domains/:host/purge', async (request, reply) => {
+  app.post<{ Params: { host: string } }>('/api/domains/:host/purge', { config: writeRateLimit() }, async (request, reply) => {  // #370 throttle
     const host = normalizeHost(decodeURIComponent(request.params.host));
     const domain = domainRepo.findByHost(host);
     if (!domain) {
@@ -1229,7 +1233,7 @@ export async function domainRoutes(
   });
 
   /** 도메인 삭제 */
-  app.delete<{ Params: { host: string } }>('/api/domains/:host', async (request, reply) => {
+  app.delete<{ Params: { host: string } }>('/api/domains/:host', { config: writeRateLimit() }, async (request, reply) => {  // #370 throttle
     // URL 인코딩된 호스트 디코딩 (*.textbook.com → %2A.textbook.com으로 전달됨)
     const host = normalizeHost(decodeURIComponent(request.params.host));
     // (#192) host 단위 락으로 toggle/PUT과 직렬화 — 삭제 중 끼어든 토글이 사라진 도메인을 가리키는 race 방지

@@ -5,6 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import axios from 'axios';
 import https from 'https';
 import type { DomainRepository } from '../db/domain-repo.js';
+import { writeRateLimit, WRITE_LIMIT_BURST_PER_MIN } from '../rate-limit-config.js';
 
 /** Proxy 관리 API 기본 URL */
 const PROXY_ADMIN_URL = process.env.PROXY_ADMIN_URL || 'http://localhost:8081';
@@ -126,7 +127,7 @@ export async function proxyRoutes(app: FastifyInstance, opts: ProxyRouteOptions 
    */
   app.post<{
     Body: { domain: string; path: string; protocol?: 'http' | 'https' };
-  }>('/api/proxy/test', async (request, reply) => {
+  }>('/api/proxy/test', { config: writeRateLimit(WRITE_LIMIT_BURST_PER_MIN) }, async (request, reply) => {  // #370 throttle (외부 fetch 트리거)
     // 빈/누락/null 바디 가드 — request.body가 undefined·null이면 destructure가 TypeError를 throw하고
     // setErrorHandler가 5xx 셰이프({error:'internal_error', message})로 노출되어 내부 변수명(`domain` 등)이
     // 클라이언트에 새어나간다(#359 정보 노출). 다른 라우트(domains.ts)와 동일하게 `?? {}`로 가드하여

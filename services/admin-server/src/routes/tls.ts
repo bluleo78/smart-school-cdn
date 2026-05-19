@@ -4,6 +4,7 @@
 import type { FastifyInstance } from 'fastify';
 import axios from 'axios';
 import type { DomainRepository } from '../db/domain-repo.js';
+import { writeRateLimit } from '../rate-limit-config.js';
 
 const PROXY_HTTP_URL = process.env.PROXY_HTTP_URL || 'http://localhost:8080';
 const TIMEOUT_MS = 3000;
@@ -97,7 +98,7 @@ export async function tlsRoutes(app: FastifyInstance, opts: TlsRouteOptions = {}
    * 사용자에게 "성공"으로 표시되어 혼선을 만든다. 다른 `/:host` 라우트(sync/purge/toggle/DELETE)와
    * 일관되게 멤버십(`domainRepo.findByHost`) 검증을 추가하고, host 정규화도 동일하게 적용한다.
    */
-  app.post<{ Params: { host: string } }>('/api/tls/renew/:host', async (request, reply) => {
+  app.post<{ Params: { host: string } }>('/api/tls/renew/:host', { config: writeRateLimit() }, async (request, reply) => {  // #370 throttle (downstream gRPC 부담)
     const host = normalizeHost(decodeURIComponent(request.params.host));
     // 멤버십 검증 — domainRepo가 주입된 경우에만 활성화 (테스트 호환성 유지)
     if (domainRepo) {

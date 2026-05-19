@@ -2,6 +2,7 @@
 /// storage-service gRPC(50051)를 통해 캐시 통계/인기 콘텐츠/퍼지를 제공한다.
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { writeRateLimit } from '../rate-limit-config.js';
 
 // 캐시 퍼지 요청 본문 스키마 — type 화이트리스트 검증.
 // discriminatedUnion으로 'all' 외 임의 truthy 값이 purgeAll() 분기로 폴백되는 것을 차단한다 (#168).
@@ -201,7 +202,7 @@ export async function cacheRoutes(app: FastifyInstance) {
   });
 
   /** 캐시 퍼지 — URL / 도메인 / 전체 */
-  app.delete('/api/cache/purge', async (request, reply) => {
+  app.delete('/api/cache/purge', { config: writeRateLimit() }, async (request, reply) => {  // #370 throttle
     // zod 화이트리스트 검증 — 'url' | 'domain' | 'all' 외 값은 모두 400 거부.
     // 검증 전에는 임의 type 값이 마지막 else로 흘러 purgeAll()을 호출하던 결함이 있었다 (#168).
     const parsed = purgeBodySchema.safeParse(request.body);

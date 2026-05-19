@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { OptimizerClient } from '../grpc/optimizer_client.js';
 import type { DomainRepository } from '../db/domain-repo.js';
+import { writeRateLimit } from '../rate-limit-config.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -63,7 +64,7 @@ export async function optimizerRoutes(app: FastifyInstance, opts: OptimizerRoute
    */
   app.put<{
     Params: { domain: string };
-  }>('/api/optimizer/profiles/:domain', async (req, reply) => {
+  }>('/api/optimizer/profiles/:domain', { config: writeRateLimit() }, async (req, reply) => {  // #370 throttle
     const domain = normalizeHost(decodeURIComponent(req.params.domain));
     // 형식 검증 — 빈 문자열/메타문자/traversal 거부 (도메인 추가와 동일 메시지)
     if (!domain || !DOMAIN_RE.test(domain)) {
