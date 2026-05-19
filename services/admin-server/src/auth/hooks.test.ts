@@ -21,6 +21,8 @@ async function buildApp(): Promise<{ app: FastifyInstance; repo: UserRepository;
   app.addHook('preHandler', createRequireAuth(repo));
   app.addHook('preHandler', requireInternalToken);
   app.get('/api/health', async () => ({ ok: true }));
+  app.get('/api/health/live', async () => ({ ok: true }));
+  app.get('/api/health/ready', async () => ({ ok: true }));
   app.get('/api/protected', async () => ({ secret: 42 }));
   app.get('/internal/x', async () => ({ internal: true }));
   app.post('/api/auth/login', async () => ({ login: true }));
@@ -40,6 +42,16 @@ describe('auth hooks', () => {
 
   it('/api/health 는 인증 스킵', async () => {
     const r = await app.inject({ method: 'GET', url: '/api/health' });
+    expect(r.statusCode).toBe(200);
+  });
+
+  // 이슈 #369 — readiness/liveness 도 오케스트레이터 probe 호환을 위해 인증 스킵.
+  it('/api/health/live 는 인증 스킵 (#369)', async () => {
+    const r = await app.inject({ method: 'GET', url: '/api/health/live' });
+    expect(r.statusCode).toBe(200);
+  });
+  it('/api/health/ready 는 인증 스킵 (#369)', async () => {
+    const r = await app.inject({ method: 'GET', url: '/api/health/ready' });
     expect(r.statusCode).toBe(200);
   });
 

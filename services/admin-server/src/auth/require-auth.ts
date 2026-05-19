@@ -43,7 +43,10 @@ export function createRequireAuth(userRepo: UserRepository): preHandlerHookHandl
     const pathOnly = url.split('?', 1)[0];
     if (
       url.startsWith('/internal/') ||
+      // 이슈 #369 — health 엔드포인트는 모두 인증 미적용 (오케스트레이터 health probe 호환).
       pathOnly === '/api/health' ||
+      pathOnly === '/api/health/live' ||
+      pathOnly === '/api/health/ready' ||
       AUTH_SKIP_PATHS.has(pathOnly)
     ) {
       return;

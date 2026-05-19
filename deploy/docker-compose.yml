@@ -144,6 +144,13 @@ services:
         condition: service_healthy
       dns-service:
         condition: service_healthy
+    # 이슈 #369 — readiness 엔드포인트로 critical 의존성 검증.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:4001/api/health/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
     networks:
       - cdn-net
 

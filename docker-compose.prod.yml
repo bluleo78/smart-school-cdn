@@ -167,6 +167,14 @@ services:
         condition: service_healthy
       optimizer-service:
         condition: service_healthy
+    # 이슈 #369 — readiness 엔드포인트 — SQLite + critical 서비스(proxy/storage/tls/dns) 가용성 검증.
+    # 503 응답 시 docker compose 가 unhealthy 마킹 → admin-web depends_on 이 영향 받아 트래픽 우회.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:4001/api/health/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
     networks:
       - cdn-local
 

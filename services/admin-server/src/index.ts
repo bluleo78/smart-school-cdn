@@ -480,9 +480,56 @@ app.decorate('healthMonitor', new HealthMonitor({
   log: app.log,
 }));
 
-/** 헬스체크 엔드포인트 */
+/** 헬스체크 엔드포인트 — 이슈 #369
+ *
+ * - /api/health      : backward-compat (live 와 동일 응답). 외부 도구 호환 유지.
+ * - /api/health/live : liveness — 프로세스/이벤트 루프 살아있음만 확인. 인증 없음.
+ * - /api/health/ready: readiness — SQLite + 다운스트림 critical 서비스 가용성까지 검증.
+ *                       하나라도 실패 시 503, 응답 본문에 각 체크 결과 포함.
+ *
+ * 오케스트레이터(Docker/k8s) health probe 호환 — 모두 인증 우회 (require-auth.ts 화이트리스트).
+ */
 app.get('/api/health', async () => {
   return { status: 'ok' };
+});
+
+app.get('/api/health/live', async () => {
+  return { status: 'ok' };
+});
+
+app.get('/api/health/ready', async (_req, reply) => {
+  // 1) SQLite 즉시 응답 검증 — `SELECT 1`
+  let dbOk = false;
+  let dbError: string | null = null;
+  try {
+    const r = db.prepare('SELECT 1 AS one').get() as { one: number } | undefined;
+    dbOk = r?.one === 1;
+  } catch (err) {
+    dbError = err instanceof Error ? err.message : String(err);
+  }
+
+  // 2) Downstream critical 서비스 가용성 — HealthMonitor 캐시 (5초 stale 허용)
+  //    proxy/storage/tls/dns 4종을 critical 로 분류. optimizer 는 콘텐츠 최적화 전용이라
+  //    다운되어도 캐시 패스스루는 동작하므로 ready 판정에 포함하지 않는다.
+  const sys = app.healthMonitor.getSystemStatus();
+  const services = {
+    proxy:   sys.proxy.online,
+    storage: sys.storage.online,
+    tls:     sys.tls.online,
+    dns:     sys.dns.online,
+    optimizer: sys.optimizer.online, // 정보용 — ready 판정 제외
+  };
+  const criticalReady = services.proxy && services.storage && services.tls && services.dns;
+
+  const ready = dbOk && criticalReady;
+  const body = {
+    status: ready ? 'ready' : 'not_ready',
+    checks: {
+      db: { ok: dbOk, error: dbError },
+      services,
+    },
+  };
+  return reply.status(ready ? 200 : 503).send(body);
 });
 
 // 에러 응답 envelope 통일 (#175) — not-found / schema validation / 미잡힌 throw 정규화.
