@@ -43,13 +43,18 @@ export function DomainAlertBanner() {
   // alerts 가 비어있으면 렌더링 안함
   if (!data?.alerts || data.alerts.length === 0) return null;
 
-  // 타입별 호스트 목록 분리 — 각 타입의 도메인에 개별 링크를 제공하기 위함
-  const tlsHosts = data.alerts.filter((a) => a.type === 'tls_expiring').map((a) => a.host);
-  const syncHosts = data.alerts.filter((a) => a.type === 'sync_failed').map((a) => a.host);
+  // 타입별 분리 — host 단위 알림은 도메인 링크, system 알림(disk_high)은 별도 처리
+  const tlsHosts  = data.alerts.flatMap((a) => (a.type === 'tls_expiring' ? [a.host] : []));
+  const syncHosts = data.alerts.flatMap((a) => (a.type === 'sync_failed'  ? [a.host] : []));
+  // 이슈 #432 — storage 디스크 사용률 80% 초과 알림. 다건 emit 되지 않으므로 첫 건만 사용.
+  const diskAlert = data.alerts.find((a) => a.type === 'disk_high');
 
   const parts: string[] = [];
-  if (tlsHosts.length > 0) parts.push(`TLS 만료 임박 ${tlsHosts.length}건`);
+  if (tlsHosts.length > 0)  parts.push(`TLS 만료 임박 ${tlsHosts.length}건`);
   if (syncHosts.length > 0) parts.push(`동기화 실패 ${syncHosts.length}건`);
+  if (diskAlert && diskAlert.type === 'disk_high') {
+    parts.push(`디스크 사용률 ${diskAlert.usage_ratio}%`);
+  }
 
   // 이슈 #281 — 2단 구조로 위계 명확화.
   // 첫 줄: 아이콘 + '주의' + 카운트 요약 (font-medium, 시각 가중치 최상)
@@ -66,13 +71,22 @@ export function DomainAlertBanner() {
         <span className="font-medium">주의 · {parts.join(' · ')}</span>
       </div>
       {/* 둘째 줄: 도메인 링크 (보조 정보, 작은 글씨) */}
-      {(tlsHosts.length > 0 || syncHosts.length > 0) && (
+      {(tlsHosts.length > 0 || syncHosts.length > 0 || diskAlert) && (
         <div className="mt-1 pl-6 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs opacity-70">
           {tlsHosts.length > 0 && (
             <span><AlertLinks hosts={tlsHosts} /></span>
           )}
           {syncHosts.length > 0 && (
             <span><AlertLinks hosts={syncHosts} /></span>
+          )}
+          {diskAlert && diskAlert.type === 'disk_high' && (
+            <Link
+              to="/system"
+              className="underline underline-offset-2 hover:opacity-80"
+              data-testid="domain-alert-link-disk-high"
+            >
+              스토리지 상세
+            </Link>
           )}
         </div>
       )}

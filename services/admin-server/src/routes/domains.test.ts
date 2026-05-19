@@ -1594,6 +1594,67 @@ describe('GET /api/domains/summary — TLS 만료 임박 alerts', () => {
     expect(JSON.parse(res.body).alerts).toHaveLength(0);
   });
 
+  it('이슈 #432 — disk.usage_ratio ≥ 0.8 이면 disk_high alert를 포함한다 (백분율 노출)', async () => {
+    const repo = makeRepo();
+    const app = Fastify({ logger: false });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    app.decorate('tlsClient', mockTlsClient as any);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    app.decorate('dnsClient', mockDnsClient as any);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    app.decorate('optimizerClient', mockOptimizerClient as any);
+    // healthMonitor 모킹 — disk 사용률 83.4% 시나리오
+    app.decorate('healthMonitor', {
+      getSystemStatus: () => ({
+        proxy: { online: true, latency_ms: 0 },
+        storage: { online: true, latency_ms: 0 },
+        tls: { online: true, latency_ms: 0 },
+        dns: { online: true, latency_ms: 0 },
+        optimizer: { online: true, latency_ms: 0 },
+        disk: { used_bytes: 834, total_bytes: 1000, usage_ratio: 0.834 },
+      }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+    app.register(domainRoutes, { domainRepo: repo });
+
+    const res = await app.inject({ method: 'GET', url: '/api/domains/summary' });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    const diskAlert = body.alerts.find((a: { type: string }) => a.type === 'disk_high');
+    expect(diskAlert).toBeDefined();
+    expect(diskAlert.usage_ratio).toBe(83.4);
+    expect(diskAlert.used_bytes).toBe(834);
+    expect(diskAlert.total_bytes).toBe(1000);
+  });
+
+  it('이슈 #432 — disk.usage_ratio < 0.8 이면 disk_high alert를 포함하지 않는다', async () => {
+    const repo = makeRepo();
+    const app = Fastify({ logger: false });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    app.decorate('tlsClient', mockTlsClient as any);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    app.decorate('dnsClient', mockDnsClient as any);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    app.decorate('optimizerClient', mockOptimizerClient as any);
+    app.decorate('healthMonitor', {
+      getSystemStatus: () => ({
+        proxy: { online: true, latency_ms: 0 },
+        storage: { online: true, latency_ms: 0 },
+        tls: { online: true, latency_ms: 0 },
+        dns: { online: true, latency_ms: 0 },
+        optimizer: { online: true, latency_ms: 0 },
+        disk: { used_bytes: 500, total_bytes: 1000, usage_ratio: 0.5 },
+      }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+    app.register(domainRoutes, { domainRepo: repo });
+
+    const res = await app.inject({ method: 'GET', url: '/api/domains/summary' });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.alerts.find((a: { type: string }) => a.type === 'disk_high')).toBeUndefined();
+  });
+
   it('tls-service listCertificates 실패 시에도 summary는 200이고 alerts는 빈 배열이다', async () => {
     const repo = makeRepo();
     mockTlsClient.listCertificates.mockRejectedValueOnce(new Error('UNAVAILABLE'));

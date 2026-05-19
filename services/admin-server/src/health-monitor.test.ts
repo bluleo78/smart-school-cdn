@@ -26,6 +26,8 @@ function makeGrpcClient(overrides: Record<string, unknown> = {}) {
   return {
     health: vi.fn().mockResolvedValue({ online: true, latency_ms: 1 }),
     syncDomains: vi.fn().mockResolvedValue({ success: true }),
+    // 이슈 #432 — StorageWithStats 호환. storage 외 클라이언트도 동일 시그니처면 무해.
+    stats: vi.fn().mockResolvedValue({ used_bytes: 0, total_bytes: 0 }),
     ...overrides,
   };
 }
@@ -196,5 +198,69 @@ describe('HealthMonitor — proxy offline→online 전환 시 gRPC 도메인 syn
     await runTick(deps, true);
 
     expect(syncToProxy).toHaveBeenCalledOnce();
+  });
+});
+
+// ── #432 — storage 디스크 사용량 캐시 ───────────────────────────────────────
+describe('HealthMonitor — #432 disk usage cache', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  /** disk 검증 전용 monitor 생성 — storage stats 응답을 주입 */
+  async function tickWithStorage(opts: {
+    storageOnline?: boolean;
+    statsResult?: { used_bytes: number; total_bytes: number } | Error;
+  }) {
+    const { storageOnline = true, statsResult = { used_bytes: 0, total_bytes: 0 } } = opts;
+    vi.mocked(axios.get).mockResolvedValue({ data: { online: true, uptime: 0, request_count: 0 } });
+
+    const storageClient = makeGrpcClient({
+      health: vi.fn().mockResolvedValue({ online: storageOnline, latency_ms: 1 }),
+      stats: statsResult instanceof Error
+        ? vi.fn().mockRejectedValue(statsResult)
+        : vi.fn().mockResolvedValue(statsResult),
+    });
+    const deps = makeDeps();
+    const monitor = new HealthMonitor({
+      proxyAdminUrl: 'http://proxy:8081',
+      storageClient,
+      optimizerClient: makeGrpcClient(),
+      tlsClient: deps.tlsClient,
+      dnsClient: deps.dnsClient,
+      domainRepo: deps.repo,
+      log: deps.log as never,
+    });
+    await (monitor as unknown as { tick: () => Promise<void> }).tick();
+    return { monitor, storageClient };
+  }
+
+  it('storage.stats() 응답으로 usage_ratio 를 계산한다 (used/total)', async () => {
+    const { monitor } = await tickWithStorage({
+      statsResult: { used_bytes: 400, total_bytes: 1000 },
+    });
+    expect(monitor.getSystemStatus().disk).toEqual({
+      used_bytes: 400,
+      total_bytes: 1000,
+      usage_ratio: 0.4,
+    });
+  });
+
+  it('total_bytes=0 이면 usage_ratio=0 으로 안전 처리한다', async () => {
+    const { monitor } = await tickWithStorage({
+      statsResult: { used_bytes: 0, total_bytes: 0 },
+    });
+    expect(monitor.getSystemStatus().disk?.usage_ratio).toBe(0);
+  });
+
+  it('storage offline 이면 disk 는 null 이다', async () => {
+    const { monitor, storageClient } = await tickWithStorage({ storageOnline: false });
+    expect(monitor.getSystemStatus().disk).toBeNull();
+    // health 가 offline 이면 stats 자체를 호출하지 않는다 (불필요한 RPC 차단)
+    expect(storageClient.stats).not.toHaveBeenCalled();
+  });
+
+  it('storage online 이지만 stats() 가 실패하면 disk=null 로 fallback (시스템 상태는 유지)', async () => {
+    const { monitor } = await tickWithStorage({ statsResult: new Error('stats rpc fail') });
+    expect(monitor.getSystemStatus().disk).toBeNull();
+    expect(monitor.getSystemStatus().storage.online).toBe(true);
   });
 });

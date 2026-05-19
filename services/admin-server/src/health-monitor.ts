@@ -10,15 +10,29 @@ interface ServiceStatus { online: boolean; latency_ms: number }
 
 export interface ProxyStatus { online: boolean; uptime: number; request_count: number }
 
+/** 이슈 #432 — 디스크 사용량 캐시. storage.stats() 결과를 5초 주기로 캐시. */
+export interface DiskUsage {
+  used_bytes: number;
+  total_bytes: number;
+  /** 0.0 ~ 1.0. total_bytes=0 이면 0. */
+  usage_ratio: number;
+}
+
 export interface SystemStatus {
   proxy:     ServiceStatus;
   storage:   ServiceStatus;
   tls:       ServiceStatus;
   dns:       ServiceStatus;
   optimizer: ServiceStatus;
+  /** 이슈 #432 — storage 디스크 사용량. storage offline 시 null. */
+  disk:      DiskUsage | null;
 }
 
 interface GrpcClient { health: () => Promise<{ online: boolean; latency_ms: number }> }
+/** 이슈 #432 — storage stats() 추가 호출용 확장 인터페이스 */
+interface StorageWithStats extends GrpcClient {
+  stats: () => Promise<{ used_bytes: number; total_bytes: number }>;
+}
 
 /** syncDomains를 지원하는 gRPC 클라이언트 (tls-service, dns-service) */
 interface DomainEntry { host: string; origin: string }
@@ -28,7 +42,7 @@ interface SyncableGrpcClient extends GrpcClient {
 
 interface Deps {
   proxyAdminUrl:   string;
-  storageClient:   GrpcClient;
+  storageClient:   StorageWithStats;
   tlsClient:       SyncableGrpcClient;
   dnsClient:       SyncableGrpcClient;
   optimizerClient: GrpcClient;
@@ -40,6 +54,7 @@ const OFFLINE_PROXY:  ProxyStatus  = { online: false, uptime: 0, request_count: 
 const OFFLINE_SVC:    ServiceStatus = { online: false, latency_ms: -1 };
 const OFFLINE_SYSTEM: SystemStatus = {
   proxy: OFFLINE_SVC, storage: OFFLINE_SVC, tls: OFFLINE_SVC, dns: OFFLINE_SVC, optimizer: OFFLINE_SVC,
+  disk: null,
 };
 
 export class HealthMonitor {
@@ -128,9 +143,30 @@ export class HealthMonitor {
       measure(() => this.deps.optimizerClient.health()),
     ]);
 
+    // 이슈 #432 — storage 디스크 사용량 동시 폴링. storage offline 또는 stats 실패 시 null.
+    let disk: DiskUsage | null = null;
+    if (storage.online) {
+      try {
+        const s = await Promise.race([
+          this.deps.storageClient.stats(),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), TIMEOUT)),
+        ]);
+        const total = Number(s.total_bytes ?? 0);
+        const used  = Number(s.used_bytes  ?? 0);
+        disk = {
+          used_bytes:  used,
+          total_bytes: total,
+          usage_ratio: total > 0 ? used / total : 0,
+        };
+      } catch {
+        // stats 실패는 disk=null 로 fallback. health 와 무관하게 처리.
+      }
+    }
+
     this.systemStatus = {
       proxy: { online: proxyOnline, latency_ms: proxyLatency },
       storage, tls, dns, optimizer,
+      disk,
     };
   }
 }

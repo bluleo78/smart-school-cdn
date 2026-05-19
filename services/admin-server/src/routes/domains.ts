@@ -339,6 +339,21 @@ export async function domainRoutes(
       app.log.warn({ err }, '[summary] tls-service listCertificates 실패 — alerts 빈 배열로 대체');
     }
 
+    // 이슈 #432 — 디스크 사용률 80% 도달 시 disk_high alert 발행.
+    // HealthMonitor 가 5초 주기로 storage.stats() 폴링한 캐시 사용 (downstream 부담 없음).
+    type DiskAlert = { type: 'disk_high'; usage_ratio: number; used_bytes: number; total_bytes: number };
+    const diskAlerts: DiskAlert[] = [];
+    // healthMonitor 미장착 테스트 환경(decorator 미주입) 안전 가드 — disk 없음으로 처리
+    const disk = app.healthMonitor?.getSystemStatus().disk ?? null;
+    if (disk && disk.usage_ratio >= 0.8) {
+      diskAlerts.push({
+        type: 'disk_high',
+        usage_ratio: Math.round(disk.usage_ratio * 1000) / 10,  // 80.0 형태로 노출
+        used_bytes: disk.used_bytes,
+        total_bytes: disk.total_bytes,
+      });
+    }
+
     return {
       total,
       enabled,
@@ -351,7 +366,7 @@ export async function domainRoutes(
       hourlyRequests,
       hourlyCacheHitRate,
       hourlyBandwidth,
-      alerts: tlsAlerts,
+      alerts: [...tlsAlerts, ...diskAlerts],
     };
   });
 

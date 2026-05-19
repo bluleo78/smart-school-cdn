@@ -30,6 +30,7 @@ function allOnlineStatus(): SystemStatus {
     tls:       { online: true, latency_ms: 5 },
     dns:       { online: true, latency_ms: 2 },
     optimizer: { online: true, latency_ms: 4 },
+    disk: null, // 이슈 #432 — 디스크 사용량은 별도 테스트에서 검증, 기본은 null
   };
 }
 
