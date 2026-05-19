@@ -23,6 +23,8 @@ import {
   startTlsExpiryScanner,
   createSinksFromEnv,
 } from './tls-expiry-scanner.js';
+import { startSqliteMaintenance } from './sqlite-maintenance.js';
+import path from 'node:path';
 import { createStorageClient } from './grpc/storage_client.js';
 import { createTlsClient } from './grpc/tls_client.js';
 import { createDnsClient } from './grpc/dns_client.js';
@@ -51,7 +53,8 @@ if (!process.env.INTERNAL_API_TOKEN || process.env.INTERNAL_API_TOKEN.length < 3
 }
 
 // SQLite DB 초기화 — 앱 기동 시 1회 실행
-const db = new Database(process.env.DB_PATH || './data/admin.db');
+const dbPath = process.env.DB_PATH || './data/admin.db';
+const db = new Database(dbPath);
 
 // 운영 PRAGMA — 동시성·내구성·백업 안전성 균형
 // - WAL: 단일 라이터/다중 리더 동시성 향상 (SSE/스트림 + stats-collector 환경에서 SQLITE_BUSY 회피)
@@ -614,6 +617,13 @@ try {
     db,
     tlsClient,
     sinks: createSinksFromEnv(app.log),
+    log: app.log,
+  });
+  // 이슈 #368 — SQLite 유지보수: 1시간 주기 WAL checkpoint + 매일 새벽 4시 VACUUM INTO 백업 + 7일 보관.
+  // dbDir 기준으로 backups/ 하위에 admin-YYYYMMDD-HHmmss.db 산출. MAINTENANCE_HOUR / BACKUP_RETENTION_DAYS 로 조정.
+  startSqliteMaintenance({
+    db,
+    dbDir: path.dirname(dbPath),
     log: app.log,
   });
 } catch (err) {
