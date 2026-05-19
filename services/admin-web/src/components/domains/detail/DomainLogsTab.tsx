@@ -96,28 +96,26 @@ function DomainTrafficChartsSection({
         ) : !data ? (
           <Skeleton className="h-64 w-full" />
         ) : (
+          // 이슈 #265 — 외곽 카드 안에 동일 스타일 카드를 중첩하면 위계가 무너진다(§2.11.5).
+          // 내부 두 차트는 카드 스타일을 떼고 패널화: heading + body 만 유지.
           // 모바일(기본) 1열, 데스크톱(md 이상) 2열 — Tailwind mobile-first 순서 수정 (#85)
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2" data-testid="traffic-charts-grid">
-            <Card>
-              <CardHeader><CardTitle className="text-sm">요청 수 추이</CardTitle></CardHeader>
-              <CardContent>
-                <HitMissBarChart
-                  labels={data.timeseries.labels}
-                  hits={data.timeseries.hits}
-                  misses={data.timeseries.misses}
-                />
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader><CardTitle className="text-sm">대역폭 &amp; 응답 시간</CardTitle></CardHeader>
-              <CardContent>
-                <BandwidthResponseChart
-                  labels={data.timeseries.labels}
-                  bandwidth={data.timeseries.bandwidth}
-                  responseTime={data.timeseries.responseTime}
-                />
-              </CardContent>
-            </Card>
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2" data-testid="traffic-charts-grid">
+            <div className="space-y-2">
+              <h4 className="text-sm font-medium">요청 수 추이</h4>
+              <HitMissBarChart
+                labels={data.timeseries.labels}
+                hits={data.timeseries.hits}
+                misses={data.timeseries.misses}
+              />
+            </div>
+            <div className="space-y-2">
+              <h4 className="text-sm font-medium">대역폭 &amp; 응답 시간</h4>
+              <BandwidthResponseChart
+                labels={data.timeseries.labels}
+                bandwidth={data.timeseries.bandwidth}
+                responseTime={data.timeseries.responseTime}
+              />
+            </div>
           </div>
         )}
       </CardContent>
