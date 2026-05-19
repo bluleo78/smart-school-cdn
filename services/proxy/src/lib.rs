@@ -180,6 +180,11 @@ pub struct ProxyState {
     /// MISS 응답 후 optimize/compress/storage.put/L1 insert를 비동기로 분리할 때
     /// 2차 MISS가 같은 키로 들어와도 저장은 1번만 수행하도록 보장한다.
     pub save_tracker: save_tracker::SaveTracker,
+    /// 이슈 #391 — 동시 origin fetch 한도 (전역 Semaphore).
+    /// 100건의 대용량 fetch 가 동시에 일어나면 in-flight 응답 버퍼만으로 GB 단위 메모리를 점유해 OOM 위험.
+    /// 한도 초과 시 짧게 대기 후 503 Retry-After 를 반환해 origin/proxy 양쪽을 보호한다.
+    /// 기본값 64 — 학교 운영 환경의 모드라테 트래픽 가정. PROXY_MAX_CONCURRENT_ORIGIN_FETCH 로 조정.
+    pub origin_semaphore: Arc<tokio::sync::Semaphore>,
 }
 
 /// 관리 API 핸들러 상태
@@ -897,6 +902,27 @@ async fn proxy_handler(
 
         let coalesced = ps.coalescer.get_or_fetch(key.clone(), move || async move {
             let key_for_put = key_c;
+            // 이슈 #391 — 동시 origin fetch 한도 (Semaphore). 5s 까지 대기, 초과 시 503 폴백.
+            // coalescer fetch_fn 안에서 acquire 하므로 같은 키 후속 요청은 broadcast 로 결과 공유 → permit 낭비 없음.
+            // permit 변수를 fetch 종료(send + bytes()) 까지 유지해 in-flight 버퍼 점유가 한도에 정확히 반영되도록 한다.
+            let _permit = match tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                ps_c.origin_semaphore.clone().acquire_owned(),
+            ).await {
+                Ok(Ok(p)) => p,
+                _ => {
+                    tracing::warn!(url=%origin_url, "origin fetch 한도 초과 — 503 Retry-After 폴백");
+                    let body = Bytes::from_static(b"Origin fetch capacity exceeded, please retry");
+                    return Ok(std::sync::Arc::new((
+                        body,
+                        Some("text/plain".to_string()),
+                        axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                        CacheOutcome::BypassOther,
+                        Vec::new(),
+                        vec![("retry-after".to_string(), "5".to_string())],
+                    )));
+                }
+            };
             // 헤더 필터링 후 원본 요청 빌드
             // Range/If-Range는 제거해 origin에서 항상 full body를 받아온다
             // (클라이언트별 Range는 수신 후 슬라이싱으로 처리)
@@ -1281,6 +1307,22 @@ async fn proxy_handler(
     // ── non-GET: coalescer 미사용, 직접 원본 fetch ────────────────────
     let path_and_query = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
     let origin_url = format!("{}{}", origin, path_and_query);
+
+    // 이슈 #391 — non-GET origin fetch 도 동시성 한도 적용. 5s 안에 슬롯 못 받으면 503.
+    let _origin_permit = match tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        ps.origin_semaphore.clone().acquire_owned(),
+    ).await {
+        Ok(Ok(p)) => p,
+        _ => {
+            tracing::warn!(host=%host, url=%uri, "origin fetch 한도 초과 (non-GET) — 503 Retry-After");
+            return Response::builder()
+                .status(StatusCode::SERVICE_UNAVAILABLE)
+                .header("retry-after", "5")
+                .body(Body::from("Origin fetch capacity exceeded, please retry"))
+                .unwrap();
+        }
+    };
 
     let mut req_builder = client.request(method.clone(), &origin_url);
     for (key, value) in headers.iter() {
@@ -2701,6 +2743,7 @@ mod tests {
             events: None,
             text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6, max_bytes: 8_388_608 },
             save_tracker: save_tracker::SaveTracker::new(),
+            origin_semaphore: Arc::new(tokio::sync::Semaphore::new(64)),
         };
 
         let router = build_proxy_router(ps);
@@ -2759,6 +2802,7 @@ mod tests {
             events: None,
             text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6, max_bytes: 8_388_608 },
             save_tracker: save_tracker::SaveTracker::new(),
+            origin_semaphore: Arc::new(tokio::sync::Semaphore::new(64)),
         };
 
         let router = build_proxy_router(ps);
@@ -2816,6 +2860,7 @@ mod tests {
             events: None,
             text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6, max_bytes: 8_388_608 },
             save_tracker: save_tracker::SaveTracker::new(),
+            origin_semaphore: Arc::new(tokio::sync::Semaphore::new(64)),
         };
 
         let router = build_proxy_router(ps);
@@ -2876,6 +2921,7 @@ mod tests {
             events: None,
             text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6, max_bytes: 8_388_608 },
             save_tracker: save_tracker::SaveTracker::new(),
+            origin_semaphore: Arc::new(tokio::sync::Semaphore::new(64)),
         };
 
         let router = build_proxy_router(ps);
@@ -2963,6 +3009,7 @@ mod tests {
             events: None,
             text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6, max_bytes: 8_388_608 },
             save_tracker: save_tracker::SaveTracker::new(),
+            origin_semaphore: Arc::new(tokio::sync::Semaphore::new(64)),
         };
 
         let router = build_proxy_router(ps);
@@ -3197,6 +3244,7 @@ mod tests {
             events: None,
             text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6, max_bytes: 8_388_608 },
             save_tracker: save_tracker::SaveTracker::new(),
+            origin_semaphore: Arc::new(tokio::sync::Semaphore::new(64)),
         };
         let router = build_proxy_router(ps.clone());
         (ps, router)
@@ -3345,6 +3393,7 @@ mod tests {
             events: None,
             text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6, max_bytes: 8_388_608 },
             save_tracker: save_tracker::SaveTracker::new(),
+            origin_semaphore: Arc::new(tokio::sync::Semaphore::new(64)),
         };
 
         // 1차 요청: MISS — brotli 저장
@@ -3448,6 +3497,7 @@ mod tests {
             events: None,
             text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6, max_bytes: 8_388_608 },
             save_tracker: save_tracker::SaveTracker::new(),
+            origin_semaphore: Arc::new(tokio::sync::Semaphore::new(64)),
         };
 
         // 1차 MISS
@@ -3537,6 +3587,7 @@ mod tests {
             events: None,
             text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6, max_bytes: 8_388_608 },
             save_tracker: save_tracker::SaveTracker::new(),
+            origin_semaphore: Arc::new(tokio::sync::Semaphore::new(64)),
         };
 
         let router = build_proxy_router(ps);
@@ -3755,6 +3806,7 @@ mod tests {
             events: None,
             text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6, max_bytes: 8_388_608 },
             save_tracker: save_tracker::SaveTracker::new(),
+            origin_semaphore: Arc::new(tokio::sync::Semaphore::new(64)),
         };
 
         let shared = ps.shared.clone();
@@ -3839,6 +3891,7 @@ mod tests {
             events: None,
             text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6, max_bytes: 8_388_608 },
             save_tracker: save_tracker::SaveTracker::new(),
+            origin_semaphore: Arc::new(tokio::sync::Semaphore::new(64)),
         };
 
         let shared = ps.shared.clone();
@@ -4223,6 +4276,7 @@ mod tests {
             events: None,
             text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6, max_bytes: 8_388_608 },
             save_tracker: save_tracker::SaveTracker::new(),
+            origin_semaphore: Arc::new(tokio::sync::Semaphore::new(64)),
         };
 
         let router = build_proxy_router(ps.clone());
@@ -4307,6 +4361,7 @@ mod tests {
             events:       None,
             text_compress: TextCompressConfig { enabled: true, min_bytes: 1024, br_level: 6, gzip_level: 6, max_bytes: 8_388_608 },
             save_tracker: save_tracker::SaveTracker::new(),
+            origin_semaphore: Arc::new(tokio::sync::Semaphore::new(64)),
         };
 
         let router = build_proxy_router(ps);

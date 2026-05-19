@@ -94,6 +94,12 @@ services:
       - TLS_GRPC_URL=http://tls-service:50052
       - OPTIMIZER_GRPC_URL=http://optimizer-service:50054
       - RUST_LOG=info
+      # 이슈 #391 — 동시 origin fetch 한도 (Semaphore). 한도 초과 시 503 Retry-After.
+      - PROXY_MAX_CONCURRENT_ORIGIN_FETCH=64
+    # 이슈 #391 — proxy 컨테이너 메모리 한도. in-flight 버퍼 폭주 시 docker OOM-kill +
+    # restart unless-stopped 으로 자가 복구. host 영향 격리.
+    mem_limit: 2g
+    memswap_limit: 2g
     depends_on:
       optimizer-service:
         condition: service_healthy

@@ -139,6 +139,16 @@ async fn main() {
     // 태스크 핸들을 main 스코프에 유지하기 위해 변수로 바인딩 (선두 `_`로 unused 경고 억제)
     let _events_handle = events_pusher.handle;
 
+    // 이슈 #391 — 동시 origin fetch 한도. env PROXY_MAX_CONCURRENT_ORIGIN_FETCH (기본 64).
+    // 100건의 대용량 fetch 동시 폭주 → in-flight 버퍼만으로 GB 단위 점유 → OOM 차단.
+    let max_origin_concurrency = std::env::var("PROXY_MAX_CONCURRENT_ORIGIN_FETCH")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(64);
+    tracing::info!(max_origin_concurrency, "origin fetch 동시성 한도 적용 (#391)");
+    let origin_semaphore = Arc::new(tokio::sync::Semaphore::new(max_origin_concurrency));
+
     let ps = ProxyState {
         shared: shared_state.clone(),
         http_client,
@@ -154,6 +164,7 @@ async fn main() {
         text_compress: TextCompressConfig::from_env(),
         // Phase 16-1: MISS 백그라운드 저장 중복 차단 트래커
         save_tracker: proxy::save_tracker::SaveTracker::new(),
+        origin_semaphore,
     };
 
     let proxy_router = build_proxy_router(ps);
