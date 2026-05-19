@@ -1,17 +1,22 @@
 import { Routes, Route, Navigate, Link } from 'react-router';
+import { Suspense, lazy } from 'react';
 import { Toaster } from 'sonner';
 import { AppLayout } from './components/layout/AppLayout';
 import { RequireAuth } from './components/auth/RequireAuth';
 import { RequireSetup } from './components/auth/RequireSetup';
 import { RequireUnauth } from './components/auth/RequireUnauth';
-import { LoginPage } from './pages/LoginPage';
-import { SetupPage } from './pages/SetupPage';
-import { DashboardPage } from './pages/DashboardPage';
-import { DomainsPage } from './pages/DomainsPage';
-import { DomainDetailPage } from './pages/DomainDetailPage';
-import { DnsPage } from './pages/DnsPage';
-import { SystemPage } from './pages/SystemPage';
-import { UsersPage } from './pages/UsersPage';
+import { Skeleton } from './components/ui/skeleton';
+
+// 이슈 #357 — 라우트별 lazy import 로 초기 로딩 청크 분할. 단일 2.6MB 청크 → 라우트별 코드 분할.
+// AppLayout / RequireAuth 등 셸 컴포넌트는 즉시 필요하므로 정적 import 유지.
+const LoginPage        = lazy(() => import('./pages/LoginPage').then(m => ({ default: m.LoginPage })));
+const SetupPage        = lazy(() => import('./pages/SetupPage').then(m => ({ default: m.SetupPage })));
+const DashboardPage    = lazy(() => import('./pages/DashboardPage').then(m => ({ default: m.DashboardPage })));
+const DomainsPage      = lazy(() => import('./pages/DomainsPage').then(m => ({ default: m.DomainsPage })));
+const DomainDetailPage = lazy(() => import('./pages/DomainDetailPage').then(m => ({ default: m.DomainDetailPage })));
+const DnsPage          = lazy(() => import('./pages/DnsPage').then(m => ({ default: m.DnsPage })));
+const SystemPage       = lazy(() => import('./pages/SystemPage').then(m => ({ default: m.SystemPage })));
+const UsersPage        = lazy(() => import('./pages/UsersPage').then(m => ({ default: m.UsersPage })));
 
 /**
  * E2E 테스트 전용 컴포넌트 — 렌더 시 즉시 예외를 throw한다.
@@ -49,9 +54,20 @@ function NotFoundPage() {
   );
 }
 
+/** 페이지 lazy 로딩 fallback — 청크 다운로드 중 카드형 Skeleton 으로 레이아웃 점프 최소화 */
+function PageFallback() {
+  return (
+    <div className="space-y-4 p-4">
+      <Skeleton className="h-8 w-48" />
+      <Skeleton className="h-64 w-full" />
+    </div>
+  );
+}
+
 export function App() {
   return (
     <>
+      <Suspense fallback={<PageFallback />}>
       <Routes>
         {/* RequireUnauth 가드 — 이미 로그인된 상태에서 /login 직접 접근 시 리다이렉트 (#291) */}
         <Route element={<RequireUnauth />}>
@@ -80,6 +96,7 @@ export function App() {
           </Route>
         </Route>
       </Routes>
+      </Suspense>
       {/* 전역 토스트 — bottom-right, 성공=녹색 / 에러=빨강 */}
       <Toaster position="bottom-right" richColors closeButton />
     </>
