@@ -180,41 +180,63 @@ impl CacheLayer {
         }
     }
 
-    /// 캐시 조회 — HIT 시 (Bytes, content_type, body_br, cached_headers) 반환, MISS/만료 시 None
+    /// 캐시 조회 — HIT 시 (Bytes, content_type, body_br, cached_headers) 반환, MISS/만료 시 None.
+    /// 호환을 위해 기존 시그니처 유지: 내부적으로 allow_stale=false 로 get_with_stale 위임.
     pub async fn get(
         &self,
         key: &str,
     ) -> Option<(Bytes, Option<String>, Option<Bytes>, Vec<(String, String)>)> {
-        // 1단계: lock 안 — 인덱스 확인·수정만 수행, 경로만 추출
+        self.get_with_stale(key, false)
+            .await
+            .map(|(body, ct, br, hdrs, _is_stale, _exp)| (body, ct, br, hdrs))
+    }
+
+    /// 캐시 조회 (#388 stale-if-error) — `allow_stale=true` 일 때 만료 entry 도 삭제 없이 반환한다.
+    ///
+    /// 무엇을: 일반 GET 경로(allow_stale=false)는 기존 동작 유지 — 만료 entry 발견 시 디스크/인덱스 제거.
+    ///        SIE 폴백 경로(allow_stale=true)는 만료 entry 를 그대로 읽어 반환하고 `is_stale=true` 로 마킹.
+    /// 왜: origin 5xx/timeout 시 proxy 가 일시적으로 stale 사본을 서빙해 학교 수업 중단을 방지하기 위함.
+    ///     SIE window 검증은 proxy 가 expires_at + SWE_WINDOW 와 now 를 비교해 수행 — 여기서는 단순 보존/반환.
+    /// 반환: (body, content_type, body_br, cached_headers, is_stale, expires_at_unix_secs).
+    ///       expires_at 은 entry 가 만료 없음(None) 이면 0, 있으면 unix seconds.
+    pub async fn get_with_stale(
+        &self,
+        key: &str,
+        allow_stale: bool,
+    ) -> Option<(Bytes, Option<String>, Option<Bytes>, Vec<(String, String)>, bool, i64)> {
         enum LookupResult {
             Expired(PathBuf),
-            Hit(PathBuf, Option<String>, bool, Vec<(String, String)>),
+            Hit(PathBuf, Option<String>, bool, Vec<(String, String)>, bool, i64),
         }
 
         let result = {
             let mut index = self.index.lock().await;
             let entry = index.get_mut(key)?;
+            let expires_at_sec = entry.expires_at.map(|t| t.timestamp()).unwrap_or(0);
+            let is_expired = entry.is_expired();
 
-            if entry.is_expired() {
-                // 만료: 인덱스에서 제거 + 크기 업데이트
+            if is_expired && !allow_stale {
+                // 일반 경로 — 만료 entry 는 즉시 정리 (기존 동작)
                 let size = entry.size_bytes;
                 let path = self.cache_dir.join(key);
                 index.remove(key);
                 self.current_size.fetch_sub(size, Ordering::Relaxed);
                 LookupResult::Expired(path)
             } else {
-                // HIT: 통계 갱신
-                entry.hit_count += 1;
-                entry.accessed_at = Utc::now();
+                // HIT (정상) 또는 SIE 폴백 (만료 보존) — 통계는 정상 HIT 일 때만 갱신해 stale 서빙이
+                // 인기 콘텐츠 통계를 오염시키지 않게 한다.
+                if !is_expired {
+                    entry.hit_count += 1;
+                    entry.accessed_at = Utc::now();
+                }
                 let content_type = entry.content_type.clone();
                 let has_br = entry.has_br;
                 let cached_headers = entry.cached_headers.clone();
                 let path = self.cache_dir.join(key);
-                LookupResult::Hit(path, content_type, has_br, cached_headers)
+                LookupResult::Hit(path, content_type, has_br, cached_headers, is_expired, expires_at_sec)
             }
-        }; // lock 해제
+        };
 
-        // 2단계: lock 밖 — 디스크 I/O 수행
         match result {
             LookupResult::Expired(path) => {
                 let _ = tokio::fs::remove_file(&path).await;
@@ -222,17 +244,16 @@ impl CacheLayer {
                 let _ = tokio::fs::remove_file(self.cache_dir.join(format!("{key}.{HEADERS_SIDECAR_EXT}"))).await;
                 None
             }
-            LookupResult::Hit(path, content_type, has_br, cached_headers) => {
+            LookupResult::Hit(path, content_type, has_br, cached_headers, is_stale, expires_at_sec) => {
                 match tokio::fs::read(&path).await {
                     Ok(data) => {
-                        // body_br 파일 읽기 (없으면 None)
                         let body_br = if has_br {
                             let br_path = path.with_extension("br");
                             tokio::fs::read(&br_path).await.ok().map(Bytes::from)
                         } else {
                             None
                         };
-                        Some((Bytes::from(data), content_type, body_br, cached_headers))
+                        Some((Bytes::from(data), content_type, body_br, cached_headers, is_stale, expires_at_sec))
                     }
                     Err(_) => {
                         // Fix 3: 디스크 파일 없으면 stale 인덱스 제거
@@ -744,6 +765,44 @@ mod tests {
         // Duration(0)은 즉시 만료
         let result = cache.get(&key).await;
         assert!(result.is_none());
+    }
+
+    // 이슈 #388 — allow_stale=true 일 때 만료 entry 도 삭제 없이 반환되고 is_stale 마킹.
+    #[tokio::test]
+    async fn get_with_stale_returns_expired_entry_when_allow_stale() {
+        let tmp = TempDir::new().unwrap();
+        let cache = make_cache(&tmp, 10 * 1024 * 1024);
+        let key = compute_cache_key("GET", "example.com", "/sie", "");
+
+        cache.put(
+            &key, "https://example.com/sie", "example.com",
+            Some("text/plain".to_string()),
+            Bytes::from("stale body"),
+            Some(Duration::from_secs(0)),  // 즉시 만료
+            None,
+            vec![],
+        ).await;
+
+        // 일반 GET — 만료 entry 제거 후 None
+        // (참고: get() 자체가 만료를 정리하므로 별도 호출 없이 with_stale 만 검증)
+
+        // allow_stale=true — 만료 entry 보존 + is_stale=true
+        let result = cache.get_with_stale(&key, true).await;
+        assert!(result.is_some(), "allow_stale=true 면 만료 entry 도 반환되어야 한다");
+        let (body, _ct, _br, _hdrs, is_stale, expires_at) = result.unwrap();
+        assert_eq!(body, Bytes::from("stale body"));
+        assert!(is_stale, "만료 entry 는 is_stale=true");
+        assert!(expires_at > 0, "expires_at 은 unix seconds 로 반환");
+
+        // 정상 entry (만료 없음) 는 is_stale=false 로 반환
+        let key2 = compute_cache_key("GET", "example.com", "/fresh", "");
+        cache.put(
+            &key2, "https://example.com/fresh", "example.com", None,
+            Bytes::from("fresh"), None, None, vec![],
+        ).await;
+        let fresh = cache.get_with_stale(&key2, true).await.unwrap();
+        assert!(!fresh.4, "만료 없는 entry 는 is_stale=false");
+        assert_eq!(fresh.5, 0, "만료 없음 entry 는 expires_at=0");
     }
 
     #[tokio::test]

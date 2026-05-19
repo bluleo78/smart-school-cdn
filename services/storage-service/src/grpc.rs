@@ -26,11 +26,12 @@ pub struct StorageGrpc {
 
 #[tonic::async_trait]
 impl StorageService for StorageGrpc {
-    /// 캐시 조회 — HIT 시 body/content_type/body_br/cached_headers 반환, MISS 시 hit=false
+    /// 캐시 조회 — HIT 시 body/content_type/body_br/cached_headers 반환, MISS 시 hit=false.
+    /// 이슈 #388 — allow_stale=true 일 때 만료 사본도 삭제 없이 반환하고 is_stale 마킹.
     async fn get(&self, req: Request<GetRequest>) -> Result<Response<GetResponse>, Status> {
-        let key = req.into_inner().key;
-        match self.cache.get(&key).await {
-            Some((body, ct, body_br, cached_headers)) => Ok(Response::new(GetResponse {
+        let r = req.into_inner();
+        match self.cache.get_with_stale(&r.key, r.allow_stale).await {
+            Some((body, ct, body_br, cached_headers, is_stale, expires_at)) => Ok(Response::new(GetResponse {
                 hit: true,
                 body: body.to_vec(),
                 content_type: ct.unwrap_or_default(),
@@ -39,6 +40,8 @@ impl StorageService for StorageGrpc {
                     .into_iter()
                     .map(|(name, value)| HeaderEntry { name, value })
                     .collect(),
+                is_stale,
+                expires_at,
             })),
             None => Ok(Response::new(GetResponse {
                 hit: false,
@@ -46,6 +49,8 @@ impl StorageService for StorageGrpc {
                 content_type: String::new(),
                 body_br: vec![],
                 cached_headers: vec![],
+                is_stale: false,
+                expires_at: 0,
             })),
         }
     }
@@ -212,7 +217,7 @@ mod tests {
     async fn get_miss_시_hit_false를_반환한다() {
         let (grpc, _dir) = make_grpc();
         let res = grpc
-            .get(Request::new(GetRequest { key: "missing_key".to_string() }))
+            .get(Request::new(GetRequest { key: "missing_key".to_string(), allow_stale: false }))
             .await
             .unwrap()
             .into_inner();
@@ -240,7 +245,7 @@ mod tests {
 
         // 조회
         let res = grpc
-            .get(Request::new(GetRequest { key: "k1".to_string() }))
+            .get(Request::new(GetRequest { key: "k1".to_string(), allow_stale: false }))
             .await
             .unwrap()
             .into_inner();
@@ -273,7 +278,7 @@ mod tests {
         .unwrap();
 
         let res = grpc
-            .get(Request::new(GetRequest { key: "k2".to_string() }))
+            .get(Request::new(GetRequest { key: "k2".to_string(), allow_stale: false }))
             .await
             .unwrap()
             .into_inner();
@@ -374,9 +379,7 @@ mod tests {
             cached_headers: vec![],
         })).await.unwrap();
 
-        let res = grpc.get(Request::new(GetRequest {
-            key: "k-br".to_string(),
-        })).await.unwrap().into_inner();
+        let res = grpc.get(Request::new(GetRequest { key: "k-br".to_string(), allow_stale: false })).await.unwrap().into_inner();
 
         assert!(res.hit);
         assert_eq!(res.body, b"<!DOCTYPE html>...original...");
@@ -398,9 +401,7 @@ mod tests {
             cached_headers: vec![],
         })).await.unwrap();
 
-        let res = grpc.get(Request::new(GetRequest {
-            key: "k-nobr".to_string(),
-        })).await.unwrap().into_inner();
+        let res = grpc.get(Request::new(GetRequest { key: "k-nobr".to_string(), allow_stale: false })).await.unwrap().into_inner();
 
         assert!(res.hit);
         assert_eq!(res.body, b"PNG_DATA");
@@ -430,9 +431,7 @@ mod tests {
             ],
         })).await.unwrap();
 
-        let res = grpc.get(Request::new(GetRequest {
-            key: "k-hdr".to_string(),
-        })).await.unwrap().into_inner();
+        let res = grpc.get(Request::new(GetRequest { key: "k-hdr".to_string(), allow_stale: false })).await.unwrap().into_inner();
 
         assert!(res.hit);
         assert_eq!(res.cached_headers.len(), 2);

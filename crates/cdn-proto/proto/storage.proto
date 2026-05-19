@@ -18,13 +18,22 @@ message HeaderEntry {
   string value = 2;
 }
 
-message GetRequest  { string key = 1; }
+// 이슈 #388 stale-if-error — allow_stale=true 일 때 만료 entry 도 삭제 없이 반환한다.
+// proxy 가 origin 5xx/timeout 폴백 경로에서만 true 로 설정. 기본 false (호환).
+message GetRequest  {
+  string key         = 1;
+  bool   allow_stale = 2;
+}
 message GetResponse {
   bool   hit          = 1;
   bytes  body         = 2;
   string content_type = 3;
   bytes  body_br      = 4;  // Phase 15: Brotli 프리컴프레스 변형 (없으면 빈 bytes)
   repeated HeaderEntry cached_headers = 5;  // Phase 20: 저장된 원본 응답 헤더 (없으면 빈 배열)
+  // 이슈 #388 — allow_stale=true 로 반환된 만료 사본이면 true. proxy 가 Warning: 110 부착 판단에 사용.
+  bool   is_stale     = 6;
+  // 이슈 #388 — entry 의 만료 시각 (unix seconds). 0 이면 만료 없음. proxy 가 SWE window 검사에 사용.
+  int64  expires_at   = 7;
 }
 
 message PutRequest {

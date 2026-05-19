@@ -210,6 +210,63 @@ const DEFAULT_TTL: Duration = Duration::from_secs(3600);
 // L1 캐시가 L2 캐시보다 작은 상한을 갖도록 한다.
 const MAX_CACHE_ENTRY_BYTES: u64 = 128 * 1024 * 1024;
 
+/// 이슈 #388 stale-if-error — origin 장애 시 만료된 캐시 사본을 일시 서빙할 수 있는 추가 윈도우 (초).
+/// expires_at + SIE_WINDOW > now 인 경우에만 stale 사본을 200 응답으로 회신.
+/// 기본 3600초 (1시간) — RFC 5861 권장 범위. env PROXY_STALE_IF_ERROR_SECS 로 조정.
+fn stale_if_error_window_secs() -> i64 {
+    std::env::var("PROXY_STALE_IF_ERROR_SECS")
+        .ok()
+        .and_then(|s| s.parse::<i64>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(3600)
+}
+
+/// 이슈 #388 — origin 5xx/timeout 시 만료된 캐시 사본을 SIE window 안에서 일시 서빙.
+/// 무엇을: storage 에서 allow_stale=true 로 GET → expires_at + SIE_WINDOW > now 검증 → coalescer 응답으로 변환.
+/// 응답 헤더: RFC 7234 §5.5 'Warning: 110 - "Response is stale"' + 'X-Cache-Stale: true' 부착.
+/// decision: 'served_stale_if_error' (옵저버빌리티). outcome 은 BypassOther 로 분류해 일반 HIT 통계에서 분리.
+/// 반환: 사용 가능 stale 사본이면 Some(CoalescedResponse), 없거나 window 초과면 None.
+async fn try_serve_stale(
+    ps: &ProxyState,
+    key: &str,
+) -> Option<coalescer::CoalescedResponse> {
+    let mut storage = ps.storage.lock().await;
+    let (body, ct, body_br, mut cached_headers, is_stale, expires_at) =
+        storage.get_with_stale(key, true).await?;
+    drop(storage);
+    // SIE window 검증 — expires_at=0 (만료 없음) 이면 사실 정상 HIT 이므로 그대로 사용.
+    // 만료 사본이면 now <= expires_at + SIE_WINDOW 만 허용.
+    if is_stale {
+        let now = chrono::Utc::now().timestamp();
+        let window = stale_if_error_window_secs();
+        if expires_at <= 0 || now > expires_at + window {
+            tracing::info!(key=%key, expires_at, now, window, "stale 사본이 SIE window 초과 — 폴백 불가");
+            return None;
+        }
+        tracing::info!(key=%key, expires_at, "stale-if-error 폴백 — 만료 사본 서빙 (#388)");
+    }
+    // Warning + X-Cache-Stale 헤더를 passthrough_headers 로 부착 (응답 빌더가 그대로 전달).
+    let mut passthrough = vec![
+        ("warning".to_string(), r#"110 - "Response is stale""#.to_string()),
+        ("x-cache-stale".to_string(), "true".to_string()),
+    ];
+    // brotli 변형이 있으면 캐시된 헤더에 content-encoding 정보가 들어가야 정상적으로 협상되지만
+    // 단순화를 위해 brotli 변형은 사용하지 않고 identity 만 반환 (stale 폴백은 단발성이라 가벼움 우선).
+    let _ = body_br;
+    // cached_headers 안의 cache-control 은 그대로 두되 must-revalidate 가 있으면 그대로 통과.
+    cached_headers.retain(|(name, _)| name != "warning" && name != "x-cache-stale");
+    passthrough.append(&mut Vec::new()); // (의도) 향후 헤더 확장 자리
+
+    Some(std::sync::Arc::new((
+        body,
+        ct,
+        axum::http::StatusCode::OK,
+        CacheOutcome::BypassOther,
+        cached_headers,
+        passthrough,
+    )))
+}
+
 // ─── Phase 20: 응답 헤더 포워딩 정책 ─────────────────────────────────
 
 /// 캐시 엔트리에 저장하고 HIT/MISS 응답 모두에서 복원할 헤더 (소문자).
@@ -942,13 +999,27 @@ async fn proxy_handler(
             let origin_resp = match req_builder.body(body_bytes_c).send().await {
                 Ok(r) => r,
                 Err(err) => {
-                    tracing::error!(error=%err, url=%origin_url, "원본 서버 연결 실패");
+                    tracing::error!(error=%err, url=%origin_url, "원본 서버 연결 실패 — stale-if-error 시도 (#388)");
+                    // #388 stale-if-error — origin 연결 실패. 만료 사본이 SIE window 내라면 일시 서빙.
+                    if let Some(stale) = try_serve_stale(&ps_c, &key_for_put).await {
+                        return Ok(stale);
+                    }
                     return Err(());
                 }
             };
 
             let status = origin_resp.status();
             let resp_headers = origin_resp.headers().clone();
+
+            // #388 stale-if-error — origin 이 5xx 로 응답한 경우에도 stale 폴백 시도.
+            // 4xx 는 origin 의 의도된 클라이언트 에러라 폴백 부적절(예: 403/404 가 stale 200 으로 가려지면 안됨).
+            if status.is_server_error() {
+                tracing::warn!(status=%status.as_u16(), url=%origin_url, "원본 5xx — stale-if-error 시도 (#388)");
+                if let Some(stale) = try_serve_stale(&ps_c, &key_for_put).await {
+                    return Ok(stale);
+                }
+                // stale 없으면 원본 5xx 그대로 진행 (기존 동작)
+            }
 
             // Phase 20: 헤더 포워딩/보안 플래그 계산
             let cached_headers      = extract_cacheable_headers(&resp_headers);
@@ -1947,6 +2018,8 @@ mod tests {
                     content_type: ct.clone(),
                     body_br: br.clone(),
                     cached_headers: vec![],
+                    is_stale: false,
+                    expires_at: 0,
                 })),
                 None => Ok(tonic::Response::new(GetResponse {
                     hit: false,
@@ -1954,6 +2027,8 @@ mod tests {
                     content_type: String::new(),
                     body_br: vec![],
                     cached_headers: vec![],
+                    is_stale: false,
+                    expires_at: 0,
                 })),
             }
         }

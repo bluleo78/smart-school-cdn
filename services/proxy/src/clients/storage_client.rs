@@ -29,12 +29,28 @@ impl StorageClient {
         })
     }
 
-    /// 캐시 조회 — HIT 시 (body, content_type, body_br, cached_headers) 반환
+    /// 캐시 조회 — HIT 시 (body, content_type, body_br, cached_headers) 반환.
+    /// 호환을 위해 기존 시그니처 유지 — 내부적으로 allow_stale=false 로 get_with_stale 위임.
     pub async fn get(
         &mut self,
         key: &str,
     ) -> Option<(Bytes, Option<String>, Option<Bytes>, Vec<(String, String)>)> {
-        let resp = self.inner.get(GetRequest { key: key.to_string() }).await.ok()?.into_inner();
+        self.get_with_stale(key, false)
+            .await
+            .map(|(body, ct, br, hdrs, _is_stale, _exp)| (body, ct, br, hdrs))
+    }
+
+    /// 캐시 조회 (#388 stale-if-error) — `allow_stale=true` 일 때 만료 사본도 반환한다.
+    /// 반환: (body, content_type, body_br, cached_headers, is_stale, expires_at_unix_secs).
+    pub async fn get_with_stale(
+        &mut self,
+        key: &str,
+        allow_stale: bool,
+    ) -> Option<(Bytes, Option<String>, Option<Bytes>, Vec<(String, String)>, bool, i64)> {
+        let resp = self.inner.get(GetRequest {
+            key: key.to_string(),
+            allow_stale,
+        }).await.ok()?.into_inner();
         if resp.hit {
             let ct = if resp.content_type.is_empty() { None } else { Some(resp.content_type) };
             let br = if resp.body_br.is_empty() { None } else { Some(Bytes::from(resp.body_br)) };
@@ -43,7 +59,7 @@ impl StorageClient {
                 .into_iter()
                 .map(|h| (h.name, h.value))
                 .collect();
-            Some((Bytes::from(resp.body), ct, br, cached_headers))
+            Some((Bytes::from(resp.body), ct, br, cached_headers, resp.is_stale, resp.expires_at))
         } else {
             None
         }
