@@ -38,6 +38,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let cache = Arc::new(cache::CacheLayer::new(cache_dir, max_bytes));
 
+    // 이슈 #389 — 디스크 임계 모니터 + 자동 evict.
+    // 5분 주기 (STORAGE_EVICT_INTERVAL_SECS), hard 90% 도달 시 LRU 로 75% 까지 evict.
+    // 임계 환경변수: STORAGE_EVICT_HARD_RATIO (0.9), STORAGE_EVICT_TARGET_RATIO (0.75).
+    // 임계 미달 시 no-op. evict 진행 시 tracing::warn 로 운영 가시성 확보.
+    let evict_cache = cache.clone();
+    let evict_interval_secs: u64 = std::env::var("STORAGE_EVICT_INTERVAL_SECS")
+        .ok().and_then(|s| s.parse().ok()).unwrap_or(300);
+    let hard_ratio: f32 = std::env::var("STORAGE_EVICT_HARD_RATIO")
+        .ok().and_then(|s| s.parse().ok()).filter(|v: &f32| *v > 0.0 && *v <= 1.0).unwrap_or(0.9);
+    let target_ratio: f32 = std::env::var("STORAGE_EVICT_TARGET_RATIO")
+        .ok().and_then(|s| s.parse().ok()).filter(|v: &f32| *v > 0.0 && *v < hard_ratio).unwrap_or(0.75);
+    tracing::info!(evict_interval_secs, hard_ratio, target_ratio, "[#389] 디스크 임계 evict 태스크 시작");
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(evict_interval_secs));
+        // 첫 tick 즉시 발사 후 주기 반복
+        loop {
+            interval.tick().await;
+            let usage = evict_cache.usage_ratio();
+            if usage >= 0.8 {
+                tracing::warn!(usage = format!("{:.1}%", usage * 100.0), "[#389] 디스크 사용률 80% 도달 (soft 알림)");
+            }
+            let freed = evict_cache.evict_to_ratio(hard_ratio, target_ratio).await;
+            if freed > 0 {
+                tracing::warn!(freed_bytes = freed, "[#389] LRU 자동 evict 실행");
+            }
+        }
+    });
+
     // gRPC 서버 빌드 — 최대 메시지 크기 64 MiB (디지털 교과서 콘텐츠 대응)
     let svc = StorageServiceServer::new(StorageGrpc { cache })
         .max_decoding_message_size(64 * 1024 * 1024)

@@ -403,6 +403,30 @@ impl CacheLayer {
         }
     }
 
+    /// 이슈 #389 — 디스크 임계 도달 시 자동 evict.
+    /// 무엇을: 현재 사용률이 hard_ratio 이상이면 LRU 기준으로 target_ratio 까지 evict.
+    /// 왜: 시간 기준 retention(#337/#338) 만으로는 공간 폭주 차단 불가. 새벽 503 사고 예방.
+    /// 반환: 실제 해제된 바이트 수 (0 = no-op, 임계 미달).
+    pub async fn evict_to_ratio(&self, hard_ratio: f32, target_ratio: f32) -> u64 {
+        if self.max_size_bytes == 0 { return 0; }
+        let current = self.current_size.load(Ordering::Relaxed);
+        let usage = current as f32 / self.max_size_bytes as f32;
+        if usage < hard_ratio { return 0; }
+        let target_bytes = (self.max_size_bytes as f32 * target_ratio) as u64;
+        if current <= target_bytes { return 0; }
+        let needed = current - target_bytes;
+        self.evict_lru(needed).await;
+        // 실제 해제량 = 호출 전 current − 호출 후 current.
+        let after = self.current_size.load(Ordering::Relaxed);
+        current.saturating_sub(after)
+    }
+
+    /// 현재 디스크 사용률 (0.0~1.0). max_size_bytes=0 면 0 반환.
+    pub fn usage_ratio(&self) -> f32 {
+        if self.max_size_bytes == 0 { return 0.0; }
+        self.current_size.load(Ordering::Relaxed) as f32 / self.max_size_bytes as f32
+    }
+
     /// 키로 단일 항목 삭제 — (삭제 항목 수, 해제 바이트 수) 반환
     pub async fn purge_by_key(&self, key: &str) -> (u64, u64) {
         // 1단계: lock 안 — 인덱스 수정
@@ -1046,5 +1070,40 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let cache = CacheLayer::new(dir.path().to_path_buf(), 64 * 1024 * 1024);
         assert!(cache.peek_metadata("does-not-exist").await.is_none());
+    }
+
+    // 이슈 #389 — usage_ratio + evict_to_ratio 동작 검증.
+    #[tokio::test]
+    async fn evict_to_ratio_triggers_only_above_hard_threshold() {
+        let tmp = TempDir::new().unwrap();
+        // max 100 bytes
+        let cache = CacheLayer::new(tmp.path().to_path_buf(), 100);
+
+        // 95% 채움 (95 bytes)
+        for i in 0..95 {
+            cache.put(
+                &format!("k-{i}"), &format!("https://x.test/{i}"), "x.test",
+                None, Bytes::from(vec![b'a'; 1]), None, None, vec![],
+            ).await;
+        }
+        let usage = cache.usage_ratio();
+        assert!(usage > 0.9, "테스트 전제: 90% 이상 채워져야 함, 실제: {usage}");
+
+        // hard=0.9, target=0.75 → 95→75 까지 약 20 bytes evict
+        let freed = cache.evict_to_ratio(0.9, 0.75).await;
+        assert!(freed > 0, "임계 초과면 evict 발생");
+        let after = cache.usage_ratio();
+        assert!(after <= 0.8, "evict 후 target 부근까지 떨어져야 함, 실제: {after}");
+    }
+
+    #[tokio::test]
+    async fn evict_to_ratio_noop_when_below_hard_threshold() {
+        let tmp = TempDir::new().unwrap();
+        let cache = CacheLayer::new(tmp.path().to_path_buf(), 1000);
+        // 50% 채움 (500 bytes 사용)
+        cache.put("k1", "https://x.test/1", "x.test", None,
+                  Bytes::from(vec![b'a'; 500]), None, None, vec![]).await;
+        let freed = cache.evict_to_ratio(0.9, 0.75).await;
+        assert_eq!(freed, 0, "임계 미달이면 no-op");
     }
 }
