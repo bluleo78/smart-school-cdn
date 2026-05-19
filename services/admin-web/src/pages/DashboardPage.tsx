@@ -32,8 +32,11 @@ export function DashboardPage() {
       </div>
 
       {/* 2행: 스택 차트(2/3) + 디스크(1/3) — items-start로 각 셀이 자체 콘텐츠 높이만큼만 차지하도록 제한 */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
-        <div className="lg:col-span-2 min-h-0">
+      {/* #261 — 차트(2/3)·스토리지(1/3) 비율을 1/2·1/2 로 변경.
+       *  기존 3-col grid 에서 스토리지 카드가 142px(차트 346px) 높이라 우측에 204px 빈 공간이 발생했다.
+       *  1/2 분할로 스토리지 카드 폭을 확장해 시각 균형 개선. */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+        <div className="min-h-0">
           <CacheHitRateChart />
         </div>
         <div className="min-h-0">

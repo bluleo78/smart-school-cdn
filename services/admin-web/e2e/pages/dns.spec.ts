@@ -256,13 +256,16 @@ test.describe('DNS 관리 페이지', () => {
     await page.goto('/dns');
     await page.getByTestId('tab-stats').click();
 
-    // NXDOMAIN 레이블 요소가 text-destructive 클래스를 갖지 않는지 확인
+    // #259 이후 의미색은 라벨이 아닌 숫자값(value) 에 적용 — 라벨 톤 통일.
+    // NXDOMAIN=0 이면 정상 상태 → 값에 destructive 없음.
     const nxdomainLabel = page.getByTestId('statcard-label-NXDOMAIN');
+    const nxdomainValue = page.getByTestId('statcard-value-NXDOMAIN');
     await expect(nxdomainLabel).toBeVisible();
     await expect(nxdomainLabel).not.toHaveClass(/text-destructive/);
+    await expect(nxdomainValue).not.toHaveClass(/text-destructive/);
   });
 
-  test('통계 탭 — NXDOMAIN 값이 1 이상이면 레이블이 destructive 색상이다', async ({ page }) => {
+  test('통계 탭 — NXDOMAIN 값이 1 이상이면 값이 destructive 색상이다 (#259 — 라벨이 아닌 값에 의미색 적용)', async ({ page }) => {
     // NXDOMAIN > 0이면 오류 상황 → text-destructive 클래스가 있어야 한다
     // totals는 metrics 버킷을 집계하므로 nxdomain 버킷이 있어야 한다
     await mockApi(page, 'GET', '/dns/status', createDnsStatusOnline());
@@ -275,9 +278,12 @@ test.describe('DNS 관리 페이지', () => {
     await page.goto('/dns');
     await page.getByTestId('tab-stats').click();
 
+    // #259 — 라벨은 항상 중성색, 의미색은 숫자값에 적용
     const nxdomainLabel = page.getByTestId('statcard-label-NXDOMAIN');
+    const nxdomainValue = page.getByTestId('statcard-value-NXDOMAIN');
     await expect(nxdomainLabel).toBeVisible();
-    await expect(nxdomainLabel).toHaveClass(/text-destructive/);
+    await expect(nxdomainLabel).not.toHaveClass(/text-destructive/);
+    await expect(nxdomainValue).toHaveClass(/text-destructive/);
   });
 
   test('최근 쿼리 탭 — matched 필터를 끄면 a.test 행이 사라진다', async ({ page }) => {

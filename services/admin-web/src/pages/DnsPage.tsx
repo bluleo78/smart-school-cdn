@@ -320,9 +320,10 @@ function StatusStrip() {
         {/* 누적 쿼리 — status.total은 dns-service gRPC 라이브 카운터(서비스 부팅 후 누적).
          *  통계 탭 KPI '전체(1시간/24시간)'는 SQLite 시계열 합계로 데이터 소스/집계 범위가 다르므로
          *  같은 '전체' 라벨을 쓰면 사용자가 두 값(예: 0 vs 6,395)이 같은 의미라고 오해한다 (#240).
-         *  라벨을 '라이브 누적'으로 구체화해 데이터 소스 의미를 분리한다. */}
-        <StripStat label="라이브 누적" value={formatNumber(status.total)} />
-        {/* QPS */}
+         *  라벨을 '세션 시작 후 누적'으로 구체화해 데이터 소스/시간창을 더 명확히 노출 (#280).
+         *  값 0은 '—' 로 표기해 '누적 0'과 'QPS 3.25' 동시 노출 시 발생하는 의미 모순을 시각적으로 해소 (#280). */}
+        <StripStat label="세션 시작 후 누적" value={status.total > 0 ? formatNumber(status.total) : '—'} />
+        {/* QPS — 시간창을 라벨에 명시해 위 누적값과 톤 일관성 유지 (#280) */}
         <StripStat label="QPS (직전 1분)" value={qpsRecent.toFixed(2)} />
       </CardContent>
     </Card>
@@ -801,6 +802,7 @@ function StatCard({
 }: {
   label: string;
   value: number;
+  /** 카드의 의미색 — value(숫자)에만 적용. 라벨은 항상 중성색(#259 — 4개 KPI 라벨 톤 통일). */
   accent?: string;
   /** E2E 테스트용 안정적 testid — label과 독립적으로 유지 */
   testid?: string;
@@ -808,9 +810,10 @@ function StatCard({
   return (
     <Card>
       <CardContent className="py-5">
-        {/* data-testid로 E2E에서 라벨 색상 검증 가능하게 노출 */}
-        <p data-testid={testid ?? `statcard-label-${label}`} className={`text-xs font-medium ${accent ?? 'text-muted-foreground'}`}>{label}</p>
-        <p className="mt-1 text-3xl font-bold tabular-nums">{formatNumber(value)}</p>
+        {/* 라벨은 항상 text-muted-foreground — 의미 분류는 숫자값에서만 표현 (#259, design-system §토큰 일관) */}
+        <p data-testid={testid ?? `statcard-label-${label}`} className="text-xs font-medium text-muted-foreground">{label}</p>
+        {/* 의미색은 숫자(value)에 적용 — testid 는 value 별도 노출하여 E2E 검증 가능 */}
+        <p data-testid={(testid ?? `statcard-label-${label}`).replace('label', 'value')} className={`mt-1 text-3xl font-bold tabular-nums ${accent ?? ''}`}>{formatNumber(value)}</p>
       </CardContent>
     </Card>
   );
