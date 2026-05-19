@@ -198,6 +198,8 @@ struct AdminState {
     cert_cache:   CertCache,
     memory_cache: moka::future::Cache<String, Arc<MemoryCacheEntry>>,
     counters:     DomainCounters,
+    /// 이슈 #427 — /status 응답에 coalescer lagged 카운트 노출을 위해 보관.
+    coalescer:    Arc<Coalescer>,
 }
 
 /// 기본 캐시 TTL (Cache-Control 헤더 없을 때)
@@ -367,8 +369,9 @@ pub fn build_admin_router(
     cert_cache:   CertCache,
     memory_cache: moka::future::Cache<String, Arc<MemoryCacheEntry>>,
     counters:     DomainCounters,
+    coalescer:    Arc<Coalescer>,
 ) -> Router {
-    let admin_state = AdminState { state: shared_state, storage, tls_client, domain_map, cert_cache, memory_cache, counters };
+    let admin_state = AdminState { state: shared_state, storage, tls_client, domain_map, cert_cache, memory_cache, counters, coalescer };
     let mut router = Router::new()
         .route("/status", get(status_handler))
         .route("/requests", get(requests_handler))
@@ -1680,7 +1683,10 @@ async fn stats_handler(State(state): State<AdminState>) -> impl IntoResponse {
 }
 
 async fn status_handler(State(admin): State<AdminState>) -> Json<state::ProxyStatus> {
-    Json(admin.state.read().await.get_status())
+    let mut status = admin.state.read().await.get_status();
+    // 이슈 #427 — coalescer lagged 누계 노출. admin-server 가 5초 폴링으로 1분 윈도우 delta 계산.
+    status.coalescer_lagged_count = admin.coalescer.lagged_count();
+    Json(status)
 }
 
 async fn requests_handler(State(admin): State<AdminState>) -> Json<Vec<RequestLog>> {
@@ -2385,7 +2391,7 @@ mod tests {
     #[tokio::test]
     async fn status_handler_현재_상태를_반환한다() {
         let (shared, storage, tls, domain_map, cert_cache) = make_test_admin_state().await;
-        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache, moka::future::Cache::builder().max_capacity(100).build(), Arc::new(std::sync::RwLock::new(HashMap::new())));
+        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache, moka::future::Cache::builder().max_capacity(100).build(), Arc::new(std::sync::RwLock::new(HashMap::new())), Arc::new(coalescer::Coalescer::new()));
 
         let resp = router
             .oneshot(
@@ -2407,7 +2413,7 @@ mod tests {
     #[tokio::test]
     async fn requests_handler_요청_로그를_반환한다() {
         let (shared, storage, tls, domain_map, cert_cache) = make_test_admin_state().await;
-        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache, moka::future::Cache::builder().max_capacity(100).build(), Arc::new(std::sync::RwLock::new(HashMap::new())));
+        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache, moka::future::Cache::builder().max_capacity(100).build(), Arc::new(std::sync::RwLock::new(HashMap::new())), Arc::new(coalescer::Coalescer::new()));
 
         let resp = router
             .oneshot(
@@ -2429,7 +2435,7 @@ mod tests {
     #[tokio::test]
     async fn cache_stats_handler_통계를_반환한다() {
         let (shared, storage, tls, domain_map, cert_cache) = make_test_admin_state().await;
-        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache, moka::future::Cache::builder().max_capacity(100).build(), Arc::new(std::sync::RwLock::new(HashMap::new())));
+        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache, moka::future::Cache::builder().max_capacity(100).build(), Arc::new(std::sync::RwLock::new(HashMap::new())), Arc::new(coalescer::Coalescer::new()));
 
         let resp = router
             .oneshot(
@@ -2452,7 +2458,7 @@ mod tests {
     #[tokio::test]
     async fn cache_popular_handler_인기_항목을_반환한다() {
         let (shared, storage, tls, domain_map, cert_cache) = make_test_admin_state().await;
-        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache, moka::future::Cache::builder().max_capacity(100).build(), Arc::new(std::sync::RwLock::new(HashMap::new())));
+        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache, moka::future::Cache::builder().max_capacity(100).build(), Arc::new(std::sync::RwLock::new(HashMap::new())), Arc::new(coalescer::Coalescer::new()));
 
         let resp = router
             .oneshot(
@@ -2477,7 +2483,7 @@ mod tests {
     #[tokio::test]
     async fn cache_purge_handler_target_없으면_400을_반환한다() {
         let (shared, storage, tls, domain_map, cert_cache) = make_test_admin_state().await;
-        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache, moka::future::Cache::builder().max_capacity(100).build(), Arc::new(std::sync::RwLock::new(HashMap::new())));
+        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache, moka::future::Cache::builder().max_capacity(100).build(), Arc::new(std::sync::RwLock::new(HashMap::new())), Arc::new(coalescer::Coalescer::new()));
 
         let resp = router
             .oneshot(
@@ -2498,7 +2504,7 @@ mod tests {
     #[tokio::test]
     async fn cache_purge_handler_url_퍼지_성공() {
         let (shared, storage, tls, domain_map, cert_cache) = make_test_admin_state().await;
-        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache, moka::future::Cache::builder().max_capacity(100).build(), Arc::new(std::sync::RwLock::new(HashMap::new())));
+        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache, moka::future::Cache::builder().max_capacity(100).build(), Arc::new(std::sync::RwLock::new(HashMap::new())), Arc::new(coalescer::Coalescer::new()));
 
         let resp = router
             .oneshot(
@@ -2524,7 +2530,7 @@ mod tests {
     #[tokio::test]
     async fn cache_purge_handler_domain_퍼지_성공() {
         let (shared, storage, tls, domain_map, cert_cache) = make_test_admin_state().await;
-        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache, moka::future::Cache::builder().max_capacity(100).build(), Arc::new(std::sync::RwLock::new(HashMap::new())));
+        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache, moka::future::Cache::builder().max_capacity(100).build(), Arc::new(std::sync::RwLock::new(HashMap::new())), Arc::new(coalescer::Coalescer::new()));
 
         let resp = router
             .oneshot(
@@ -2547,7 +2553,7 @@ mod tests {
     #[tokio::test]
     async fn cache_purge_handler_all_퍼지_성공() {
         let (shared, storage, tls, domain_map, cert_cache) = make_test_admin_state().await;
-        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache, moka::future::Cache::builder().max_capacity(100).build(), Arc::new(std::sync::RwLock::new(HashMap::new())));
+        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache, moka::future::Cache::builder().max_capacity(100).build(), Arc::new(std::sync::RwLock::new(HashMap::new())), Arc::new(coalescer::Coalescer::new()));
 
         let resp = router
             .oneshot(
@@ -2568,7 +2574,7 @@ mod tests {
     #[tokio::test]
     async fn cache_purge_handler_invalid_type_은_0을_반환한다() {
         let (shared, storage, tls, domain_map, cert_cache) = make_test_admin_state().await;
-        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache, moka::future::Cache::builder().max_capacity(100).build(), Arc::new(std::sync::RwLock::new(HashMap::new())));
+        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache, moka::future::Cache::builder().max_capacity(100).build(), Arc::new(std::sync::RwLock::new(HashMap::new())), Arc::new(coalescer::Coalescer::new()));
 
         let resp = router
             .oneshot(
@@ -2592,7 +2598,7 @@ mod tests {
     #[tokio::test]
     async fn tls_ca_handler_ca_pem을_반환한다() {
         let (shared, storage, tls, domain_map, cert_cache) = make_test_admin_state().await;
-        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache, moka::future::Cache::builder().max_capacity(100).build(), Arc::new(std::sync::RwLock::new(HashMap::new())));
+        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache, moka::future::Cache::builder().max_capacity(100).build(), Arc::new(std::sync::RwLock::new(HashMap::new())), Arc::new(coalescer::Coalescer::new()));
 
         let resp = router
             .oneshot(
@@ -2617,7 +2623,7 @@ mod tests {
     #[tokio::test]
     async fn tls_certificates_handler_인증서_목록을_반환한다() {
         let (shared, storage, tls, domain_map, cert_cache) = make_test_admin_state().await;
-        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache, moka::future::Cache::builder().max_capacity(100).build(), Arc::new(std::sync::RwLock::new(HashMap::new())));
+        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache, moka::future::Cache::builder().max_capacity(100).build(), Arc::new(std::sync::RwLock::new(HashMap::new())), Arc::new(coalescer::Coalescer::new()));
 
         let resp = router
             .oneshot(
@@ -2641,7 +2647,7 @@ mod tests {
     async fn update_domains_handler_도메인_맵을_갱신한다() {
         let (shared, storage, tls, domain_map, cert_cache) = make_test_admin_state().await;
         let domain_map_check = domain_map.clone();
-        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache, moka::future::Cache::builder().max_capacity(100).build(), Arc::new(std::sync::RwLock::new(HashMap::new())));
+        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache, moka::future::Cache::builder().max_capacity(100).build(), Arc::new(std::sync::RwLock::new(HashMap::new())), Arc::new(coalescer::Coalescer::new()));
 
         let resp = router
             .oneshot(
@@ -2680,7 +2686,7 @@ mod tests {
         })).await;
 
         let memory_cache_check = memory_cache.clone();
-        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache, memory_cache, Arc::new(std::sync::RwLock::new(HashMap::new())));
+        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache, memory_cache, Arc::new(std::sync::RwLock::new(HashMap::new())), Arc::new(coalescer::Coalescer::new()));
 
         let resp = router
             .oneshot(
@@ -2735,7 +2741,7 @@ mod tests {
         // moka 비동기 캐시는 pending tasks 실행 후 entry_count 반영
         memory_cache.run_pending_tasks().await;
 
-        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache, memory_cache, Arc::new(std::sync::RwLock::new(HashMap::new())));
+        let router = build_admin_router(shared, storage, tls, domain_map, cert_cache, memory_cache, Arc::new(std::sync::RwLock::new(HashMap::new())), Arc::new(coalescer::Coalescer::new()));
 
         let resp = router
             .oneshot(
@@ -2781,7 +2787,7 @@ mod tests {
 
         let router = build_admin_router(
             shared, storage, tls, domain_map, cert_cache, memory_cache,
-            Arc::new(std::sync::RwLock::new(HashMap::new())),
+            Arc::new(std::sync::RwLock::new(HashMap::new())), Arc::new(coalescer::Coalescer::new()),
         );
 
         let resp = router.oneshot(
@@ -2807,7 +2813,7 @@ mod tests {
 
         let router = build_admin_router(
             shared, storage, tls, domain_map, cert_cache, memory_cache,
-            Arc::new(std::sync::RwLock::new(HashMap::new())),
+            Arc::new(std::sync::RwLock::new(HashMap::new())), Arc::new(coalescer::Coalescer::new()),
         );
 
         let resp = router.oneshot(

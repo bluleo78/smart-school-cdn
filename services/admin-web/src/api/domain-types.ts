@@ -34,8 +34,9 @@ export interface DomainSummary {
 export type DomainAlert =
   | { type: 'tls_expiring';  host: string; expiresAt?: string }
   | { type: 'sync_failed';   host: string; lastError?: string }
-  | { type: 'stale_serving'; host: string } // #430 — 최근 10분 내 stale 사본 서빙 이력 존재
-  | { type: 'disk_high';     usage_ratio: number; used_bytes: number; total_bytes: number };
+  | { type: 'stale_serving';    host: string } // #430 — 최근 10분 내 stale 사본 서빙 이력 존재
+  | { type: 'coalescer_lagged'; count: number } // #427 — 최근 1분 내 coalescer broadcast lag 발생 건수
+  | { type: 'disk_high';        usage_ratio: number; used_bytes: number; total_bytes: number };
 
 /** 단일 도메인 요약 통계 — L1/Edge/Bypass 비율 포함 (Overview 카드용) */
 export interface DomainHostSummary {

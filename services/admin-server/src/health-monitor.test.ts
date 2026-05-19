@@ -201,6 +201,57 @@ describe('HealthMonitor — proxy offline→online 전환 시 gRPC 도메인 syn
   });
 });
 
+// ── #427 — coalescer lagged 1분 윈도우 delta ──────────────────────────────
+describe('HealthMonitor — #427 coalescer lagged last-minute delta', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  function makeMonitor() {
+    const deps = makeDeps();
+    return new HealthMonitor({
+      proxyAdminUrl: 'http://proxy:8081',
+      storageClient: makeGrpcClient(),
+      optimizerClient: makeGrpcClient(),
+      tlsClient: deps.tlsClient,
+      dnsClient: deps.dnsClient,
+      domainRepo: deps.repo,
+      log: deps.log as never,
+    });
+  }
+
+  it('샘플이 1개 이하면 0 반환 (baseline 없음)', () => {
+    const m = makeMonitor();
+    expect(m.getCoalescerLaggedLastMinute()).toBe(0);
+    m._pushLaggedSampleForTest(Date.now(), 100);
+    expect(m.getCoalescerLaggedLastMinute()).toBe(0);
+  });
+
+  it('윈도우 내 newest - oldest 차이를 반환', () => {
+    const m = makeMonitor();
+    const now = Date.now();
+    m._pushLaggedSampleForTest(now - 55_000, 10);
+    m._pushLaggedSampleForTest(now - 30_000, 12);
+    m._pushLaggedSampleForTest(now -  5_000, 17);
+    expect(m.getCoalescerLaggedLastMinute()).toBe(7); // 17 - 10
+  });
+
+  it('윈도우 밖 샘플은 무시한다 (1분 경계)', () => {
+    const m = makeMonitor();
+    const now = Date.now();
+    m._pushLaggedSampleForTest(now - 70_000, 100); // 윈도우 밖
+    m._pushLaggedSampleForTest(now - 50_000, 105);
+    m._pushLaggedSampleForTest(now -  1_000, 108);
+    expect(m.getCoalescerLaggedLastMinute()).toBe(3); // 108 - 105
+  });
+
+  it('proxy 재시작으로 카운터 reset 되면 0 반환 (음수 방지)', () => {
+    const m = makeMonitor();
+    const now = Date.now();
+    m._pushLaggedSampleForTest(now - 30_000, 999);
+    m._pushLaggedSampleForTest(now -  1_000, 5); // 재시작
+    expect(m.getCoalescerLaggedLastMinute()).toBe(0);
+  });
+});
+
 // ── #432 — storage 디스크 사용량 캐시 ───────────────────────────────────────
 describe('HealthMonitor — #432 disk usage cache', () => {
   beforeEach(() => { vi.clearAllMocks(); });

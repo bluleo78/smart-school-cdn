@@ -32,6 +32,10 @@ pub struct ProxyStatus {
     pub online: bool,
     pub uptime: u64,
     pub request_count: u64,
+    /// 이슈 #427 — Coalescer broadcast lag 누계.
+    /// admin-server 가 5초마다 폴링해 1분 window delta 로 변환한다.
+    #[serde(default)]
+    pub coalescer_lagged_count: u64,
 }
 
 /// 히트율 시점 스냅샷 (최근 1시간, 매분 기록)
@@ -143,6 +147,7 @@ impl AppState {
             online: true,
             uptime: self.started_at.elapsed().as_secs(),
             request_count: self.request_count,
+            coalescer_lagged_count: 0, // status_handler 가 admin-state coalescer 값으로 overwrite (#427)
         }
     }
 

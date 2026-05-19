@@ -357,6 +357,15 @@ export async function domainRoutes(
       app.log.warn({ err }, '[summary] stale_serving 집계 실패 — 빈 배열로 대체');
     }
 
+    // 이슈 #427 — 최근 1분간 coalescer broadcast lag 가 발생하면 capacity 부족 가능성 알림.
+    // HealthMonitor 가 proxy /status 의 coalescer_lagged_count 시계열을 보관하고 1분 delta 를 계산.
+    type CoalescerLagAlert = { type: 'coalescer_lagged'; count: number };
+    const coalescerLagAlerts: CoalescerLagAlert[] = [];
+    const laggedLastMin = app.healthMonitor?.getCoalescerLaggedLastMinute?.() ?? 0;
+    if (laggedLastMin > 0) {
+      coalescerLagAlerts.push({ type: 'coalescer_lagged', count: laggedLastMin });
+    }
+
     // 이슈 #432 — 디스크 사용률 80% 도달 시 disk_high alert 발행.
     // HealthMonitor 가 5초 주기로 storage.stats() 폴링한 캐시 사용 (downstream 부담 없음).
     type DiskAlert = { type: 'disk_high'; usage_ratio: number; used_bytes: number; total_bytes: number };
@@ -384,7 +393,7 @@ export async function domainRoutes(
       hourlyRequests,
       hourlyCacheHitRate,
       hourlyBandwidth,
-      alerts: [...tlsAlerts, ...staleAlerts, ...diskAlerts],
+      alerts: [...tlsAlerts, ...staleAlerts, ...coalescerLagAlerts, ...diskAlerts],
     };
   });
 

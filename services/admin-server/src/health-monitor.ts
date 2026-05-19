@@ -8,7 +8,13 @@ import type { DomainRepository } from './db/domain-repo.js';
 
 interface ServiceStatus { online: boolean; latency_ms: number }
 
-export interface ProxyStatus { online: boolean; uptime: number; request_count: number }
+export interface ProxyStatus {
+  online: boolean;
+  uptime: number;
+  request_count: number;
+  /** 이슈 #427 — proxy 가 노출한 coalescer broadcast lag 누계. 기본 0 (구버전 proxy 호환). */
+  coalescer_lagged_count?: number;
+}
 
 /** 이슈 #432 — 디스크 사용량 캐시. storage.stats() 결과를 5초 주기로 캐시. */
 export interface DiskUsage {
@@ -61,6 +67,10 @@ export class HealthMonitor {
   private proxyStatus:  ProxyStatus  = { ...OFFLINE_PROXY };
   private systemStatus: SystemStatus = { ...OFFLINE_SYSTEM };
   private proxyWasOnline = false;
+  /** 이슈 #427 — coalescer_lagged_count 시계열. 5초 폴링마다 한 행 추가하고 60초 윈도우 밖은 폐기. */
+  private laggedSamples: Array<{ ts: number; count: number }> = [];
+  /** 1분 윈도우 size — 폴링 5초 간격 × 12 = 60초. Buffer overflow 안전을 위해 +1. */
+  private static readonly LAGGED_WINDOW_MS = 60_000;
 
   constructor(private readonly deps: Deps) {}
 
@@ -69,6 +79,27 @@ export class HealthMonitor {
 
   /** 캐시된 전체 서비스 상태 반환 (system.ts 라우트용) */
   getSystemStatus(): SystemStatus { return this.systemStatus; }
+
+  /**
+   * 이슈 #427 — 최근 1분 윈도우 동안의 coalescer lagged delta.
+   * 무엇을: laggedSamples 중 (now - WINDOW) 이상 샘플들 중 가장 오래된 것과 가장 최근 것의 count 차.
+   * 왜:    proxy 누계 카운터를 운영자 친화적 "최근 1분 발생률" 로 변환해 알림 임계로 사용.
+   * 반환: 샘플이 2개 미만이거나 baseline 이 더 크면 0 (재시작·overflow 대응).
+   */
+  getCoalescerLaggedLastMinute(): number {
+    const now = Date.now();
+    const cutoff = now - HealthMonitor.LAGGED_WINDOW_MS;
+    const within = this.laggedSamples.filter(s => s.ts >= cutoff);
+    if (within.length < 2) return 0;
+    const oldest = within[0]!.count;
+    const newest = within[within.length - 1]!.count;
+    return newest >= oldest ? newest - oldest : 0;
+  }
+
+  /** 테스트 보조 — 외부 시간 주입 없이 샘플 시드 가능하게 한다. */
+  _pushLaggedSampleForTest(ts: number, count: number): void {
+    this.laggedSamples.push({ ts, count });
+  }
 
   /** 백그라운드 폴링 시작 */
   start(intervalMs = 5_000): void {
@@ -107,6 +138,12 @@ export class HealthMonitor {
       const res = await axios.get(`${this.deps.proxyAdminUrl}/status`, { timeout: TIMEOUT });
       this.proxyStatus = res.data as ProxyStatus;
       proxyOnline = true;
+      // 이슈 #427 — coalescer_lagged_count 시계열 갱신.
+      // 윈도우 밖 샘플 폐기 + 신규 샘플 추가 (proxy 미지원 시 0 으로 안전 폴백).
+      const now = Date.now();
+      const cutoff = now - HealthMonitor.LAGGED_WINDOW_MS;
+      this.laggedSamples = this.laggedSamples.filter(s => s.ts >= cutoff);
+      this.laggedSamples.push({ ts: now, count: this.proxyStatus.coalescer_lagged_count ?? 0 });
     } catch {
       this.proxyStatus = { ...OFFLINE_PROXY };
     }

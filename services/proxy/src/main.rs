@@ -150,6 +150,8 @@ async fn main() {
         .unwrap_or(64);
     tracing::info!(max_origin_concurrency, "origin fetch 동시성 한도 적용 (#391)");
     let origin_semaphore = Arc::new(tokio::sync::Semaphore::new(max_origin_concurrency));
+    // 이슈 #427 — coalescer 인스턴스 1개를 proxy 처리 경로(ProxyState)와 admin /status 노출(AdminState)에서 공유.
+    let coalescer = Arc::new(Coalescer::new());
 
     let ps = ProxyState {
         shared: shared_state.clone(),
@@ -159,7 +161,7 @@ async fn main() {
         optimizer: optimizer.clone(),              // optimizer gRPC 클라이언트
         domain_map: domain_map.clone(),
         cert_cache: cert_cache.clone(),
-        coalescer: Arc::new(Coalescer::new()),
+        coalescer: coalescer.clone(),
         memory_cache: memory_cache.clone(),
         counters: counters.clone(),
         events: events_sender,
@@ -171,7 +173,7 @@ async fn main() {
 
     let proxy_router = build_proxy_router(ps);
     let admin_router = build_admin_router(
-        shared_state, storage, tls_client, domain_map, cert_cache.clone(), memory_cache, counters,
+        shared_state, storage, tls_client, domain_map, cert_cache.clone(), memory_cache, counters, coalescer,
     );
 
     let server_config = ServerConfig::builder()

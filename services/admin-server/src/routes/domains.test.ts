@@ -1594,6 +1594,36 @@ describe('GET /api/domains/summary — TLS 만료 임박 alerts', () => {
     expect(JSON.parse(res.body).alerts).toHaveLength(0);
   });
 
+  it('이슈 #427 — getCoalescerLaggedLastMinute > 0 이면 coalescer_lagged alert 포함 (count 노출)', async () => {
+    const repo = makeRepo();
+    const app = Fastify({ logger: false });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    app.decorate('tlsClient', mockTlsClient as any);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    app.decorate('dnsClient', mockDnsClient as any);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    app.decorate('optimizerClient', mockOptimizerClient as any);
+    app.decorate('healthMonitor', {
+      getSystemStatus: () => ({
+        proxy: { online: true, latency_ms: 0 },
+        storage: { online: true, latency_ms: 0 },
+        tls: { online: true, latency_ms: 0 },
+        dns: { online: true, latency_ms: 0 },
+        optimizer: { online: true, latency_ms: 0 },
+        disk: null,
+      }),
+      getCoalescerLaggedLastMinute: () => 7,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+    app.register(domainRoutes, { domainRepo: repo });
+
+    const res = await app.inject({ method: 'GET', url: '/api/domains/summary' });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    const lag = body.alerts.find((a: { type: string }) => a.type === 'coalescer_lagged');
+    expect(lag).toEqual({ type: 'coalescer_lagged', count: 7 });
+  });
+
   it('이슈 #430 — 최근 10분 내 served_stale_if_error 이벤트가 있으면 stale_serving alert 포함', async () => {
     const repo = makeRepo();
     repo.upsert('s.test', 'https://s.test');

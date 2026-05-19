@@ -48,6 +48,8 @@ export function DomainAlertBanner() {
   const syncHosts  = data.alerts.flatMap((a) => (a.type === 'sync_failed'   ? [a.host] : []));
   // 이슈 #430 — origin 5xx/timeout 시 stale 사본을 서빙 중인 호스트. 다건 가능.
   const staleHosts = data.alerts.flatMap((a) => (a.type === 'stale_serving' ? [a.host] : []));
+  // 이슈 #427 — proxy coalescer broadcast lag (capacity 부족 신호). 단건 emit.
+  const lagAlert   = data.alerts.find((a) => a.type === 'coalescer_lagged');
   // 이슈 #432 — storage 디스크 사용률 80% 초과 알림. 다건 emit 되지 않으므로 첫 건만 사용.
   const diskAlert  = data.alerts.find((a) => a.type === 'disk_high');
 
@@ -55,6 +57,9 @@ export function DomainAlertBanner() {
   if (tlsHosts.length > 0)   parts.push(`TLS 만료 임박 ${tlsHosts.length}건`);
   if (syncHosts.length > 0)  parts.push(`동기화 실패 ${syncHosts.length}건`);
   if (staleHosts.length > 0) parts.push(`stale 사본 서빙 중 ${staleHosts.length}건`);
+  if (lagAlert && lagAlert.type === 'coalescer_lagged') {
+    parts.push(`coalescer 처리 지연 ${lagAlert.count}건/분`);
+  }
   if (diskAlert && diskAlert.type === 'disk_high') {
     parts.push(`디스크 사용률 ${diskAlert.usage_ratio}%`);
   }
