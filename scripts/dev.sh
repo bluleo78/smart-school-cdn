@@ -34,6 +34,10 @@ export DNS_GRPC_URL="${DNS_GRPC_URL:-http://localhost:50053}"
 export OPTIMIZER_GRPC_URL="${OPTIMIZER_GRPC_URL:-http://localhost:50054}"
 export ADMIN_SNAPSHOT_URL="${ADMIN_SNAPSHOT_URL:-http://localhost:4001}"
 export PROXY_ADMIN_URL="${PROXY_ADMIN_URL:-http://localhost:${PROXY_ADMIN_PORT}}"
+# 이슈 #283/#278/#277 — dev 환경에서 Rust 서비스 in-memory 시드 진입점 활성.
+# scripts/seed.sh full 호출 시 storage/dns/proxy 가 가짜 데이터를 인메모리에 inject (디자인 검증 전용).
+# 운영 빌드에서는 절대 설정하지 말 것.
+export ENABLE_DEV_SEED="${ENABLE_DEV_SEED:-true}"
 
 # 기존 프로세스 정리
 echo "🔄 포트 ${PORTS} 프로세스 정리..."

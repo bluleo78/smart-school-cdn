@@ -16,3 +16,4 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 hickory-proto = { version = "0.25", default-features = false, features = ["std"] }
 axum.workspace = true
+serde_json.workspace = true

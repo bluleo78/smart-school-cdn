@@ -64,12 +64,58 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         recent:  dns_recent.clone(),
         cdn_ip:  cdn_ip.to_string(),
     });
+    let dns_metrics_udp = dns_metrics.clone();
+    let dns_recent_udp = dns_recent.clone();
     let dns_handle = tokio::spawn(async move {
-        dns::run_dns_server(dns_map, dns_metrics, dns_recent, cdn_ip, dns_upstream).await;
+        dns::run_dns_server(dns_map, dns_metrics_udp, dns_recent_udp, cdn_ip, dns_upstream).await;
     });
 
-    // HTTP 헬스체크 서버 — Docker healthcheck용 (:8082)
-    let health_router = Router::new().route("/health", get(health));
+    // HTTP 헬스체크 서버 — Docker healthcheck용 (:8082).
+    // 이슈 #278 — ENABLE_DEV_SEED=true 시 /dev/seed 엔드포인트 활성. 가짜 dns_queries inject.
+    let dev_seed_enabled = std::env::var("ENABLE_DEV_SEED").ok().as_deref() == Some("true");
+    let mut health_router = Router::new().route("/health", get(health));
+    if dev_seed_enabled {
+        let recent_for_seed = dns_recent.clone();
+        let metrics_for_seed = dns_metrics.clone();
+        health_router = health_router.route(
+            "/dev/seed",
+            axum::routing::post(move || {
+                let recent = recent_for_seed.clone();
+                let metrics = metrics_for_seed.clone();
+                async move {
+                    // 다양한 결과 분포로 20건 inject — UI 디자인 검증용
+                    use crate::metrics::{QueryEntry, QueryResult};
+                    let samples: &[(&str, &str, QueryResult)] = &[
+                        ("textbook.com",       "A", QueryResult::Matched),
+                        ("cdn.school.kr",      "A", QueryResult::Matched),
+                        ("api.school.kr",      "A", QueryResult::Matched),
+                        ("unknown.example",    "A", QueryResult::Nxdomain),
+                        ("google.com",         "A", QueryResult::Forwarded),
+                        ("github.com",         "A", QueryResult::Forwarded),
+                        ("ads.evil",           "A", QueryResult::Nxdomain),
+                        ("img.school.kr",      "A", QueryResult::Matched),
+                    ];
+                    let now_ms = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64;
+                    let mut n = 0;
+                    for (i, (qname, qtype, result)) in samples.iter().cycle().take(20).enumerate() {
+                        recent.push(QueryEntry {
+                            ts_unix_ms: now_ms - (i as i64 * 30_000),  // 30초 간격 과거
+                            client_ip:  format!("192.168.1.{}", (i % 50) + 10),
+                            qname:      qname.to_string(),
+                            qtype:      qtype.to_string(),
+                            result:     result.clone(),
+                            latency_us: 800 + (i as u32 % 500) * 100,
+                        });
+                        metrics.record(result.clone());
+                        n += 1;
+                    }
+                    axum::Json(serde_json::json!({ "seeded_queries": n }))
+                }
+            }),
+        );
+        tracing::warn!("[dev-seed] /dev/seed 엔드포인트 활성");
+    }
     let health_listener = tokio::net::TcpListener::bind("0.0.0.0:8082").await?;
     let health_server = tokio::spawn(async move {
         axum::serve(health_listener, health_router).await

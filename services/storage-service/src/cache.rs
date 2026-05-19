@@ -403,6 +403,39 @@ impl CacheLayer {
         }
     }
 
+    /// 이슈 #283/#277 — dev 환경에서 popular 카드를 시각 검증 가능하게 가짜 entry 주입.
+    /// 무엇을: hit_count 가 높은 가짜 CacheEntry 를 인덱스에 직접 INSERT.
+    /// 왜: 실제 트래픽 없는 dev 환경에서 admin-web '인기 콘텐츠 Top 5' 카드가 빈 상태로만
+    ///    노출되어 디자인 검증 불가. dev seed 진입점.
+    /// 보안: ENABLE_DEV_SEED env 가 main.rs 에서 가드 — 본 메서드는 호출만 안 되면 안전.
+    pub async fn dev_seed_popular(&self) -> usize {
+        let now = Utc::now();
+        let samples: &[(&str, &str, u64)] = &[
+            ("https://textbook.com/chapter1.pdf",     "textbook.com",      1247),
+            ("https://cdn.school.kr/video/intro.mp4", "cdn.school.kr",      892),
+            ("https://cdn.school.kr/images/logo.png", "cdn.school.kr",      654),
+            ("https://textbook.com/exercise/q1.pdf",  "textbook.com",       521),
+            ("https://api.school.kr/manifest.json",   "api.school.kr",      387),
+        ];
+        let mut index = self.index.lock().await;
+        for (url, domain, hits) in samples {
+            let key = format!("dev-seed-{}", url);
+            index.insert(key, CacheEntry {
+                url:            (*url).to_string(),
+                domain:         (*domain).to_string(),
+                content_type:   Some("application/octet-stream".to_string()),
+                size_bytes:     1024,
+                has_br:         false,
+                hit_count:      *hits,
+                created_at:     now,
+                accessed_at:    now,
+                expires_at:     None,
+                cached_headers: vec![],
+            });
+        }
+        samples.len()
+    }
+
     /// 이슈 #389 — 디스크 임계 도달 시 자동 evict.
     /// 무엇을: 현재 사용률이 hard_ratio 이상이면 LRU 기준으로 target_ratio 까지 evict.
     /// 왜: 시간 기준 retention(#337/#338) 만으로는 공간 폭주 차단 불가. 새벽 503 사고 예방.

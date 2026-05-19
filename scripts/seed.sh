@@ -144,5 +144,20 @@ subprocess.run(["sqlite3", db], input=sql, text=True, check=True)
 print(f"  optimization_events: {len(rows)}행 삽입")
 PYEOF
 
-echo "✅ full 완료"
+echo "✅ admin DB 시드 완료"
 sqlite3 "$DB" "SELECT 'domains' as t, count(*) FROM domains UNION ALL SELECT 'domain_stats', count(*) FROM domain_stats UNION ALL SELECT 'dns_metrics_minute', count(*) FROM dns_metrics_minute UNION ALL SELECT 'optimization_events', count(*) FROM optimization_events;"
+
+# ── Rust 서비스 in-memory 시드 (#283/#278/#277) ──────────────
+# ENABLE_DEV_SEED=true 로 기동된 서비스만 응답. 서비스 미기동 시 silent skip.
+echo "▶ Rust 서비스 in-memory 시드 시도"
+STORAGE_HEALTH_URL="${STORAGE_HEALTH_URL:-http://localhost:8080}"
+DNS_HEALTH_URL="${DNS_HEALTH_URL:-http://localhost:8082}"
+PROXY_ADMIN_URL="${PROXY_ADMIN_URL:-http://localhost:8081}"
+
+curl -fsS -X POST "$STORAGE_HEALTH_URL/dev/seed" 2>/dev/null && echo "  storage-service /dev/seed OK" \
+  || echo "  storage-service /dev/seed skip (미기동 또는 ENABLE_DEV_SEED 미설정)"
+curl -fsS -X POST "$DNS_HEALTH_URL/dev/seed" 2>/dev/null && echo "  dns-service /dev/seed OK" \
+  || echo "  dns-service /dev/seed skip (미기동 또는 ENABLE_DEV_SEED 미설정)"
+curl -fsS -X POST "$PROXY_ADMIN_URL/dev/seed" 2>/dev/null && echo "  proxy /admin/dev/seed OK" \
+  || echo "  proxy /admin/dev/seed skip (미기동 또는 ENABLE_DEV_SEED 미설정)"
+echo "✅ full 완료"

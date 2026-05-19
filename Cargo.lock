@@ -540,6 +540,7 @@ dependencies = [
  "cdn-proto",
  "hickory-proto",
  "prost",
+ "serde_json",
  "tokio",
  "tonic",
  "tracing",

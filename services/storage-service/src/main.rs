@@ -67,15 +67,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     // gRPC 서버 빌드 — 최대 메시지 크기 64 MiB (디지털 교과서 콘텐츠 대응)
-    let svc = StorageServiceServer::new(StorageGrpc { cache })
+    let svc = StorageServiceServer::new(StorageGrpc { cache: cache.clone() })
         .max_decoding_message_size(64 * 1024 * 1024)
         .max_encoding_message_size(64 * 1024 * 1024);
 
     let grpc_addr = "0.0.0.0:50051".parse()?;
     tracing::info!("storage-service 시작 — gRPC :50051, HTTP health :8080");
 
-    // HTTP 헬스체크 서버 — gRPC와 병행 실행
-    let health_router = Router::new().route("/health", get(health));
+    // HTTP 헬스체크 서버 — gRPC와 병행 실행.
+    // 이슈 #283/#277 — ENABLE_DEV_SEED=true 일 때만 /dev/seed 엔드포인트 활성. dev 디자인 검증 전용.
+    let dev_seed_enabled = std::env::var("ENABLE_DEV_SEED").ok().as_deref() == Some("true");
+    let mut health_router = Router::new().route("/health", get(health));
+    if dev_seed_enabled {
+        let cache_for_seed = cache.clone();
+        health_router = health_router.route(
+            "/dev/seed",
+            axum::routing::post(move || {
+                let cache = cache_for_seed.clone();
+                async move {
+                    let n = cache.dev_seed_popular().await;
+                    axum::Json(serde_json::json!({ "seeded_popular": n }))
+                }
+            }),
+        );
+        tracing::warn!("[dev-seed] /dev/seed 엔드포인트 활성 — 운영 빌드에서는 ENABLE_DEV_SEED 미설정 필수");
+    }
     let health_listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await?;
     let health_server = tokio::spawn(async move {
         axum::serve(health_listener, health_router).await

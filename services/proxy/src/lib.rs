@@ -369,7 +369,7 @@ pub fn build_admin_router(
     counters:     DomainCounters,
 ) -> Router {
     let admin_state = AdminState { state: shared_state, storage, tls_client, domain_map, cert_cache, memory_cache, counters };
-    Router::new()
+    let mut router = Router::new()
         .route("/status", get(status_handler))
         .route("/requests", get(requests_handler))
         .route("/cache/stats", get(cache_stats_handler))
@@ -380,8 +380,44 @@ pub fn build_admin_router(
         .route("/domains", axum::routing::post(update_domains_handler))
         .route("/domains/{host}/purge", axum::routing::post(domain_purge_handler))
         .route("/stats", get(stats_handler))
-        .route("/diagnose", get(diagnose_handler))
-        .with_state(admin_state)
+        .route("/diagnose", get(diagnose_handler));
+    // 이슈 #283/#277 — ENABLE_DEV_SEED=true 시 /dev/seed 활성. dev 디자인 검증 전용 RequestLog 주입.
+    if std::env::var("ENABLE_DEV_SEED").ok().as_deref() == Some("true") {
+        router = router.route("/dev/seed", axum::routing::post(dev_seed_handler));
+        tracing::warn!("[dev-seed] proxy /admin/dev/seed 엔드포인트 활성");
+    }
+    router.with_state(admin_state)
+}
+
+/// 이슈 #283/#277 — dev 환경 디자인 검증용 RequestLog 가짜 주입.
+async fn dev_seed_handler(State(admin): State<AdminState>) -> Json<serde_json::Value> {
+    let samples: &[(&str, &str, &str, u16, &str)] = &[
+        ("GET", "textbook.com",  "/chapter1.pdf",    200, "HIT"),
+        ("GET", "cdn.school.kr", "/video/intro.mp4", 200, "HIT"),
+        ("GET", "cdn.school.kr", "/images/logo.png", 200, "HIT"),
+        ("GET", "api.school.kr", "/manifest.json",   200, "MISS"),
+        ("GET", "textbook.com",  "/missing.pdf",     404, "BYPASS"),
+        ("GET", "img.school.kr", "/banner.jpg",      200, "HIT"),
+        ("HEAD","cdn.school.kr", "/video/intro.mp4", 200, "HIT"),
+        ("GET", "textbook.com",  "/exercise/q1.pdf", 200, "HIT"),
+        ("GET", "api.school.kr", "/health",          200, "BYPASS"),
+        ("GET", "cdn.school.kr", "/css/main.css",    200, "HIT"),
+    ];
+    let now = chrono::Utc::now();
+    let mut state = admin.state.write().await;
+    for (i, (method, host, url, status, cache)) in samples.iter().enumerate() {
+        state.record_request(RequestLog {
+            method:           (*method).to_string(),
+            host:             (*host).to_string(),
+            url:              (*url).to_string(),
+            status_code:      *status,
+            response_time_ms: 10 + (i as u64 * 7) % 200,
+            timestamp:        now - chrono::Duration::seconds((i as i64) * 30),
+            cache_status:     (*cache).to_string(),
+            size:             1024 + (i as u64 * 2048),
+        });
+    }
+    Json(serde_json::json!({ "seeded_requests": samples.len() }))
 }
 
 // ─── 캐시 키·파싱 유틸 (기존 cache.rs에서 이전) ───────────────────
