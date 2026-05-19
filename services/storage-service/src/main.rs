@@ -49,6 +49,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .ok().and_then(|s| s.parse().ok()).filter(|v: &f32| *v > 0.0 && *v <= 1.0).unwrap_or(0.9);
     let target_ratio: f32 = std::env::var("STORAGE_EVICT_TARGET_RATIO")
         .ok().and_then(|s| s.parse().ok()).filter(|v: &f32| *v > 0.0 && *v < hard_ratio).unwrap_or(0.75);
+    // 이슈 #433 — evict 결과를 admin-server optimization_events 에 기록.
+    // ADMIN_SERVER_URL 미설정 시 fall back: docker-compose 서비스명. push 실패는 warn 로그만.
+    let admin_url = std::env::var("ADMIN_SERVER_URL")
+        .unwrap_or_else(|_| "http://admin-server:4001".to_string());
+    let internal_token = std::env::var("INTERNAL_API_TOKEN").ok();
+    let evict_http = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .expect("reqwest Client 생성 실패");
     tracing::info!(evict_interval_secs, hard_ratio, target_ratio, "[#389] 디스크 임계 evict 태스크 시작");
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(evict_interval_secs));
@@ -62,6 +71,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let freed = evict_cache.evict_to_ratio(hard_ratio, target_ratio).await;
             if freed > 0 {
                 tracing::warn!(freed_bytes = freed, "[#389] LRU 자동 evict 실행");
+                // 이슈 #433 — evict 이벤트 push. event_type=storage_evict / decision=auto_evict.
+                // orig_size 에 freed_bytes 를 담아 누적 분석 가능하게 한다 (out_size 는 null).
+                let endpoint = format!("{}/internal/events/batch", admin_url.trim_end_matches('/'));
+                let ts = chrono::Utc::now().to_rfc3339();
+                let payload = serde_json::json!({
+                    "events": [{
+                        "ts": ts,
+                        "event_type": "storage_evict",
+                        "host": "*",
+                        "url": "storage://evict",
+                        "decision": "auto_evict",
+                        "orig_size": freed,
+                        "elapsed_ms": 0
+                    }]
+                });
+                let mut req = evict_http.post(&endpoint).json(&payload);
+                if let Some(tok) = internal_token.as_deref() {
+                    req = req.header("x-internal-token", tok);
+                }
+                match req.send().await {
+                    Ok(r) if r.status().is_success() => {
+                        tracing::debug!(freed_bytes = freed, "[#433] evict 이벤트 push 성공");
+                    }
+                    Ok(r) => tracing::warn!(status = %r.status(), "[#433] evict 이벤트 push 실패 — admin-server 응답"),
+                    Err(e) => tracing::warn!(error = %e, "[#433] evict 이벤트 push 실패"),
+                }
             }
         }
     });

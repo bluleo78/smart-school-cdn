@@ -97,6 +97,26 @@ describe('POST /internal/events/batch', () => {
     expect(res.statusCode).toBe(400);
   });
 
+  it('이슈 #433 — storage_evict + auto_evict 이벤트도 화이트리스트로 허용된다', async () => {
+    const { app } = mkApp();
+    const res = await app.inject({
+      method: 'POST', url: '/internal/events/batch',
+      headers: { 'content-type': 'application/json' },
+      payload: {
+        events: [{
+          event_type: 'storage_evict',
+          host: '*',
+          url: 'storage://evict',
+          decision: 'auto_evict',
+          orig_size: 12345,
+          elapsed_ms: 0,
+        }],
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ inserted: 1 });
+  });
+
   it('빈 배열이면 0 반환', async () => {
     const { app } = mkApp();
     const res = await app.inject({

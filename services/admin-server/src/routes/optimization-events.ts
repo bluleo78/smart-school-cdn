@@ -16,6 +16,8 @@ import {
 /** 허용 event_type — 화이트리스트 밖이면 400 */
 const ALLOWED_EVENT_TYPES: ReadonlySet<OptimizationEventType> = new Set([
   'media_cache', 'image_optimize', 'text_compress',
+  // #433 — storage-service 자동 evict 이벤트
+  'storage_evict',
 ]);
 
 /**
@@ -39,6 +41,8 @@ export const ALLOWED_DECISIONS: ReadonlySet<string> = new Set([
   'compressed_br', 'compressed_gzip',
   // 공통 bypass — proxy lib.rs / events.rs에서 발행
   'bypass_nocache', 'bypass_size', 'bypass_method', 'bypass_other',
+  // #433 — storage-service LRU 자동 evict (event_type=storage_evict 와 짝)
+  'auto_evict',
 ]);
 
 /** period 문자열 → 초 매핑. 기본 24시간. */
@@ -80,7 +84,7 @@ function normalizeEventHost(raw: string): string {
 
 const eventInputSchema = z.object({
   ts:           z.string().optional(),
-  event_type:   z.enum(['media_cache', 'image_optimize', 'text_compress']),
+  event_type:   z.enum(['media_cache', 'image_optimize', 'text_compress', 'storage_evict']),
   host:         z.string().min(1).transform(normalizeEventHost),
   url:          z.string().min(1),
   decision:     z.string().refine((d) => ALLOWED_DECISIONS.has(d), {

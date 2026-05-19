@@ -12,6 +12,7 @@ import { clampInt, clampOffset } from './pagination.js';
  * - url_hash: SHA-256 앞 16자 — 동일 URL 그룹핑·인덱스 정렬 효율용 (insert 시 자동 계산)
  * - decision: 처리 결과 분류 문자열. Phase별로 의미가 다르지만 고정 집합으로 운영한다.
  *   · media_cache:   'served_200','served_206','stored_new','invalid_range_416','served_stale_if_error'(#431)
+ *   · storage_evict: 'auto_evict' (#433) — orig_size 에 freed_bytes 누적값을 담는다.
  *   · image_optimize:'converted','rejected_size','skipped_small','skipped_type','error'
  *   · text_compress: 'compressed_br','compressed_gzip','skipped_small','skipped_type','error'
  *   · (공통 bypass): 'bypass_nocache','bypass_size','bypass_method','bypass_other'
@@ -65,7 +66,7 @@ function unixSecToIso(sec: number): string {
 }
 
 /** 허용 event_type — 라우트/repo 양쪽에서 검증에 사용 */
-export type OptimizationEventType = 'media_cache' | 'image_optimize' | 'text_compress';
+export type OptimizationEventType = 'media_cache' | 'image_optimize' | 'text_compress' | 'storage_evict';
 
 /** 단일 이벤트 입력 타입 — url_hash는 insert 시 자동 계산되므로 제외 */
 export interface OptimizationEventInput {
