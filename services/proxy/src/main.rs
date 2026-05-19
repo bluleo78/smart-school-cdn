@@ -33,6 +33,8 @@ impl ResolvesServerCert for SniCertResolver {
     }
 }
 
+// 이슈 #392 — tokio worker_threads 는 기본 #cores. 명시 attribute 보다 env 기반 조정이 운영 유연.
+// 컨테이너 vCPU 변경 시 코드 변경 없이 TOKIO_WORKER_THREADS env 로 조정 가능.
 #[tokio::main]
 async fn main() {
     rustls::crypto::ring::default_provider()
