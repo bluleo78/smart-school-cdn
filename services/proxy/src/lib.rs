@@ -156,6 +156,76 @@ pub fn spawn_auto_tune_task(coalescer: Arc<Coalescer>) {
     });
 }
 
+/// 이슈 #424 — in-flight 응답 buffer 합산 메모리 추적.
+/// 동시 origin fetch 개수 한도(Semaphore, #391)만으로는 "64 × 128MB = 8GB" 같은 합산 폭증을
+/// 막지 못한다. 실제 점유 바이트를 전역 누적해 한도 초과 시 503 으로 백프레셔를 건다.
+static IN_FLIGHT_BUFFER_BYTES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Content-Length 미상 응답의 예약 추정치(8MB) — 학교 교과서 콘텐츠 평균 가정.
+/// bytes().await 후 InFlightGuard::reconcile 로 실측치에 맞춰 보정한다.
+const IN_FLIGHT_UNKNOWN_ESTIMATE: u64 = 8 * 1024 * 1024;
+
+/// in-flight buffer 합산 한도(바이트). 기본 1GB. env PROXY_INFLIGHT_MAX_BYTES 로 조정.
+fn in_flight_max_bytes() -> u64 {
+    std::env::var("PROXY_INFLIGHT_MAX_BYTES")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(1024 * 1024 * 1024)
+}
+
+/// 현재 in-flight buffer 점유 바이트 (관찰/테스트용).
+pub fn in_flight_buffer_bytes() -> u64 {
+    IN_FLIGHT_BUFFER_BYTES.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// 이슈 #424 — in-flight buffer 점유 RAII 가드.
+/// reserve() 가 한도 검사 후 Some(가드) 를 반환하며, drop 시 예약량을 전역 카운터에서 차감한다.
+/// reconcile() 로 실측 크기에 맞춰 예약량을 사후 보정할 수 있다.
+struct InFlightGuard {
+    reserved: std::cell::Cell<u64>,
+}
+
+impl InFlightGuard {
+    /// 한도 내이면 want 바이트를 예약하고 가드 반환. 초과면 None (호출자가 503 폴백).
+    /// compare-and-swap 루프로 동시 예약 경쟁을 안전하게 처리한다.
+    fn reserve(want: u64) -> Option<Self> {
+        use std::sync::atomic::Ordering;
+        let limit = in_flight_max_bytes();
+        loop {
+            let cur = IN_FLIGHT_BUFFER_BYTES.load(Ordering::Relaxed);
+            // 한 건이라도 받을 수 있도록: 카운터가 0 이면 한도 초과 크기여도 통과(데드락 방지).
+            if cur > 0 && cur.saturating_add(want) > limit {
+                return None;
+            }
+            if IN_FLIGHT_BUFFER_BYTES
+                .compare_exchange_weak(cur, cur + want, Ordering::AcqRel, Ordering::Relaxed)
+                .is_ok()
+            {
+                return Some(Self { reserved: std::cell::Cell::new(want) });
+            }
+        }
+    }
+
+    /// bytes().await 후 실측 크기로 예약량을 보정 — 추정과의 delta 만큼 카운터를 조정.
+    fn reconcile(&self, actual: u64) {
+        use std::sync::atomic::Ordering;
+        let prev = self.reserved.get();
+        if actual > prev {
+            IN_FLIGHT_BUFFER_BYTES.fetch_add(actual - prev, Ordering::AcqRel);
+        } else if prev > actual {
+            IN_FLIGHT_BUFFER_BYTES.fetch_sub(prev - actual, Ordering::AcqRel);
+        }
+        self.reserved.set(actual);
+    }
+}
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        IN_FLIGHT_BUFFER_BYTES.fetch_sub(self.reserved.get(), std::sync::atomic::Ordering::AcqRel);
+    }
+}
+
 /// 이슈 #425 — streaming bypass 임계(바이트). Content-Length 가 이 값을 초과하면
 /// buffered 경로(bytes().await) 대신 chunked stream 으로 client 에 직접 pipe.
 /// 기본은 MAX_CACHE_ENTRY_BYTES 와 동일 — "어차피 캐시 못 함" 응답을 streaming 으로 처리해
@@ -1361,6 +1431,30 @@ async fn proxy_handler(
                 }
             }
 
+            // 이슈 #424 — in-flight buffer 합산 메모리 한도. bytes().await 가 곧 점유할 바이트를
+            // 미리 예약(Content-Length 없으면 추정치)하고, 한도 초과면 503 Retry-After 로 백프레셔.
+            // 가드는 buffered 경로 종료까지 유지되어 동시 fetch 들의 합산 점유를 한도 내로 묶는다.
+            let reserve_estimate = declared_cl.unwrap_or(IN_FLIGHT_UNKNOWN_ESTIMATE);
+            let in_flight_guard = match InFlightGuard::reserve(reserve_estimate) {
+                Some(g) => g,
+                None => {
+                    tracing::warn!(
+                        reserve = reserve_estimate,
+                        in_flight = in_flight_buffer_bytes(),
+                        limit = in_flight_max_bytes(),
+                        "[#424] in-flight buffer 한도 초과 — 503 Retry-After 폴백"
+                    );
+                    return Ok(std::sync::Arc::new((
+                        Bytes::from_static(b"In-flight buffer capacity exceeded, please retry"),
+                        Some("text/plain".to_string()),
+                        axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                        CacheOutcome::BypassOther,
+                        Vec::new(),
+                        vec![("retry-after".to_string(), "5".to_string())],
+                    )));
+                }
+            };
+
             let resp_body = match origin_resp.bytes().await {
                 Ok(b) => b,
                 Err(err) => {
@@ -1368,6 +1462,8 @@ async fn proxy_handler(
                     return Err(());
                 }
             };
+            // 추정 예약을 실측 크기로 보정 — Content-Length 미상/오차 케이스 정확도 확보.
+            in_flight_guard.reconcile(resp_body.len() as u64);
 
             let content_type = resp_headers
                 .get("content-type")
@@ -5243,6 +5339,33 @@ mod header_policy_tests {
         // 너무 큰 값 → MAX 로 클램프
         let grown = (AUTO_TUNE_MAX_CAPACITY.saturating_mul(2)).min(AUTO_TUNE_MAX_CAPACITY);
         assert_eq!(grown, AUTO_TUNE_MAX_CAPACITY);
+    }
+
+    // 이슈 #424 — InFlightGuard 예약/차감/보정/한도 검사.
+    // 전역 IN_FLIGHT_BUFFER_BYTES 를 공유하므로 병렬 테스트 충돌을 피하려 단일 #[test] 로 묶는다.
+    #[test]
+    fn in_flight_guard_reserve_reconcile_release_and_limit() {
+        use std::sync::atomic::Ordering;
+        IN_FLIGHT_BUFFER_BYTES.store(0, Ordering::Relaxed);
+
+        // 예약 → 카운터 증가, reconcile 증가/축소, drop 시 전액 차감
+        {
+            let g = InFlightGuard::reserve(1000).expect("한도 내 예약 성공");
+            assert_eq!(in_flight_buffer_bytes(), 1000);
+            g.reconcile(1500); // 추정 1000 → 실측 1500
+            assert_eq!(in_flight_buffer_bytes(), 1500);
+            g.reconcile(200);  // 실측 축소
+            assert_eq!(in_flight_buffer_bytes(), 200);
+        }
+        assert_eq!(in_flight_buffer_bytes(), 0, "drop 시 보정 후 예약량 전액 차감");
+
+        // 한도 초과 거부 — 단, 카운터 0 이면 한도 초과 크기여도 1건은 통과(데드락 방지)
+        let limit = in_flight_max_bytes();
+        let huge = InFlightGuard::reserve(limit + 1).expect("카운터 0 이면 첫 건 통과");
+        assert!(in_flight_buffer_bytes() > limit);
+        assert!(InFlightGuard::reserve(1).is_none(), "카운터>0 + 한도 초과면 거부");
+        drop(huge);
+        assert_eq!(in_flight_buffer_bytes(), 0);
     }
 
     // 이슈 #425 — streaming bypass 임계는 기본적으로 MAX_CACHE_ENTRY_BYTES 와 동일.
