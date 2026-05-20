@@ -15,7 +15,10 @@ path = "src/main.rs"
 cdn-proto       = { path = "../../crates/cdn-proto" }
 tokio.workspace = true
 axum.workspace  = true
-reqwest.workspace = true
+# 이슈 #425 — streaming bypass 에서 reqwest::Response::bytes_stream() 필요 → "stream" feature 활성.
+reqwest = { workspace = true, features = ["stream"] }
+# 이슈 #425 — Stream::map 등 콤비네이터 사용.
+futures        = "0.3"
 serde.workspace = true
 serde_json.workspace = true
 chrono.workspace = true

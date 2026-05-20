@@ -156,6 +156,18 @@ pub fn spawn_auto_tune_task(coalescer: Arc<Coalescer>) {
     });
 }
 
+/// 이슈 #425 — streaming bypass 임계(바이트). Content-Length 가 이 값을 초과하면
+/// buffered 경로(bytes().await) 대신 chunked stream 으로 client 에 직접 pipe.
+/// 기본은 MAX_CACHE_ENTRY_BYTES 와 동일 — "어차피 캐시 못 함" 응답을 streaming 으로 처리해
+/// in-flight 메모리 점유를 막는다. env PROXY_STREAM_BYPASS_THRESHOLD_BYTES 로 조정.
+fn stream_bypass_threshold() -> u64 {
+    std::env::var("PROXY_STREAM_BYPASS_THRESHOLD_BYTES")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(MAX_CACHE_ENTRY_BYTES)
+}
+
 /// host 의 coalescer capacity 를 반환. admin override > auto-tuned global.
 async fn coalesce_capacity_for_host(host: &str) -> usize {
     let map = domain_coalesce_capacity_map().read().await;
@@ -392,6 +404,127 @@ async fn try_serve_stale(
         cached_headers,
         passthrough,
     )))
+}
+
+/// 이슈 #425 — Content-Length 가 임계 초과인 응답을 chunked streaming 으로 client 에 직접 pipe.
+/// origin fetch 를 새로 수행(coalescer 콜백 안의 origin_resp 는 이미 drop) 하고, 응답 body 를
+/// reqwest::Response::bytes_stream() → Body::from_stream 으로 흘려보낸다. 캐시 저장·Range
+/// 슬라이싱·optimize/compress 는 일절 수행하지 않는다(이미 캐시 한도 초과로 BypassSize 분류).
+async fn stream_bypass_response(
+    ps: &ProxyState,
+    state: &SharedState,
+    headers: &HeaderMap,
+    host: &str,
+    uri: &Uri,
+    method: &axum::http::Method,
+    client: &reqwest::Client,
+    body_bytes: Bytes,
+    origin_url: String,
+    elapsed_so_far_ms: u64,
+) -> axum::response::Response {
+    // 이슈 #391 — semaphore 도 streaming 경로에서 유지. 한도 초과 시 503 폴백.
+    let _permit = match tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        ps.origin_semaphore.clone().acquire_owned(),
+    ).await {
+        Ok(Ok(p)) => p,
+        _ => {
+            tracing::warn!(url=%origin_url, "[#425] streaming bypass — origin fetch 한도 초과 503");
+            return Response::builder()
+                .status(StatusCode::SERVICE_UNAVAILABLE)
+                .header("retry-after", "5")
+                .header("X-Cache-Status", "BYPASS")
+                .header("X-Cache-Reason", CacheOutcome::BypassSize.as_header())
+                .body(Body::from("Origin fetch capacity exceeded, please retry"))
+                .unwrap();
+        }
+    };
+
+    let mut req_builder = client.request(method.clone(), &origin_url);
+    for (k, v) in headers.iter() {
+        let name = k.as_str();
+        if !matches!(name,
+            "host" | "connection" | "transfer-encoding" | "proxy-connection"
+                | "keep-alive" | "upgrade" | "te" | "trailer"
+                | "range" | "if-range") {
+            req_builder = req_builder.header(k, v);
+        }
+    }
+    let origin_resp = match req_builder.body(body_bytes).send().await {
+        Ok(r) => r,
+        Err(err) => {
+            tracing::error!(error=%err, url=%origin_url, "[#425] streaming bypass — origin 연결 실패 502");
+            return Response::builder()
+                .status(StatusCode::BAD_GATEWAY)
+                .header("X-Cache-Status", "BYPASS")
+                .header("X-Cache-Reason", CacheOutcome::BypassSize.as_header())
+                .body(Body::from("Origin fetch failed"))
+                .unwrap();
+        }
+    };
+
+    let status = origin_resp.status();
+    let resp_headers = origin_resp.headers().clone();
+    let content_type = resp_headers.get("content-type")
+        .and_then(|v| v.to_str().ok()).map(|s| s.to_string());
+    let content_length = resp_headers.get(axum::http::header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok()).map(|s| s.to_string());
+    let passthrough_headers = extract_passthrough_headers(&resp_headers);
+
+    // 운영 가시성 — BypassSize 카운터·로그·이벤트는 buffered 경로와 동일하게 기록.
+    record_domain_outcome(&ps.counters, host, CacheOutcome::BypassSize, 0, elapsed_so_far_ms);
+    {
+        let mut app_state = state.write().await;
+        app_state.record_cache_bypass();
+        app_state.record_request(RequestLog {
+            method: method.to_string(),
+            host:   host.to_string(),
+            url:    uri.to_string(),
+            status_code: status.as_u16(),
+            response_time_ms: elapsed_so_far_ms,
+            timestamp: chrono::Utc::now(),
+            cache_status: "BYPASS".to_string(),
+            size: content_length.as_deref().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0),
+        });
+    }
+    emit_media_cache_event(
+        &ps.events, host, uri, CacheOutcome::BypassSize.as_header(),
+        content_length.as_deref().and_then(|s| s.parse::<u64>().ok()),
+        None, headers, content_type.as_deref(), elapsed_so_far_ms,
+    );
+    tracing::info!(
+        method=%method, host=%host, url=%uri,
+        status=%status.as_u16(), cache="BYPASS", mode="stream",
+        "[#425] streaming bypass 응답 시작"
+    );
+
+    // reqwest::Response::bytes_stream() → axum Body::from_stream.
+    // permit 은 stream 가 drop 될 때 함께 release 되도록 클로저로 이동.
+    use futures::StreamExt;
+    let permit_holder = _permit;
+    let body_stream = origin_resp.bytes_stream().map(move |chunk_res| {
+        // permit_holder reference 를 keep-alive 시키는 형태로 만들지 않으면
+        // owned 캡처가 첫 poll 후 사라질 수 있다 → permit_holder 를 명시 캡처.
+        let _keep_permit = &permit_holder;
+        chunk_res.map_err(std::io::Error::other)
+    });
+
+    let mut builder = Response::builder()
+        .status(status)
+        .header("Accept-Ranges", "bytes")
+        .header("X-Cache-Status", "BYPASS")
+        .header("X-Cache-Reason", CacheOutcome::BypassSize.as_header())
+        .header("X-Served-By", "smart-school-cdn");
+    if let Some(ct) = content_type.as_deref() {
+        builder = builder.header("Content-Type", ct);
+    }
+    if let Some(cl) = content_length.as_deref() {
+        builder = builder.header("Content-Length", cl);
+    }
+    for (name, value) in passthrough_headers.iter() {
+        builder = builder.header(name.as_str(), value.as_str());
+    }
+    builder.body(Body::from_stream(body_stream)).unwrap()
 }
 
 // ─── Phase 20: 응답 헤더 포워딩 정책 ─────────────────────────────────
@@ -1199,6 +1332,35 @@ async fn proxy_handler(
                 parse_cache_control(cc, pragma)
             };
 
+            // 이슈 #425 — Content-Length 가 단일 캐시 항목 상한을 초과하면 buffered 경로(bytes().await)
+            // 가 곧바로 100MB+ 메모리를 점유하므로, 그 자리에서 BypassSize sentinel 만 반환하고
+            // origin_resp 는 폐기한다. outer 코드가 별도 streaming 경로로 client 에 직접 pipe.
+            // (가성비 트레이드: 대형 미디어 다운로드는 동시 동일-URL 요청이 드물어 double-fetch 허용)
+            let declared_cl: Option<u64> = resp_headers
+                .get(axum::http::header::CONTENT_LENGTH)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.parse::<u64>().ok());
+            if let Some(cl) = declared_cl {
+                if cl > stream_bypass_threshold() {
+                    tracing::info!(content_length = cl, threshold = stream_bypass_threshold(),
+                        "[#425] Content-Length 임계 초과 — streaming bypass sentinel 반환");
+                    // sentinel: body 비움, passthrough 에 마커 + content-length 보존(클라이언트 헤더 복원용).
+                    let mut sentinel_passthrough: Vec<(String, String)> = passthrough_headers.clone();
+                    sentinel_passthrough.push(("x-stream-mode".to_string(), "1".to_string()));
+                    sentinel_passthrough.push(("x-stream-content-length".to_string(), cl.to_string()));
+                    return Ok(std::sync::Arc::new((
+                        Bytes::new(),
+                        resp_headers.get("content-type")
+                            .and_then(|v| v.to_str().ok())
+                            .map(|s| s.to_string()),
+                        status,
+                        CacheOutcome::BypassSize,
+                        cached_headers.clone(),
+                        sentinel_passthrough,
+                    )));
+                }
+            }
+
             let resp_body = match origin_resp.bytes().await {
                 Ok(b) => b,
                 Err(err) => {
@@ -1435,6 +1597,21 @@ async fn proxy_handler(
             Ok(resp) => {
                 let (body, ct, status, outcome, cached_headers_out, passthrough_out) = resp.as_ref();
                 let total = body.len() as u64;
+
+                // 이슈 #425 — streaming bypass 분기. coalescer 콜백이 Content-Length 임계 초과를
+                // 감지해 sentinel(빈 body + x-stream-mode 마커) 을 반환한 경우, 여기서 fresh origin
+                // 요청을 chunked streaming 으로 다시 보내 client 에 직접 pipe 한다. 캐시 저장·Range
+                // 슬라이싱·optimize/compress 모두 우회 — 어차피 캐시 못 하는 대형 응답이라 트레이드 작음.
+                if *outcome == CacheOutcome::BypassSize
+                    && passthrough_out.iter().any(|(n, v)| n == "x-stream-mode" && v == "1")
+                {
+                    let path_and_query = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
+                    let stream_url = format!("{}{}", origin, path_and_query);
+                    return stream_bypass_response(
+                        &ps, &state, &headers, &host, &uri, &method, &client,
+                        body_bytes.clone(), stream_url, elapsed_ms,
+                    ).await;
+                }
 
                 // Range 슬라이싱은 200 OK 응답에만 적용 — 오류 상태는 그대로 통과
                 let (resp_status, resp_body, content_range_hdr, decision, out_bytes) =
@@ -5066,6 +5243,35 @@ mod header_policy_tests {
         // 너무 큰 값 → MAX 로 클램프
         let grown = (AUTO_TUNE_MAX_CAPACITY.saturating_mul(2)).min(AUTO_TUNE_MAX_CAPACITY);
         assert_eq!(grown, AUTO_TUNE_MAX_CAPACITY);
+    }
+
+    // 이슈 #425 — streaming bypass 임계는 기본적으로 MAX_CACHE_ENTRY_BYTES 와 동일.
+    #[test]
+    fn stream_bypass_threshold_defaults_to_max_cache_entry_bytes() {
+        // env 미설정 환경에서만 결정적이라 가정 (CI 표준).
+        // env 가 설정돼 있어도 양의 정수면 그 값을 신뢰하는 정책이라 충돌 없음.
+        let v = stream_bypass_threshold();
+        assert!(v > 0);
+        // env 미설정 시 정확히 MAX_CACHE_ENTRY_BYTES 와 같다.
+        if std::env::var("PROXY_STREAM_BYPASS_THRESHOLD_BYTES").is_err() {
+            assert_eq!(v, MAX_CACHE_ENTRY_BYTES);
+        }
+    }
+
+    // 이슈 #425 — sentinel 식별 로직: passthrough 에 x-stream-mode=1 + BypassSize 가 동시 충족돼야 분기.
+    #[test]
+    fn streaming_bypass_sentinel_detected_only_with_both_marker_and_outcome() {
+        let marker_present: Vec<(String, String)> = vec![("x-stream-mode".into(), "1".into())];
+        let marker_missing: Vec<(String, String)> = vec![("other".into(), "1".into())];
+
+        let detect = |outcome: CacheOutcome, passthrough: &Vec<(String,String)>| {
+            outcome == CacheOutcome::BypassSize
+                && passthrough.iter().any(|(n, v)| n == "x-stream-mode" && v == "1")
+        };
+        assert!(detect(CacheOutcome::BypassSize, &marker_present));
+        assert!(!detect(CacheOutcome::BypassSize, &marker_missing));
+        assert!(!detect(CacheOutcome::Miss,       &marker_present));
+        assert!(!detect(CacheOutcome::BypassOther,&marker_present));
     }
 
     // 이슈 #428 — auto_tuned_coalesce_capacity 읽기/쓰기가 일관되게 동작.
