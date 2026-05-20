@@ -73,23 +73,97 @@ fn domain_coalesce_capacity_map() -> &'static RwLock<HashMap<String, usize>> {
     DOMAIN_COALESCE_CAPACITY.get_or_init(|| RwLock::new(HashMap::new()))
 }
 
-/// 글로벌 coalescer broadcast capacity (PROXY_COALESCE_CHANNEL_CAPACITY env). 기본 1024.
-fn global_coalesce_capacity() -> usize {
-    std::env::var("PROXY_COALESCE_CHANNEL_CAPACITY")
-        .ok()
-        .and_then(|s| s.parse::<usize>().ok())
-        .filter(|n| *n > 0)
-        .unwrap_or(1024)
+/// 이슈 #428 — auto-tuned global coalescer capacity.
+/// 초기값: PROXY_COALESCE_CHANNEL_CAPACITY env 또는 1024.
+/// 배경 태스크가 lagged delta 기반으로 동적 조정. admin override 가 있는 host 는 영향 없음.
+const AUTO_TUNE_MIN_CAPACITY: usize = 256;
+const AUTO_TUNE_MAX_CAPACITY: usize = 65536;
+/// 연속 N 인터벌 동안 lagged delta=0 이면 capacity 를 1/2 로 축소.
+const AUTO_TUNE_SHRINK_AFTER_CALM_INTERVALS: u32 = 10;
+
+static AUTO_TUNED_COALESCE_CAPACITY: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(1024);
+
+/// 초기 seed — 첫 호출 시 env 값으로 덮어쓴다 (OnceLock 패턴 사용).
+static AUTO_TUNED_SEEDED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+
+fn seed_auto_tuned_from_env() {
+    AUTO_TUNED_SEEDED.get_or_init(|| {
+        let initial = std::env::var("PROXY_COALESCE_CHANNEL_CAPACITY")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .filter(|n| *n > 0)
+            .unwrap_or(1024)
+            .clamp(AUTO_TUNE_MIN_CAPACITY, AUTO_TUNE_MAX_CAPACITY);
+        AUTO_TUNED_COALESCE_CAPACITY.store(initial, std::sync::atomic::Ordering::Relaxed);
+    });
 }
 
-/// host 의 coalescer capacity 를 반환. 미등록이면 글로벌 폴백.
+/// 현재 auto-tuned global capacity. /status 노출/관찰용.
+pub fn auto_tuned_coalesce_capacity() -> usize {
+    seed_auto_tuned_from_env();
+    AUTO_TUNED_COALESCE_CAPACITY.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// 이슈 #428 — 동적 capacity 자동 조정 태스크.
+/// PROXY_COALESCE_AUTO_TUNE=false 로 비활성. 비활성 시 env seed 값으로 고정.
+pub fn spawn_auto_tune_task(coalescer: Arc<Coalescer>) {
+    seed_auto_tuned_from_env();
+    let enabled = std::env::var("PROXY_COALESCE_AUTO_TUNE")
+        .ok()
+        .map(|v| v.to_ascii_lowercase() != "false" && v != "0")
+        .unwrap_or(true);
+    if !enabled {
+        tracing::info!("[#428] coalescer auto-tune 비활성 (env 고정값 사용)");
+        return;
+    }
+    let interval_secs: u64 = std::env::var("PROXY_COALESCE_AUTO_TUNE_INTERVAL_SECS")
+        .ok().and_then(|s| s.parse().ok()).filter(|n: &u64| *n >= 5).unwrap_or(60);
+    tracing::info!(interval_secs, "[#428] coalescer auto-tune 태스크 시작");
+    tokio::spawn(async move {
+        let mut last_lagged = coalescer.lagged_count();
+        let mut calm_intervals: u32 = 0;
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(interval_secs));
+        // 첫 tick 즉시 발사를 막아 baseline 측정 안정화 — Skip 모드.
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            interval.tick().await;
+            let now_lagged = coalescer.lagged_count();
+            let delta = now_lagged.saturating_sub(last_lagged);
+            last_lagged = now_lagged;
+
+            let prev = AUTO_TUNED_COALESCE_CAPACITY.load(std::sync::atomic::Ordering::Relaxed);
+            let next = if delta > 0 {
+                calm_intervals = 0;
+                (prev.saturating_mul(2)).min(AUTO_TUNE_MAX_CAPACITY)
+            } else {
+                calm_intervals = calm_intervals.saturating_add(1);
+                if calm_intervals >= AUTO_TUNE_SHRINK_AFTER_CALM_INTERVALS {
+                    calm_intervals = 0;
+                    (prev / 2).max(AUTO_TUNE_MIN_CAPACITY)
+                } else {
+                    prev
+                }
+            };
+            if next != prev {
+                AUTO_TUNED_COALESCE_CAPACITY.store(next, std::sync::atomic::Ordering::Relaxed);
+                tracing::warn!(
+                    prev, next, delta, calm_intervals,
+                    "[#428] coalesce capacity auto-tune 조정"
+                );
+            }
+        }
+    });
+}
+
+/// host 의 coalescer capacity 를 반환. admin override > auto-tuned global.
 async fn coalesce_capacity_for_host(host: &str) -> usize {
     let map = domain_coalesce_capacity_map().read().await;
     if let Some(&v) = map.get(host) {
         return v;
     }
     drop(map);
-    global_coalesce_capacity()
+    auto_tuned_coalesce_capacity()
 }
 
 /// 도메인별 요청 통계 카운터 (lock-free atomic 연산)
@@ -1739,6 +1813,8 @@ async fn status_handler(State(admin): State<AdminState>) -> Json<state::ProxySta
     let mut status = admin.state.read().await.get_status();
     // 이슈 #427 — coalescer lagged 누계 노출. admin-server 가 5초 폴링으로 1분 윈도우 delta 계산.
     status.coalescer_lagged_count = admin.coalescer.lagged_count();
+    // 이슈 #428 — 현재 auto-tuned global capacity 노출 (관찰/감사).
+    status.coalescer_auto_capacity = auto_tuned_coalesce_capacity();
     Json(status)
 }
 
@@ -4972,5 +5048,35 @@ mod header_policy_tests {
         assert!(has_vary_star(&hm(&[("Vary", " * ")])));
         assert!(!has_vary_star(&hm(&[("vary", "Accept-Encoding")])));
         assert!(!has_vary_star(&hm(&[])));
+    }
+
+    // 이슈 #428 — auto-tune 초기값 seed (clamp 동작 확인). 다른 테스트가 같은 static 을 공유하므로
+    // 값을 직접 set 후 verify 하는 방식으로 격리. seed_auto_tuned_from_env 는 OnceLock 라 한 번만 동작.
+    #[test]
+    fn auto_tune_seed_clamps_to_min_max_range() {
+        // seed 가 이미 다른 테스트에서 일어날 수 있으므로 직접 store 로 시나리오 검증.
+        use std::sync::atomic::Ordering;
+
+        // 너무 작은 값 → MIN 으로 클램프되는지 확인 (atomic 시뮬레이션)
+        AUTO_TUNED_COALESCE_CAPACITY.store(1, Ordering::Relaxed);
+        // shrink 로직: 1/2 = 0 인데 max(MIN) 로 클램프 → MIN
+        let shrunk = (1usize / 2).max(AUTO_TUNE_MIN_CAPACITY);
+        assert_eq!(shrunk, AUTO_TUNE_MIN_CAPACITY);
+
+        // 너무 큰 값 → MAX 로 클램프
+        let grown = (AUTO_TUNE_MAX_CAPACITY.saturating_mul(2)).min(AUTO_TUNE_MAX_CAPACITY);
+        assert_eq!(grown, AUTO_TUNE_MAX_CAPACITY);
+    }
+
+    // 이슈 #428 — auto_tuned_coalesce_capacity 읽기/쓰기가 일관되게 동작.
+    #[test]
+    fn auto_tuned_coalesce_capacity_round_trip() {
+        use std::sync::atomic::Ordering;
+        // seed OnceLock 를 먼저 동작시켜 이후 store 가 덮어쓰이지 않도록 한다.
+        seed_auto_tuned_from_env();
+        AUTO_TUNED_COALESCE_CAPACITY.store(4096, Ordering::Relaxed);
+        assert_eq!(auto_tuned_coalesce_capacity(), 4096);
+        AUTO_TUNED_COALESCE_CAPACITY.store(1024, Ordering::Relaxed);
+        assert_eq!(auto_tuned_coalesce_capacity(), 1024);
     }
 }

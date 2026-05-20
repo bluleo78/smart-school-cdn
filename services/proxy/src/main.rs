@@ -7,7 +7,7 @@ use tracing_subscriber::EnvFilter;
 use rustls::{ServerConfig, server::{ClientHello, ResolvesServerCert}, sign::CertifiedKey};
 use axum_server::tls_rustls::RustlsConfig;
 
-use proxy::{DomainMap, MemoryCacheEntry, TextCompressConfig, build_admin_router, build_proxy_router, ProxyState};
+use proxy::{DomainMap, MemoryCacheEntry, TextCompressConfig, build_admin_router, build_proxy_router, ProxyState, spawn_auto_tune_task};
 use proxy::clients::optimizer_client::OptimizerClient;
 use proxy::clients::storage_client::StorageClient;
 use proxy::clients::tls_client::{TlsClient, CertCache};
@@ -152,6 +152,8 @@ async fn main() {
     let origin_semaphore = Arc::new(tokio::sync::Semaphore::new(max_origin_concurrency));
     // 이슈 #427 — coalescer 인스턴스 1개를 proxy 처리 경로(ProxyState)와 admin /status 노출(AdminState)에서 공유.
     let coalescer = Arc::new(Coalescer::new());
+    // 이슈 #428 — lagged delta 기반 동적 capacity sizing 태스크 spawn (env 로 비활성 가능).
+    spawn_auto_tune_task(coalescer.clone());
 
     let ps = ProxyState {
         shared: shared_state.clone(),

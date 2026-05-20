@@ -36,6 +36,10 @@ pub struct ProxyStatus {
     /// admin-server 가 5초마다 폴링해 1분 window delta 로 변환한다.
     #[serde(default)]
     pub coalescer_lagged_count: u64,
+    /// 이슈 #428 — auto-tuned global coalescer broadcast capacity (현재값).
+    /// admin override 가 있는 host 는 영향 없음.
+    #[serde(default)]
+    pub coalescer_auto_capacity: usize,
 }
 
 /// 히트율 시점 스냅샷 (최근 1시간, 매분 기록)
@@ -147,7 +151,8 @@ impl AppState {
             online: true,
             uptime: self.started_at.elapsed().as_secs(),
             request_count: self.request_count,
-            coalescer_lagged_count: 0, // status_handler 가 admin-state coalescer 값으로 overwrite (#427)
+            coalescer_lagged_count: 0,  // status_handler 가 overwrite (#427)
+            coalescer_auto_capacity: 0, // status_handler 가 overwrite (#428)
         }
     }
 

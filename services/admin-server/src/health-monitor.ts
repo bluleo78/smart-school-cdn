@@ -14,6 +14,8 @@ export interface ProxyStatus {
   request_count: number;
   /** 이슈 #427 — proxy 가 노출한 coalescer broadcast lag 누계. 기본 0 (구버전 proxy 호환). */
   coalescer_lagged_count?: number;
+  /** 이슈 #428 — auto-tuned global coalescer capacity (관찰용). */
+  coalescer_auto_capacity?: number;
 }
 
 /** 이슈 #432 — 디스크 사용량 캐시. storage.stats() 결과를 5초 주기로 캐시. */
